@@ -1780,6 +1780,11 @@ document.addEventListener('DOMContentLoaded', () => {
 AUTH_HTML = """
 <!doctype html><html lang='fr'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2" type="image/x-icon">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=2">
+<link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=2">
+<link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2">
+<link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}?v=2">
 {{ css|safe }}<title>{{ title }}</title></head>
 <body>
 <nav>
