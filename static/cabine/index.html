@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cabine • MétéoGod</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="cabine-controls-compact.css">
+</head>
+<body class="cabine-page">
+  <header class="topbar">
+    <div class="brand">Météo<span>God</span></div>
+    <nav class="spacer"></nav>
+    <a class="navlink active" href="#">Cabine</a>
+  </header>
+
+  <main class="cabine">
+    <section class="canvas-col">
+      <div id="avatar-stage" class="stage" aria-label="Aperçu de l'avatar">
+        <!-- Layers injected by JS -->
+      </div>
+    </section>
+    <section class="controls-col">
+      <h1></h1>
+      <p class="muted">Personnalisation</p>
+      <div id="controls"></div>
+
+      <div class="actions">
+        <button id="saveBtn" class="btn primary">Sauvegarder</button>
+        <button id="cancelBtn" class="btn ghost">Annuler</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footnote">
+    <small>Beta Test</small>
+  </footer>
+
+  <script src="app.js"></script>
+  <script defer src="cabine-audio.js"></script>
+</body>
+</html>

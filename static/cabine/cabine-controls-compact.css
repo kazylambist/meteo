@@ -1,0 +1,52 @@
+
+/* cabine-controls-compact.css — maximise l'affichage de la colonne de droite */
+
+/* Hauteur de la topbar (à ajuster si besoin) */
+:root{
+  --topbar-h: 56px;
+}
+
+/* Assure que la grille pose bien les sections et ne s'étire pas inutilement */
+.cabine{
+  align-items: start;
+}
+
+/* Colonne de droite : sticky + scroll interne + padding compact */
+.controls-col{
+  position: sticky;
+  top: calc(var(--topbar-h) + 12px);
+  max-height: calc(100vh - var(--topbar-h) - 24px);
+  overflow: auto;
+  padding-right: 8px; /* pour laisser la place au scrollbar */
+}
+
+/* Réduire les espacements verticaux */
+.controls-col h1{ margin: 0 0 4px 0; }
+.controls-col .muted{ margin: 0 0 10px 0; }
+.controls-col .control{ margin: 6px 0 10px 0; }
+
+/* Champs compacts */
+.controls-col label{ margin: 0 0 4px 2px; font-size: 13px; }
+.controls-col select{
+  padding: 8px 10px;
+  font-size: 14px;
+  min-height: 36px;
+}
+
+/* Mettre les contrôles en deux colonnes sur les écrans larges */
+#controls{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px 16px;
+}
+@media (min-width: 980px){
+  #controls{ grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1280px){
+  #controls{ grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+}
+
+/* S'assurer que la colonne avatar ne pousse pas la page à scroller trop loin */
+.canvas-col .stage{
+  max-height: calc(100vh - var(--topbar-h) - 120px); /* garde la preview dans l'écran autant que possible */
+}

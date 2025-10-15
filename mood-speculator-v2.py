@@ -1,0 +1,5797 @@
+#!/usr/bin/env python3 -*- coding: utf-8 -*-
+"""
+Humeur — Spéculation (v2)
+- Ajoute des "mises" à échéance (3 semaines à 6 mois) et le mécanisme de "remise".
+- À l'allocation initiale (1 point), l'utilisateur choisit la répartition + une échéance par actif non nul.
+- Chaque mise convertit un certain nombre de points en une position verrouillée jusqu'à l'échéance.
+- À l'échéance, la position est réglée en multipliant les points par (valeur_échéance / valeur_départ) et
+  les points sont crédités au solde libre de l'utilisateur pour cet actif. L'utilisateur peut ensuite "remiser".
+
+⚠️ MVP éducatif (non durci pour la prod) — prévoir CSRF/HTTPS/rate limiting, etc.
+"""
+from __future__ import annotations
+import os
+import re
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, date, timedelta, timezone
+from typing import Optional
+
+from flask import Flask, abort, flash, jsonify, jsonify, redirect, render_template_string, request, request, send_from_directory, url_for
+from flask import render_template_string as render
+from flask import current_app
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text 
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import (
+    LoginManager, login_user, login_required, logout_user,
+    current_user, UserMixin
+)
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
+from werkzeug.security import generate_password_hash, check_password_hash
+from email_validator import validate_email, EmailNotValidError
+from dateutil import parser as dtparse
+
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz
+    UTC = _tz.utc
+
+import json, os
+from pathlib import Path
+from PIL import Image
+import io
+
+# Ordre d’empilement identique à Cabine
+AVATAR_ORDER = [
+    "PIEDS","TORSE","JAMBES","CEINTURE","ARME","ACCESSOIRE","FACIAL","MASQUE","LUNETTES","CHAPEAU"
+]
+
+def _fs_path_from_web(path: str) -> str:
+    """
+    Convertit un chemin web (ex: '/cabine/assets/torse/Mark.png')
+    vers un chemin filesystem sous app.static_folder.
+    """
+    if not path:
+        return ""
+    p = path.lstrip("/")  # 'cabine/assets/...'
+    return os.path.join(app.static_folder, p)
+
+
+STATIONS_PATH = Path(__file__).parent / "stations(3).json"
+
+def load_stations():
+    with open(STATIONS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    # NOTE: le JSON fourni ne contient pas de lat/lon. On met un petit fallback
+    # pour quelques icao connus. Idéalement, ajoute lat/lon dans le JSON.
+    ICAO_COORDS = {
+        "LFLP": (45.930, 6.106),   # Annecy
+        "LFPG": (49.0097, 2.5479), # CDG
+        "LFPO": (48.7262, 2.3652), # Orly
+        "LFBD": (44.8283, -0.7156),# Bordeaux
+        "LFMN": (43.6584, 7.2159), # Nice
+        "LFML": (43.4393, 5.2214), # Marseille
+        "LFLL": (45.7264, 5.0908), # Lyon
+        # ...ajoute au besoin
+    }
+    for s in data:
+        icao = s.get("icao")
+        latlon = ICAO_COORDS.get(icao)
+        s["lat"] = latlon[0] if latlon else None
+        s["lon"] = latlon[1] if latlon else None
+        s["label"] = f"{s.get('name')} — {s.get('city')} ({s.get('dept')})"
+    return data
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
+APP_TZ = pytz.timezone("Europe/Paris")
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+SITE_URL = os.environ.get("SITE_URL", "http://localhost:5000")
+ADMIN_EMAIL = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+DB_PATH = os.environ.get("DATABASE_URL", "sqlite:///moodspec.db")
+
+# -----------------------------------------------------------------------------
+# App
+# -----------------------------------------------------------------------------
+app = Flask(__name__)
+
+try:
+    app.config.from_object("config")
+except Exception:
+    # Fallback si le module config n'existe pas
+    app.config.from_mapping(
+        SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-key"),
+        SQLALCHEMY_DATABASE_URI=os.environ.get(
+            "DATABASE_URL",
+            "sqlite:///instance/moodspec.db"
+        ),
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    )
+
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+
+with app.app_context():
+    try:
+        db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text("ALTER TABLE ppp_boosts ADD COLUMN station_id VARCHAR(64)"))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_pppboost_user_date_station "
+            "ON ppp_boosts(user_id, bet_date, station_id)"
+        ))
+    except Exception:
+        pass
+    db.session.commit()   
+
+# -----------------------------------------------------------------------------
+# Models
+# -----------------------------------------------------------------------------
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(40), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    pw_hash = db.Column(db.String(255), nullable=False)
+    email_confirmed_at = db.Column(db.DateTime, nullable=True)
+
+    # Allocation initiale
+    allocation_pierre = db.Column(db.Float, nullable=True)
+    allocation_marie = db.Column(db.Float, nullable=True)
+    allocation_locked = db.Column(db.Boolean, default=False)
+
+    # Soldes libres (points disponibles pour remiser)
+    bal_pierre = db.Column(db.Float, default=0.0)
+    bal_marie  = db.Column(db.Float, default=0.0)
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
+
+    @property
+    def is_admin(self) -> bool:
+        return self.email.lower() == ADMIN_EMAIL if ADMIN_EMAIL else False
+
+    def get_id(self):
+        return str(self.id)
+
+
+class DailyMood(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    the_date = db.Column(db.Date, unique=True, nullable=False, index=True)
+    pierre_value = db.Column(db.Float, nullable=False)
+    marie_value = db.Column(db.Float, nullable=False)
+    published_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
+
+
+class PendingMood(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    the_date = db.Column(db.Date, unique=True, nullable=False, index=True)
+    pierre_value = db.Column(db.Float, nullable=False)
+    marie_value = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
+
+
+class Position(db.Model):
+    """Mise en points avec échéance.
+    - asset: 'PIERRE' ou 'MARIE'
+    - principal_points: nombre de points bloqués au départ
+    - start_value: valeur de l'actif au moment de la mise
+    - start_date: date de départ
+    - maturity_date: date d'échéance (>= start_date + 21j, <= + 6 mois)
+    - status: 'ACTIVE' | 'SETTLED'
+    - settled_points: points crédités au règlement (si SETTLED)
+    - settled_at: datetime de règlement
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
+    asset = db.Column(db.String(10), nullable=False)  # 'PIERRE' | 'MARIE'
+    principal_points = db.Column(db.Float, nullable=False)
+    start_value = db.Column(db.Float, nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    maturity_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(10), default='ACTIVE', index=True)
+    settled_points = db.Column(db.Float, nullable=True)
+    settled_at = db.Column(db.DateTime, nullable=True)
+
+    user = db.relationship('User', backref='positions')
+
+class WeatherSnapshot(db.Model):
+    __tablename__ = 'weather_snapshot'
+    id = db.Column(db.Integer, primary_key=True)
+    city_query = db.Column(db.String(120), index=True, nullable=False)   # e.g. "Paris, France"
+    lat = db.Column(db.Float, nullable=False)
+    lon = db.Column(db.Float, nullable=False)
+    ref_date = db.Column(db.Date, nullable=False)  # the “today” the snapshot was computed for (Europe/Paris)
+    sun_hours_3d = db.Column(db.Float, nullable=False)
+    rain_hours_3d = db.Column(db.Float, nullable=False)
+    forecast_json = db.Column(db.Text, nullable=False)  # store small JSON (5-day forecast pretty compact)
+    created_at = db.Column(db.DateTime, default=lambda: dt_paris_now())
+
+    __table_args__ = (db.UniqueConstraint('city_query', 'ref_date', name='uq_ws_city_ref'),)
+
+class WeatherPosition(db.Model):
+    __tablename__ = 'weather_position'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    asset = db.Column(db.String(10), nullable=False)  # 'SOLEIL' or 'PLUIE'
+    principal_part = db.Column(db.Float, nullable=False)  # the part of the 1 weather point (e.g. 0.6)
+    start_hours = db.Column(db.Float, nullable=False)     # last-3-days hours at start (per asset*)
+    start_date = db.Column(db.Date, nullable=False)
+    maturity_date = db.Column(db.Date, nullable=False)
+    city_query = db.Column(db.String(120), nullable=False)  # city chosen for this bet
+    status = db.Column(db.String(12), default='ACTIVE')     # ACTIVE / SETTLED
+    settled_value = db.Column(db.Float)                     # principal_part * end_hours
+    settled_at = db.Column(db.DateTime)
+
+    user = db.relationship('User', backref=db.backref('weather_positions', lazy=True))
+
+class PPPBet(db.Model):
+    __tablename__ = 'ppp_bet'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    bet_date = db.Column(db.Date, nullable=False, index=True)   # the calendar day (Europe/Paris)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    choice = db.Column(db.String(12), nullable=False)           # 'PLUIE' or 'PAS_PLUIE'
+    amount = db.Column(db.Float, nullable=False)                # points staked
+    odds = db.Column(db.Float, nullable=False)                  # e.g., 1.3, 2.0, 2.7
+    status = db.Column(db.String(16), nullable=False, default='ACTIVE')  # ACTIVE/SETTLED/CANCELED
+    result = db.Column(db.String(12))                           # 'WIN'/'LOSE' (when settled)
+    station_id = db.Column(db.String(64), index=True, nullable=True)
+    locked_for_trade = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+
+
+class WetBet(db.Model):
+    __tablename__ = 'wet_bets'
+
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    # Slot (hour bucket)
+    slot_dt     = db.Column(db.DateTime, nullable=False, index=True)
+
+    # Stake info
+    target_pct  = db.Column(db.Integer, nullable=False)    # 0..100
+    amount      = db.Column(db.Float,   nullable=False)
+    odds        = db.Column(db.Float,   nullable=False)
+    placed_at   = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    status      = db.Column(db.String(16), nullable=False, default='ACTIVE')  # ACTIVE/RESOLVED/CANCELED
+
+    # Resolution fields
+    observed_pct = db.Column(db.Integer)                   # observed humidity %
+    outcome      = db.Column(db.String(16))                # e.g. WIN / LOSE / EXACT
+    payout       = db.Column(db.Float)                     # amount * odds (*2 if EXACT)
+    resolved_at  = db.Column(db.DateTime)                  # when we settled
+    dismissed_at = db.Column(db.DateTime)                  # when the tile was dismissed (UI rule)
+
+    user        = db.relationship('User', backref='wet_bets')
+
+
+class HumidityObservation(db.Model):
+    __tablename__ = "humidity_obs"
+    id = db.Column(db.Integer, primary_key=True)
+    station_id = db.Column(db.String, index=True, nullable=False)
+    obs_time = db.Column(db.DateTime, index=True, nullable=False)  # UTC-aware recommended
+    humidity = db.Column(db.Float, nullable=False)  # %
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+from sqlalchemy.exc import IntegrityError
+from datetime import date as _date
+
+class UserStation(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    station_id = db.Column(db.String(64), nullable=False, index=True)
+    station_label = db.Column(db.String(200), nullable=False)
+    lat = db.Column(db.Float, nullable=True)
+    lon = db.Column(db.Float, nullable=True)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "station_id", name="uq_user_station"),)   
+
+from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
+
+class CabineSelection(db.Model):
+    __tablename__ = "cabine_selection"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, index=True, nullable=False, unique=True)
+    data = db.Column(SQLITE_JSON, nullable=False, default={})
+
+# --- Trade models ------------------------------------------------------------
+class BetListing(db.Model):
+    __tablename__ = "bet_listings"
+
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.String, nullable=False)
+    kind          = db.Column(db.String, nullable=False, default="PPP")
+    payload       = db.Column(db.JSON, nullable=True)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at    = db.Column(db.DateTime, nullable=False)  # ta table l'exige
+
+    status        = db.Column(db.String, nullable=False, default="OPEN")
+
+    # --- champs "métier" qu'on remplit depuis PPP ---
+    city          = db.Column(db.String, nullable=True)
+    date_label    = db.Column(db.String, nullable=True)
+    deadline_key  = db.Column(db.String, nullable=True)   # 'YYYY-MM-DD'
+    choice        = db.Column(db.String, nullable=True)   # 'PLUIE' / 'PAS_PLUIE'
+    side          = db.Column(db.String, nullable=False, default="RAIN")  # <— CRITIQUE
+
+    stake         = db.Column(db.Float, nullable=True)
+    base_odds     = db.Column(db.Float, nullable=True)
+    boosts_count  = db.Column(db.Integer, nullable=True)
+    boosts_add    = db.Column(db.Float, nullable=True)
+    total_odds    = db.Column(db.Float, nullable=True)
+    potential_gain= db.Column(db.Float, nullable=True)
+
+class TradeProposal(db.Model):
+    __tablename__ = "trade_proposals"
+    id = db.Column(db.Integer, primary_key=True)
+    listing_id = db.Column(db.Integer, db.ForeignKey("bet_listings.id"), nullable=False, index=True)
+    from_user_id = db.Column(db.String(64), nullable=False, index=True)
+    kind = db.Column(db.String(12), nullable=False)     # "POINTS" | "SWAP"
+    data = db.Column(db.JSON, default=dict)             # e.g. {"points": 12.0} or {"listing_id": 42}
+    status = db.Column(db.String(16), default="OPEN")   # OPEN | ACCEPTED | REJECTED | WITHDRAWN
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+
+
+class PPPBoost(db.Model):
+    __tablename__ = 'ppp_boosts'
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    bet_date   = db.Column(db.Date, nullable=False, index=True)        # date de la tuile
+    station_id = db.Column(db.String(64), index=True, nullable=True)
+    value      = db.Column(db.Float, nullable=False, default=0.0)      # cumul des boosts pour ce user+date
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    # NB: SQLite can’t add this later with ALTER easily. It will exist only if table is (re)created.
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'bet_date', name='uq_pppboost_user_date'),
+    )
+
+# --- Ensure tables + columns exist (idempotent, SQLite-safe) ---
+with app.app_context():
+    with app.app_context():
+        db.create_all()
+
+    from sqlalchemy import inspect, text
+
+    def add_col_if_missing(table: str, column: str, ddl: str):
+        """Add a column if it doesn't exist (SQLite-friendly). ddl is 'colname TYPE [DEFAULT ...] [NULL|NOT NULL]'."""
+        insp = inspect(db.engine)
+        try:
+            cols = {c['name'] for c in insp.get_columns(table)}
+        except Exception:
+            cols = set()
+        if column not in cols:
+            try:
+                db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+    # ppp_boosts: make sure critical columns exist if table pre-dated the model
+    add_col_if_missing('ppp_boosts', 'user_id',    'user_id INTEGER')
+    add_col_if_missing('ppp_boosts', 'bet_date',   'bet_date DATE')
+    add_col_if_missing('ppp_boosts', 'value',      'value FLOAT DEFAULT 0.0')
+    add_col_if_missing('ppp_boosts', 'created_at', 'created_at DATETIME')
+
+    # wet_bets: settlement fields used by Wet logic
+    add_col_if_missing('wet_bets', 'observed_pct', 'observed_pct FLOAT')
+    add_col_if_missing('wet_bets', 'outcome',      'outcome VARCHAR(16)')
+    add_col_if_missing('wet_bets', 'payout',       'payout FLOAT')
+    add_col_if_missing('wet_bets', 'resolved_at',  'resolved_at DATETIME')
+    add_col_if_missing('wet_bets', 'dismissed_at', 'dismissed_at DATETIME')
+
+    # Optional: warn if UNIQUE is likely missing (only matters if the table existed before)
+    try:
+        insp = inspect(db.engine)
+        uqs = [c['name'] for c in insp.get_unique_constraints('ppp_boosts')]
+        if 'uq_pppboost_user_date' not in uqs:
+            app.logger.warning(
+                "PPPBoost UNIQUE(user_id, bet_date) not detected. "
+                "Code will still upsert via fetch+increment, but consider a proper migration if you need hard uniqueness."
+            )
+    except Exception:
+        pass
+    
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+@login_manager.user_loader
+def load_user(user_id: str) -> Optional[User]:
+    return db.session.get(User, int(user_id))
+
+
+def today_paris() -> date:
+    return datetime.now(APP_TZ).date()
+
+
+def dt_paris_now() -> datetime:
+    return datetime.now(APP_TZ)
+
+from datetime import date, timedelta, datetime
+import pytz
+
+from zoneinfo import ZoneInfo
+from flask import jsonify, request
+import json as _json
+
+def paris_now():
+    return datetime.now(ZoneInfo("Europe/Paris"))
+
+def today_paris_date() -> date:
+    tz = pytz.timezone('Europe/Paris')
+    return datetime.now(tz).date()
+
+WET_ODDS = {
+    **{h: 1.6 for h in range(1, 7)},    # 1-6h
+    **{h: 1.8 for h in range(7, 13)},   # 7-12h
+    **{h: 2.0 for h in range(13, 25)},  # 13-24h
+    **{h: 2.2 for h in range(25, 37)},  # 25-36h
+    **{h: 2.5 for h in range(37, 49)},  # 37-48h
+}
+
+def wet_odds_for_offset(hours_ahead: int) -> float | None:
+    """Return odds for given hour offset (1..48). None if out of range."""
+    return WET_ODDS.get(int(hours_ahead))
+
+# Map offset → odds (per your spec). Offset d ∈ [0..30]
+PPP_ODDS = {
+    0: None, 1:1.0, 2:1.0, 3:1.0, 4:1.1, 5:1.1,
+    6:1.2, 7:1.3, 8:1.4, 9:1.5, 10:1.6, 11:1.7,
+    12:1.8, 13:1.9, 14:2.0, 15:2.0, 16:2.0, 17:2.0, 18:2.0, 19:2.5,
+    20:2.5, 21:2.5, 22:2.5, 23:2.5, 24:2.5, 25:2.5, 26:2.5,
+    27:2.7, 28:2.7, 29:2.7, 30:2.7
+}
+
+def ppp_odds_for_offset(d: int):
+    return PPP_ODDS.get(d, None)
+
+def ppp_validate_can_bet(target: date, today: date) -> tuple[bool,str|None,int|None,float|None]:
+    """Return (ok, msg, offset, odds). First 5 days disabled; allow from +6..+30."""
+    if target < today:
+        return False, "Jour passé.", None, None
+    offset = (target - today).days
+    if offset <= 3:
+        return False, "Mise interdite sur les 5 prochains jours.", offset, None
+    if offset > 30:
+        return False, "Calendrier limité à 30 jours.", offset, None
+    odds = ppp_odds_for_offset(offset)
+    if odds is None:
+        return False, "Aucun taux disponible.", offset, None
+    return True, None, offset, odds
+
+def get_value_for(d: date, asset: str) -> Optional[float]:
+    row = DailyMood.query.filter_by(the_date=d).first()
+    if not row:
+        return None
+    return row.pierre_value if asset == 'PIERRE' else row.marie_value
+
+def last_published_on_or_before(d: date) -> Optional[DailyMood]:
+    return (DailyMood.query
+            .filter(DailyMood.the_date <= d)
+            .order_by(DailyMood.the_date.desc())
+            .first())
+
+def get_value_for_fallback(d: date, asset: str) -> Optional[float]:
+    row = last_published_on_or_before(d)
+    if not row:
+        return None
+    return row.pierre_value if asset == 'PIERRE' else row.marie_value
+
+def remaining_mood_points(u: User) -> float:
+    active = db.session.query(db.func.coalesce(db.func.sum(Position.principal_points), 0.0))\
+        .filter(Position.user_id == u.id, Position.status == 'ACTIVE').scalar() or 0.0
+    rem = 1.0 - float(active)
+    return max(0.0, round(rem, 6))
+
+def remaining_weather_points(u: User) -> float:
+    active = db.session.query(db.func.coalesce(db.func.sum(WeatherPosition.principal_part), 0.0))\
+        .filter(WeatherPosition.user_id == u.id, WeatherPosition.status == 'ACTIVE').scalar() or 0.0
+    rem = 1.0 - float(active)
+    return max(0.0, round(rem, 6))
+
+BUDGET_INITIAL = 500.0
+
+from sqlalchemy import func
+
+def remaining_points(user):
+    """
+    Global budget left for the user.
+    Starts at 500.0 and:
+      - subtracts ACTIVE commitments (PPPBet.amount + WetBet.amount)
+      - adds payouts from RESOLVED Wet bets (WetBet.payout)
+    """
+    if not user or not getattr(user, "id", None):
+        return 0.0
+
+    base = 500.0
+
+    # ACTIVE PPP stakes
+    ppp_active = (
+        db.session.query(db.func.coalesce(db.func.sum(PPPBet.amount), 0.0))
+        .filter(PPPBet.user_id == user.id, PPPBet.status == 'ACTIVE')
+        .scalar()
+    ) or 0.0
+
+    # ACTIVE Wet stakes
+    wet_active = (
+        db.session.query(db.func.coalesce(db.func.sum(WetBet.amount), 0.0))
+        .filter(WetBet.user_id == user.id, WetBet.status == 'ACTIVE')
+        .scalar()
+    ) or 0.0
+
+    # Wet payouts from RESOLVED bets
+    wet_won = (
+        db.session.query(db.func.coalesce(db.func.sum(WetBet.payout), 0.0))
+        .filter(WetBet.user_id == user.id, WetBet.status == 'RESOLVED')
+        .scalar()
+    ) or 0.0
+
+    left = base - float(ppp_active) - float(wet_active) + float(wet_won)
+    return max(0.0, round(left, 6))
+
+from zoneinfo import ZoneInfo
+from datetime import timezone
+
+def get_observed_humidity_paris(slot_dt, station_id: str = "cdg_07157"):
+    """
+    Retourne une humidité (%) pour un créneau WET 'slot_dt' (naïf, heure de Paris).
+    Stratégie: cherche dans [slot, slot+59m], puis fallback dernière obs <= slot+59m.
+    """
+    try:
+        tz_paris = ZoneInfo("Europe/Paris")
+        if slot_dt.tzinfo is None:
+            slot_local = slot_dt.replace(tzinfo=tz_paris)
+        else:
+            slot_local = slot_dt.astimezone(tz_paris)
+
+        start_utc = slot_local.astimezone(timezone.utc)
+        end_utc   = start_utc + timedelta(minutes=59, seconds=59)
+
+        win = (HumidityObservation.query
+               .filter_by(station_id=station_id)
+               .filter(HumidityObservation.obs_time >= start_utc,
+                       HumidityObservation.obs_time <= end_utc)
+               .order_by(HumidityObservation.obs_time.asc())
+               .first())
+        if win:
+            return float(win.humidity)
+
+        fb = (HumidityObservation.query
+              .filter_by(station_id=station_id)
+              .filter(HumidityObservation.obs_time <= end_utc)
+              .order_by(HumidityObservation.obs_time.desc())
+              .first())
+        if fb:
+            return float(fb.humidity)
+
+        return None
+    except Exception as e:
+        app.logger.warning("get_observed_humidity_paris failed: %s", e)
+        return None
+
+def resolve_due_wet_bets(user, now=None, station_id: str = "cdg_07157"):
+    """
+    Règles:
+      - EXACT si observed == target_pct  -> payout = amount * odds * 2
+      - WIN   si |observed - target|<=3  -> payout = amount * odds
+      - LOSE  sinon                      -> payout = 0
+    On ne clôture que les mises dont le créneau est déjà passé (heure entière atteinte).
+    """
+    if not user or not getattr(user, "id", None):
+        return
+
+    from zoneinfo import ZoneInfo
+    tz_paris = ZoneInfo("Europe/Paris")
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    # Heure courante au pas horaire (Paris), ramenée à 00 minutes
+    now_paris = now.astimezone(tz_paris).replace(minute=0, second=0, microsecond=0)
+
+    # Les slots sont stockés "naïfs" locaux -> on clôture ceux <= now_paris (naïf)
+    due = (WetBet.query
+        .filter(WetBet.user_id == user.id,
+                WetBet.status == 'ACTIVE',
+                WetBet.slot_dt <= now_paris.replace(tzinfo=None))
+        .order_by(WetBet.slot_dt.asc())
+        .all())
+
+    if not due:
+        return
+
+    for bet in due:
+        try:
+            # Cherche l'observation (première >= slot)
+            observed = get_observed_humidity_paris(bet.slot_dt, station_id=station_id)
+            if observed is None:
+                # Pas d'obs dispo -> on garde ACTIVE pour retenter plus tard
+                continue
+
+            # Décision
+            target = int(bet.target_pct or 0)
+            obs_pct = int(round(observed))  # on travaille à l'entier (affichage et règle)
+            diff = abs(obs_pct - target)
+
+            if obs_pct == target:
+                outcome = 'EXACT'
+                payout  = float(bet.amount) * float(bet.odds) * 2.0
+            elif diff <= 3:
+                outcome = 'WIN'
+                payout  = float(bet.amount) * float(bet.odds)
+            else:
+                outcome = 'LOSE'
+                payout  = 0.0
+
+            # Mise à jour
+            bet.observed_pct = obs_pct
+            bet.outcome      = outcome
+            bet.payout       = payout
+            bet.status       = 'RESOLVED'
+            bet.resolved_at  = datetime.now(timezone.utc)
+
+            # Créditer l’utilisateur si gain
+            if payout > 0:
+                credit_points(user, payout)
+
+        except Exception as e:
+            app.logger.warning("resolve_due_wet_bets bet_id=%s failed: %s", getattr(bet, "id", "?"), e)
+
+    db.session.commit()
+
+# --- helpers pour l'affichage du solde ---
+def user_solde(u) -> float:
+    return remaining_points(u)  # on reflète le budget global restant
+
+def format_points_fr(x: float) -> str:
+    return f"{x:.1f}".replace('.', ',')
+
+def parse_decimal(s: str):
+    s = (s or "").strip().replace(',', '.')
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+def parse_int(s, default=None):
+    try:
+        return int(str(s).strip())
+    except Exception:
+        return default
+
+import requests
+import json
+from datetime import timedelta
+
+def geocode_city_openmeteo(q: str):
+    # https://geocoding-api.open-meteo.com/v1/search?name=Paris, France&count=1&language=fr
+    r = requests.get("https://geocoding-api.open-meteo.com/v1/search",
+                     params={"name": q, "count": 1, "language": "fr", "format":"json"}, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    if not data.get("results"):
+        return None
+    res = data["results"][0]
+    return {"lat": res["latitude"], "lon": res["longitude"], "name": res["name"], "country": res.get("country")}
+
+def openmeteo_daily(lat, lon, start_date, end_date):
+    # We request daily sunshine_duration (minutes) and precipitation_hours. Open-Meteo returns minutes.
+    # https://api.open-meteo.com/v1/forecast?latitude=..&longitude=..&daily=sunshine_duration,precipitation_hours&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&timezone=Europe%2FParis
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat, "longitude": lon,
+        "daily": "sunshine_duration,precipitation_hours,weathercode,temperature_2m_max,temperature_2m_min",
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "timezone": "Europe/Paris"
+    }
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+def compute_last3_hours(lat, lon, ref_date):
+    # last 3 full days ending at ref_date (inclusive)
+    start = ref_date - timedelta(days=2)
+    d = openmeteo_daily(lat, lon, start, ref_date)
+    # Sum last 3 days
+    sun_sec = 0.0
+    rain_h  = 0.0
+    daily = d.get("daily", {})
+    sd = daily.get("sunshine_duration") or []
+    ph = daily.get("precipitation_hours") or []
+
+    for s in sd: sun_sec += (s or 0.0)      # secondes
+    for h in ph: rain_h  += (h or 0.0)      # heures
+
+    sun_h = round(sun_sec / 3600.0, 2)      # secondes → heures
+    rain_h = round(rain_h, 2)               # déjà en heures
+    return sun_h, rain_h
+
+def forecast_5days(lat, lon, ref_date):
+    end = ref_date + timedelta(days=5)
+    d = openmeteo_daily(lat, lon, ref_date, end)
+    # Keep only next 5 days (excluding today)
+    daily = d.get("daily", {})
+    result = []
+    for i, day in enumerate(daily.get("time", [])):
+        if i == 0:  # skip today here, page will show today's last-3-days separately
+            continue
+        result.append({
+            "date": day,
+            "sun_hours": round((daily.get("sunshine_duration",[0])[i] or 0) / 3600.0, 2),
+            "rain_hours": round((daily.get("precipitation_hours",[0])[i] or 0), 2),
+            "t_min": daily.get("temperature_2m_min",[None])[i],
+            "t_max": daily.get("temperature_2m_max",[None])[i],
+            "code": daily.get("weathercode",[None])[i],
+        })
+        if len(result) >= 5: break
+    return result
+
+def get_city_snapshot(city_query: str, ref_date, force_refresh: bool = False):
+    """
+    Return a WeatherSnapshot row for (city_query, ref_date).
+
+    - If cached and force_refresh=False → reuse it.
+    - If cached and force_refresh=True  → refresh fields in place.
+    - If not cached → insert a new row, with UNIQUE guard.
+
+    We ALWAYS store forecast_json as a dict: {"forecast5": [...]}.
+    """
+    # 1) Try existing cache first
+    snap = (WeatherSnapshot.query
+            .filter_by(city_query=city_query, ref_date=ref_date)
+            .one_or_none())
+
+    if snap and not force_refresh:
+        # Safety: if older rows were stored as a list, normalize once and save.
+        try:
+            j = json.loads(snap.forecast_json or "null")
+            if isinstance(j, list):
+                snap.forecast_json = json.dumps({"forecast5": j})
+                db.session.commit()
+        except Exception:
+            pass
+        return snap
+
+    # 2) Compute fresh data
+    g = geocode_city_openmeteo(city_query)
+    if not g:
+        return None
+    lat = float(g["lat"])
+    lon = float(g["lon"])
+
+    sun3d, rain3d = compute_last3_hours(lat, lon, ref_date)
+    fc5 = forecast_5days(lat, lon, ref_date)  # <-- EXPECTED to be a list
+    forecast_json = json.dumps({"forecast5": fc5})  # <-- ALWAYS a dict
+
+    if snap:
+        # 3a) Update existing row (force refresh)
+        snap.lat = lat
+        snap.lon = lon
+        snap.sun_hours_3d = sun3d
+        snap.rain_hours_3d = rain3d
+        snap.forecast_json = forecast_json
+        db.session.commit()
+        return snap
+
+    # 3b) Insert a new row, guarding UNIQUE (city_query, ref_date)
+    snap = WeatherSnapshot(
+        city_query=city_query,
+        lat=lat, lon=lon,
+        ref_date=ref_date,
+        sun_hours_3d=sun3d,
+        rain_hours_3d=rain3d,
+        forecast_json=forecast_json,
+    )
+    db.session.add(snap)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Another request inserted the same key; reuse that one
+        db.session.rollback()
+        snap = (WeatherSnapshot.query
+                .filter_by(city_query=city_query, ref_date=ref_date)
+                .one_or_none())
+    return snap
+
+INFOCLIMAT_CDG_URL = "https://www.infoclimat.fr/observations-meteo/temps-reel/roissy-charles-de-gaulle/07157.html"
+TZ_PARIS = ZoneInfo("Europe/Paris")
+
+def _parse_infoclimat_cdg_html(html: str):
+    """
+    Retourne une liste de tuples (obs_time_utc, humidity_float)
+    à partir de la page HTML d'Infoclimat CDG. On tolère plusieurs mises en page.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    rows = []
+
+    # Heuristique 1 : table principale des relevés horaires
+    tables = soup.find_all("table")
+    time_re = re.compile(r"^\s*\d{1,2}[:h]\d{2}\s*$")  # ex "10:00" ou "10h00"
+    pct_re = re.compile(r"(\d{1,3})\s*%")
+
+    def parse_time_cell(txt: str, base_date_local: datetime):
+        txt = txt.strip().lower().replace("h", ":")
+        # "10:00" → construire datetime local (Paris) du jour
+        try:
+            hh, mm = txt.split(":")
+            hh = int(hh); mm = int(mm)
+            dt_local = base_date_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            # Si l’heure est dans le futur (par rapport à maintenant Paris), on recule d’un jour (table “depuis minuit”/changement de jour)
+            now_paris = datetime.now(TZ_PARIS)
+            if dt_local > now_paris + timedelta(minutes=5):
+                dt_local = dt_local - timedelta(days=1)
+            return dt_local
+        except Exception:
+            return None
+
+    # Date locale “base” = aujourd’hui Paris (ajustée si la page porte sur la veille)
+    base_date_local = datetime.now(TZ_PARIS)
+
+    for table in tables:
+        for tr in table.find_all("tr"):
+            tds = tr.find_all(["td", "th"])
+            if len(tds) < 3:
+                continue
+
+            # Cherche une cellule d'heure, puis une cellule d'humidité
+            idx_time = None
+            idx_hum = None
+            for i, td in enumerate(tds):
+                raw = td.get_text(" ", strip=True)
+                if idx_time is None and time_re.match(raw or ""):
+                    idx_time = i
+                if idx_hum is None and "hum" in (raw or "").lower():
+                    # parfois l'entête "Humidité" est dans un th voisin, on continue à chercher
+                    idx_hum = i
+
+            # Stratégie: si on a une “heure” et ailleurs un “NN %” on prend
+            if idx_time is not None:
+                # Cherche la première occurrence NN% dans la ligne
+                hum_val = None
+                for td in tds:
+                    m = pct_re.search(td.get_text(" ", strip=True))
+                    if m:
+                        hum_val = float(m.group(1))
+                        break
+
+                if hum_val is not None:
+                    time_txt = tds[idx_time].get_text(" ", strip=True)
+                    dt_local = parse_time_cell(time_txt, base_date_local)
+                    if dt_local:
+                        dt_utc = dt_local.astimezone(timezone.utc)
+                        rows.append((dt_utc, hum_val))
+
+    # Dédup et tri
+    uniq = {}
+    for dt_utc, hum in rows:
+        key = dt_utc.replace(second=0, microsecond=0)
+        uniq[key] = hum  # garde la dernière occurrence
+    out = sorted(uniq.items(), key=lambda x: x[0])
+    return out
+
+
+def ingest_infoclimat_cdg(station_id: str = "cdg_07157", timeout=15) -> int:
+    """
+    Télécharge la page Infoclimat CDG et insère dans humidity_obs
+    (si non présent pour (station_id, obs_time)).
+    Retourne le nombre d'insertions.
+    """
+    try:
+        r = requests.get(INFOCLIMAT_CDG_URL, timeout=timeout, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; WetBot/1.0)"
+        })
+        r.raise_for_status()
+        pairs = _parse_infoclimat_cdg_html(r.text)
+        if not pairs:
+            app.logger.warning("ingest_infoclimat_cdg: no rows parsed")
+            return 0
+
+        inserted = 0
+        for obs_time_utc, hum in pairs:
+            # Existe déjà ?
+            exists = (HumidityObservation.query
+                      .filter_by(station_id=station_id)
+                      .filter(HumidityObservation.obs_time == obs_time_utc)
+                      .first())
+            if exists:
+                continue
+            db.session.add(HumidityObservation(
+                station_id=station_id,
+                obs_time=obs_time_utc,
+                humidity=float(hum),
+            ))
+            inserted += 1
+
+        db.session.commit()
+        return inserted
+    except Exception as e:
+        app.logger.error("ingest_infoclimat_cdg failed: %s", e)
+        db.session.rollback()
+        return 0
+
+def render_and_save_avatar_png(user_id: str, selections: dict) -> str:
+    """
+    Compose l’avatar à partir des couches sélectionnées et sauvegarde
+    static/avatars/<user_id>.png. Renvoie le chemin web du PNG.
+    """
+    # Répertoire de sortie
+    out_dir = os.path.join(app.static_folder, "avatars")
+    os.makedirs(out_dir, exist_ok=True)
+    out_fs = os.path.join(out_dir, f"{user_id}.png")
+    out_web = f"/static/avatars/{user_id}.png"
+
+    # Tente d’ouvrir la base (avatar) si existante côté Cabine
+    base_web = "/cabine/assets/avatar.png"  # adapte si différent
+    base_fs = _fs_path_from_web(base_web)
+    canvas = None
+
+    try:
+        if os.path.exists(base_fs):
+            base = Image.open(base_fs).convert("RGBA")
+            canvas = Image.new("RGBA", base.size, (0, 0, 0, 0))
+            canvas.alpha_composite(base)
+        else:
+            # fallback si pas d’avatar.png
+            canvas = Image.new("RGBA", (1024, 1365), (0, 0, 0, 0))
+    except Exception:
+        # si souci d’ouverture: canvas vide
+        canvas = Image.new("RGBA", (1024, 1365), (0, 0, 0, 0))
+
+    # Empiler les couches selon l’ordre
+    for key in AVATAR_ORDER:
+        path = selections.get(key) or selections.get(key.upper()) or ""
+        fs = _fs_path_from_web(path)
+        if fs and os.path.exists(fs):
+            try:
+                layer = Image.open(fs).convert("RGBA")
+                # Redimensionne si besoin pour matcher canvas
+                if layer.size != canvas.size:
+                    layer = layer.resize(canvas.size, Image.LANCZOS)
+                canvas.alpha_composite(layer)
+            except Exception:
+                # on ignore les images non trouvées / corrompues
+                pass
+
+    # Sauvegarde en PNG
+    try:
+        canvas.save(out_fs, "PNG")
+    except Exception:
+        # en cas d’erreur disque, on ne bloque pas la sauvegarde JSON
+        pass
+
+    return out_web    
+
+# -----------------------------------------------------------------------------
+# Scheduler: publication des valeurs + règlement des positions arrivées à échéance
+# -----------------------------------------------------------------------------
+scheduler = BackgroundScheduler(timezone=str(APP_TZ))
+
+
+def publish_today_if_pending():
+    d = today_paris()
+    p = PendingMood.query.filter_by(the_date=d).first()
+    if not p:
+        return
+    r = DailyMood.query.filter_by(the_date=d).first()
+    if not r:
+        r = DailyMood(the_date=d, pierre_value=p.pierre_value, marie_value=p.marie_value,
+                      published_at=dt_paris_now())
+        db.session.add(r)
+    else:
+        r.pierre_value = p.pierre_value
+        r.marie_value = p.marie_value
+        r.published_at = dt_paris_now()
+    db.session.commit()
+
+
+def settle_maturities():
+    """Règle les positions dont l'échéance est aujourd'hui ou déjà passée,
+    en utilisant la valeur publiée du jour d'échéance.
+    Formule : points_final = principal_points * (valeur_échéance / valeur_départ)
+    """
+    d = today_paris()
+    to_settle = Position.query.filter(
+        Position.status == 'ACTIVE', Position.maturity_date <= d
+    ).all()
+    if not to_settle:
+        return
+    # S'assurer que la valeur du jour est publiée (sinon on ne règle pas aujourd'hui)
+    today_row = DailyMood.query.filter_by(the_date=d).first()
+    if not today_row:
+        return
+    for pos in to_settle:
+        end_val = get_value_for_fallback(pos.maturity_date, pos.asset)
+        if end_val is None:
+            # Historique vide : impossible de régler pour l’instant.
+            continue
+        multiplier = end_val / pos.start_value if pos.start_value else 0.0
+        final_points = round(pos.principal_points * multiplier, 6)
+        user = pos.user
+        if pos.asset == 'PIERRE':
+            user.bal_pierre = round((user.bal_pierre or 0.0) + final_points, 6)
+        else:
+            user.bal_marie = round((user.bal_marie or 0.0) + final_points, 6)
+        pos.status = 'SETTLED'
+        pos.settled_points = final_points
+        pos.settled_at = dt_paris_now()
+    db.session.commit()
+
+
+scheduler.add_job(publish_today_if_pending, CronTrigger(hour=10, minute=0, timezone=str(APP_TZ)), id='publish10', replace_existing=True)
+scheduler.add_job(settle_maturities, CronTrigger(hour=10, minute=5, timezone=str(APP_TZ)), id='settle1005', replace_existing=True)
+scheduler.start()
+
+# -----------------------------------------------------------------------------
+# UI (basique — réutilise le style v1)
+# -----------------------------------------------------------------------------
+BASE_CSS = """
+<style>
+:root{
+  --bg:#06070c;               /* deep space */
+  --bg2:#0b0f1a;
+  --card-bg:rgba(17,22,36,.58);/* glassy panels */
+  --card-border:rgba(255,255,255,.08);
+  --text:#e8ecf2;
+  --muted:#a8b0c2;
+  --brand:#79e7ff;            /* cyan accent */
+  --brand-2:#bb86fc;          /* violet accent */
+  --good:#7ef7c0;
+  --bad:#ff7a7a;
+  --glow: 0 0 32px rgba(121,231,255,.25), 0 0 4px rgba(121,231,255,.6);
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font: 15px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,"Helvetica Neue",Arial;
+  color:var(--text);
+  background: radial-gradient(1200px 900px at 80% -10%, #0e1430 0%, transparent 55%),
+              radial-gradient(900px 700px at -10% 110%, #191f3b 0%, transparent 55%),
+              linear-gradient(180deg, var(--bg), var(--bg2) 60%, var(--bg) 100%);
+  overflow-x:hidden;
+}
+
+/* ——— Starfield (3 layers) ——— */
+.stars, .stars:before, .stars:after{
+  position:fixed; inset:0; content:""; z-index:-3; pointer-events:none;
+  background-repeat:repeat;
+  background-image:
+    radial-gradient(2px 2px at 20px 30px, rgba(255,255,255,.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 80px 120px, rgba(255,255,255,.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 200px 50px, rgba(255,255,255,.35) 50%, transparent 51%);
+  animation: drift linear infinite;
+}
+.stars{opacity:.35; background-size:300px 300px; animation-duration:120s}
+.stars:before{opacity:.25; background-size:500px 500px; animation-duration:180s}
+.stars:after{opacity:.15; background-size:800px 800px; animation-duration:260s}
+@keyframes drift{from{transform:translate3d(0,0,0)} to{transform:translate3d(-200px,-120px,0)}}
+
+/* ——— Layout / Nav ——— */
+.container{max-width:1040px;margin:0 auto;padding:0 16px}
+nav{position:sticky;top:0;backdrop-filter:saturate(120%) blur(8px);background:rgba(6,7,12,.55);border-bottom:1px solid var(--card-border);z-index:10}
+nav .container{display:flex;gap:14px;align-items:center;min-height:56px}
+nav .brand{font-weight:700;letter-spacing:.3px;color:var(--brand);text-decoration:none;text-shadow:var(--glow)}
+nav a{color:var(--text);opacity:.9;text-decoration:none}
+nav a:hover{color:var(--brand)}
+.spacer{flex:1}
+
+/* Navbar logo (Wet & PPP) */
+.topbar .nav-right { display:flex; align-items:center; gap:10px; }
+.topbar .nav-right .topbar-logo { height:22px; width:auto; display:block; opacity:.95; }
+
+/* ——— Cards ——— */
+.grid{display:grid;grid-template-columns:1fr;gap:16px}
+@media (min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
+.card{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  border-radius:16px;
+  padding:16px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+  backdrop-filter: blur(6px);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.card:hover{ transform: translateY(-2px); border-color: rgba(121,231,255,.18); box-shadow: 0 16px 48px rgba(0,0,0,.45), 0 0 24px rgba(121,231,255,.08); }
+
+h1,h2,h3{margin:8px 0 12px}
+h2{font-size:20px}
+h3{font-size:16px;color:var(--muted)}
+
+/* ——— Buttons / Inputs ——— */
+.btn{
+  display:inline-block;padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);
+  background:linear-gradient(180deg, rgba(121,231,255,.15), rgba(121,231,255,.05));
+  color:var(--text); cursor:pointer; text-decoration:none;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 0 10px rgba(121,231,255,.12);
+}
+.btn:hover{ border-color:rgba(121,231,255,.55); box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 0 18px rgba(121,231,255,.25); }
+
+input,select{
+  width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.04); color:var(--text); outline:none;
+}
+input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 3px rgba(121,231,255,.15); }
+
+/* ——— Tables / Muted ——— */
+.table{width:100%;border-collapse:collapse; font-variant-numeric: tabular-nums;}
+.table th,.table td{padding:8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.table th{color:var(--muted);font-weight:500;text-align:left}
+.muted{color:var(--muted)}
+
+/* ——— Flash messages ——— */
+.flash{margin-bottom:12px}
+.flash-item{
+  padding:10px 12px;border-radius:10px;margin-bottom:8px;
+  background:linear-gradient(180deg, rgba(187,134,252,.15), rgba(187,134,252,.05));
+  border:1px solid rgba(187,134,252,.25);
+}
+.card-small{
+  padding:12px 14px;
+  display:inline-block;
+  max-width:320px;
+}
+.today-box{
+  font-size:14px;
+  line-height:1.4;
+}
+.today-box table{
+  font-size:13px;
+}
+.today-box th{
+  font-weight:500;
+  color:var(--muted);
+}
+.today-box td{
+  text-align:right;
+}
+
+/* --- Solde box styles --- */
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr; /* left | center | right */
+  align-items: center;
+  gap: 12px;
+}
+.nav-left, .nav-right { display: inline-flex; align-items: center; gap: 14px; }
+.nav-center { display: flex; justify-content: center; }
+
+.solde-box {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 10px;
+  background: #1a0f0f; color: #ffd95e; font-weight: 700; letter-spacing: .3px;
+  border: 2px solid #ffb800;
+  box-shadow:
+    0 0 6px rgba(255,184,0,.7),
+    0 0 14px rgba(255,77,0,.5),
+    inset 0 0 8px rgba(255,184,0,.35);
+  text-shadow:
+    0 0 2px #ffec99,
+    0 0 6px #ffb800,
+    0 0 12px #ff4d00;
+}
+.solde-label { opacity: .9; }
+.solde-value { font-variant-numeric: tabular-nums; }
+
+.wet-target {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-weight: 700;
+  opacity: .9;
+  color: #2196f3;   /* bleu vif */
+}
+
+/* --- Pluie Pas Pluie (button & calendar) --- */
+.ppp-btn{
+  font-weight:700;
+  border-color:#ffb800;
+  background:linear-gradient(180deg, rgba(255,184,0,.18), rgba(255,184,0,.06));
+  color:#ffd95e;
+  text-shadow:0 0 2px #ffec99, 0 0 6px #ffb800, 0 0 12px #ff4d00;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 0 14px rgba(255,184,0,.25);
+}
+.ppp-btn:hover{ box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 0 20px rgba(255,184,0,.35); }
+
+.ppp-grid{
+  display:grid; gap:10px;
+  grid-template-columns: repeat(7, minmax(110px,1fr));
+  min-height: 10rem;
+  visibility: visible;
+}
+.ppp-day{
+  position:relative; padding:10px; border-radius:12px;
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  min-height:90px; cursor:pointer;
+}
+.ppp-day.disabled{ cursor:not-allowed; opacity:.5; filter:grayscale(30%); }
+.ppp-day .date{ font-weight:700; }
+.ppp-day .odds{
+  position:absolute; bottom:8px; right:8px;
+  font-weight:800; color:#ffd95e;
+  text-shadow:0 0 2px #ffec99, 0 0 6px #ffb800, 0 0 12px #ff4d00;
+}
+.ppp-day.today{ box-shadow: 0 0 0 2px #ffffff, 0 0 18px rgba(255,77,77,.35); }
+.ppp-day.today.today-win{ box-shadow: 0 0 0 2px #30d158, 0 0 18px rgba(48,209,88,.35); }
+.ppp-day.today.today-loss{ box-shadow: 0 0 0 2px #ff3b30, 0 0 18px rgba(255,59,48,.35); }
+.ppp-day.disabled:after{
+  content:"✖";
+  position:absolute; inset:auto 6px 6px auto;
+  font-size:20px; color:#ff4d4d; text-shadow:0 0 8px rgba(255,77,77,.6);
+}
+
+/* modal */
+.ppp-modal{
+  position:fixed; inset:0; display:none; place-items:center; z-index:20;
+  background:rgba(0,0,0,.55); backdrop-filter:blur(6px);
+}
+.ppp-modal.open{ display:grid; }
+.ppp-card{
+  width:min(420px, 92vw);
+  background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:16px; padding:16px;
+  box-shadow: 0 12px 50px rgba(0,0,0,.5);
+}
+
+/* Montant misé (en bas à gauche) */
+.ppp-day .stake{
+  position:absolute; bottom:8px; left:8px;
+  font-weight:800; color:#7ef7c0;  /* vert “gain” */
+  text-shadow:
+    0 0 2px rgba(126,247,192,.9),
+    0 0 6px rgba(126,247,192,.6),
+    0 0 12px rgba(70,220,160,.5);
+}
+
+.stake-wrap{
+  position:absolute; left:8px; bottom:8px;
+  display:flex; flex-direction:column; align-items:flex-start; gap:4px;
+}
+.stake-amt{
+  font-weight:800; color:#7ef7c0;
+  text-shadow:
+    0 0 2px rgba(126,247,192,.9),
+    0 0 6px rgba(126,247,192,.6),
+    0 0 12px rgba(70,220,160,.5);
+}
+.stake-icon{ width:18px; height:18px; display:block; }
+.stake-icon svg{ width:100%; height:100%; display:block; }
+.icon-drop path{ fill:#76d9ff; }
+.icon-sun  circle{ fill:#ffd95e; }
+.icon-sun  line{ stroke:#ffd95e; stroke-width:2; stroke-linecap:round; }
+
+/* Icône de prévision (droite, au-dessus du multiplicateur) */
+.forecast-wrap{
+  position:absolute;
+  right:8px;
+  bottom:34px;        /* juste au-dessus de .odds (bottom:8px) */
+  z-index:2;          /* passe au-dessus du fond et des grilles */
+}
+.forecast-icon{ width:18px; height:18px; display:block; }
+.forecast-icon svg{ width:100%; height:100%; display:block; }
+.forecast-drop path{ fill:#76d9ff; }
+.forecast-sun  circle{ fill:#ffd95e; }
+.forecast-sun  line{ stroke:#ffd95e; stroke-width:2; stroke-linecap:round; }
+.ppp-day { pointer-events:auto; }
+.ppp-grid .ppp-day.disabled { pointer-events: auto; }
+</style>
+"""
+
+INDEX_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Humeur — Spéculation</title>
+{{ css|safe }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head><body>
+<div class="stars"></div>
+<nav>
+  <div class="container topbar">
+    <!-- Left: main links -->
+    <div class="nav-left">
+      <a class="brand" href="/">Humeur</a>
+      <a href="/meteo" style="color:#ffd95e;">Météo</a>
+      {% if current_user.is_authenticated %}
+        <a href="/allocate">Attribuer (initial)</a>
+        <a href="/stake">Remiser</a>
+        {% if current_user.is_admin %}<a href="/admin">Admin</a>{% endif %}
+      {% endif %}
+    </div>
+
+    <!-- Center: Solde -->
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box" title="Points restants Humeur + Météo">
+          <span class="solde-label">Solde&nbsp;:</span>
+          <span class="solde-value">{{ solde_str }}</span>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="nav-right">
+      <a class="btn ppp-btn" href="/ppp" title="Paris — Pluie ou Pas Pluie">Pluie Pas Pluie</a>
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>    
+
+    <!-- Right: auth -->
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+<div class='container grid' style='margin-top:16px;'>
+
+  <div class='card'>
+    <h2>Valeurs de bonne humeur (publication ~10:00 CET)</h2>
+  <div id="chartWrap" style="height:300px;">
+    <canvas id="moodChart"></canvas>
+  </div>
+</div>
+
+<div class='card card-small'>
+  <h3 style="margin-top:0;margin-bottom:6px;">Valeurs du jour</h3>
+  <div id="today" class="today-box"></div>
+</div>
+
+{% if current_user.is_authenticated %}
+<div class='card'>
+  <h3>Mon portefeuille</h3>
+  <div id="wallet"></div>
+  <h4 style='margin-top:16px;'>Positions actives</h4>
+  <div id="positions"></div>
+</div>
+  {% endif %}
+</div>
+
+<script>
+async function loadChart(){
+  try {
+    const r = await fetch('/api/moods');
+    const raw = await r.json();
+    if (!Array.isArray(raw) || raw.length === 0) return;
+
+    // Normalize, coerce, sort
+    const rows = raw
+      .map(d => ({ date: String(d.date||""), pierre: +d.pierre, marie: +d.marie }))
+      .filter(d => d.date && Number.isFinite(d.pierre) && Number.isFinite(d.marie))
+      .sort((a,b)=> a.date.localeCompare(b.date));
+
+    // De-duplicate by date (keep last)
+    const byDate = new Map();
+    for (const d of rows) byDate.set(d.date, d);
+    const data = Array.from(byDate.values());
+
+    const labels = data.map(d => d.date);
+    const pierre = data.map(d => d.pierre);
+    const marie  = data.map(d => d.marie);
+
+    // Compute y-range padding (prevents jump)
+    const yMin = Math.min(...pierre, ...marie);
+    const yMax = Math.max(...pierre, ...marie);
+    const pad  = Math.max((yMax - yMin) * 0.1, 5);
+
+    const ctxEl = document.getElementById('moodChart');
+    if (!ctxEl) return;
+    const ctx = ctxEl.getContext('2d');
+
+    // Destroy previous chart if any (avoid double init)
+    if (window._moodChart) window._moodChart.destroy();
+
+    window._moodChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Pierre', data: pierre, tension: 0.25, pointRadius: 2 },
+          { label: 'Marie',  data: marie,  tension: 0.25, pointRadius: 2 }
+        ]
+      },
+      options: {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false,
+  resizeDelay: 100,
+  interaction: { mode: 'nearest', intersect: false },
+  plugins: {
+    legend: { labels: { color: '#e8ecf2' } },
+    tooltip: { titleColor:'#e8ecf2', bodyColor:'#e8ecf2', backgroundColor:'rgba(17,22,36,.9)', borderColor:'rgba(255,255,255,.08)', borderWidth:1 }
+  },
+  scales: {
+    x: {
+      ticks: { color:'#a8b0c2', maxRotation:0, autoSkip:true },
+      grid:  { color:'rgba(255,255,255,.06)' }
+    },
+    y: {
+      ticks: { color:'#a8b0c2' },
+      grid:  { color:'rgba(255,255,255,.06)' },
+      beginAtZero:false,
+      // keep your min/max padding logic if you added it earlier:
+      // min: yMin - pad, max: yMax + pad
+    }
+  }
+}
+    });
+  } catch (e) {
+    console.error('[ui] loadChart error:', e);
+  }
+}
+
+async function loadMe(){
+  try {
+    const wallet = document.getElementById('wallet');
+    if(!wallet) return; // pas loggé → pas de section portefeuille
+    const r = await fetch('/api/me');
+    if(r.status!==200) { wallet.innerHTML = '<em>Non connecté.</em>'; return; }
+    const me = await r.json();
+    wallet.innerHTML = `<table class='table'>
+      <tr><th>Solde libre Pierre</th><td><strong>${(+me.bal_pierre).toFixed(6)}</strong></td></tr>
+      <tr><th>Solde libre Marie</th><td><strong>${(+me.bal_marie).toFixed(6)}</strong></td></tr>
+    </table>`;
+    const p = document.getElementById('positions');
+    if(!p) return;
+    if(!me.positions || me.positions.length===0){
+      p.innerHTML = '<em>Aucune position active.</em>'; return;
+    }
+    p.innerHTML = '<table class="table"><tr><th>Actif</th><th>Points</th><th>Départ</th><th>Val. départ</th><th>Échéance</th><th>Statut</th></tr>' +
+      me.positions.map(x => `<tr>
+        <td>${x.asset}</td><td>${x.principal_points}</td>
+        <td>${x.start_date}</td><td>${x.start_value}</td>
+        <td>${x.maturity_date}</td><td>${x.status}</td>
+      </tr>`).join('') + '</table>';
+  } catch (e) {
+    console.error('[ui] loadMe error:', e);
+  }
+}
+
+// Ordre: aujourd'hui, portefeuille, puis graphe
+(async () => {
+  try { await loadToday(); } catch(e){ console.error(e); }
+  try { await loadMe(); }    catch(e){ console.error(e); }
+  try { await loadChart(); } catch(e){ console.error(e); }
+})();
+</script>
+</body></html>
+"""
+
+INTRO_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meteo God — intro</title>
+{{ css|safe }}
+<style>
+  :root { --introDur: 2000ms; } /* 2s */
+
+  html, body {
+    height:100%; margin:0; padding:0; overflow:hidden;
+    background:#0b0f1a;
+  }
+
+  .intro-wrap {
+    position:relative;
+    height:100%;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  /* Haze / fog made of 2 animated layers */
+  .fog, .fog::before, .fog::after {
+    position:absolute; inset:0; content:"";
+  }
+  .fog {
+    filter: blur(8px);
+    opacity:.75;
+  }
+  /* Layer A */
+  .fog::before {
+    background:
+      radial-gradient(60vmax 60vmax at 20% 30%, rgba(255,255,255,.06), transparent 60%),
+      radial-gradient(50vmax 50vmax at 80% 70%, rgba(255,255,255,.05), transparent 60%),
+      radial-gradient(70vmax 70vmax at 40% 80%, rgba(255,255,255,.04), transparent 60%),
+      radial-gradient(40vmax 40vmax at 70% 25%, rgba(255,255,255,.05), transparent 60%);
+    animation: driftA 18s linear infinite;
+  }
+  /* Layer B (slower / different direction) */
+  .fog::after {
+    background:
+      radial-gradient(55vmax 55vmax at 30% 60%, rgba(255,255,255,.05), transparent 60%),
+      radial-gradient(60vmax 60vmax at 75% 35%, rgba(255,255,255,.05), transparent 60%),
+      radial-gradient(45vmax 45vmax at 50% 10%, rgba(255,255,255,.04), transparent 60%),
+      radial-gradient(65vmax 65vmax at 10% 80%, rgba(255,255,255,.03), transparent 60%);
+    animation: driftB 26s linear infinite reverse;
+  }
+  @keyframes driftA { 
+    0% { transform: translate3d(-6%, -3%, 0) scale(1.02); }
+    50%{ transform: translate3d( 4%,  3%, 0) scale(1.03); }
+    100%{transform: translate3d(-6%, -3%, 0) scale(1.02); }
+  }
+  @keyframes driftB { 
+    0% { transform: translate3d(6%, 2%, 0) scale(1.02); }
+    50%{ transform: translate3d(-4%, -2%, 0) scale(1.04); }
+    100%{transform: translate3d(6%, 2%, 0) scale(1.02); }
+  }
+
+  /* Logo */
+  .intro-logo {
+    position:relative;
+    width:min(82vw, 760px);
+    max-width:760px;
+    height:auto;
+    z-index:2;
+    filter: drop-shadow(0 10px 30px rgba(0,0,0,.4));
+    animation: popIn .6s ease-out both;
+  }
+  @keyframes popIn {
+    0% { transform: translateY(10px) scale(.96); opacity:0; }
+    100%{ transform: translateY(0) scale(1); opacity:1; }
+  }
+
+  /* Small helper text (optional) */
+  .intro-note{
+    position:absolute; bottom:24px; width:100%; text-align:center;
+    color:#a8b0c2; font-size:14px; letter-spacing:.3px;
+    opacity:.8;
+  }
+</style>
+</head>
+<body>
+
+<div class="intro-wrap">
+  <div class="fog"></div>
+
+  <img class="intro-logo"
+       src="{{ url_for('static', filename='img/weather_bets_intro.png') }}"
+       alt="METEO GOD — Weather bets">
+
+  <div class="intro-note">Chargement…</div>
+</div>
+
+<script>
+  // Sécurité: si l'utilisateur revient en arrière, éviter de rester bloqué sur l’intro
+  setTimeout(function(){
+    window.location.replace("{{ url_for('ppp') }}");
+  }, 2000); // 2 secondes
+</script>
+</body></html>
+"""
+
+ALLOCATE_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Attribuer mon point</title>
+{{ css|safe }}
+</head><body>
+<div class="stars"></div>
+<nav>
+  <div class="container topbar">
+    <!-- Left: main links -->
+    <div class="nav-left">
+      <a class="brand" href="/">Humeur</a>
+      <a href="/meteo" style="color:#ffd95e;">Météo</a>
+      {% if current_user.is_authenticated %}
+        <a href="/allocate">Attribuer (initial)</a>
+        <a href="/stake">Remiser</a>
+        {% if current_user.is_admin %}<a href="/admin">Admin</a>{% endif %}
+      {% endif %}
+    </div>
+
+    <!-- Center: Solde -->
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box" title="Points restants Humeur + Météo">
+          <span class="solde-label">Solde&nbsp;:</span>
+          <span class="solde-value">{{ solde_str }}</span>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="nav-right">
+      <a class="btn ppp-btn" href="/ppp" title="MeteoGod calendar">Pluie Pas Pluie</a>
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>    
+
+    <!-- Right: auth -->
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+<div class='container' style='margin-top:16px;'>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <div class="flash">{% for m in messages %}<div class="flash-item">{{ m }}</div>{% endfor %}</div>
+    {% endif %}
+  {% endwith %}
+
+  <div class='card' style='max-width:860px;margin:0 auto;'>
+    <!-- ========================= H U M E U R ========================= -->
+    <h2>Attribuer mon point — Humeur</h2>
+    <p>Vous disposez de <strong>1,0 point</strong>. Répartissez-le entre Pierre et Marie (somme = 1,0) et choisissez une échéance (semaines) pour chaque part &gt; 0.</p>
+    <form method="post" action="/allocate">
+      <input type="hidden" name="form_kind" value="mood">
+      <div class='grid' style='grid-template-columns:1fr 1fr;gap:12px;'>
+        <div>
+          <label>Part pour Pierre (ex 0,6)</label>
+          <input name="ap" type="text" inputmode="decimal" value="0.5">
+        </div>
+        <div>
+          <label>Échéance Pierre (semaines, 3 à 24)</label>
+          <input name="wp" type="number" min="3" max="24" step="1" value="3">
+        </div>
+        <div>
+          <label>Part pour Marie (ex 0,4)</label>
+          <input name="am" type="text" inputmode="decimal" value="0.5">
+        </div>
+        <div>
+          <label>Échéance Marie (semaines, 3 à 24)</label>
+          <input name="wm" type="number" min="3" max="24" step="1" value="3">
+        </div>
+      </div>
+      <div style='margin-top:12px;'>
+        <button class="btn" type="submit">Enregistrer (humeur)</button>
+      </div>
+    </form>
+
+    <hr style="border-color:rgba(255,255,255,.08);margin:18px 0">
+
+    <!-- ========================= M É T É O ========================= -->
+    <hr style="border-color:rgba(255,255,255,.08);margin:18px 0">
+
+    <h2 class="meteo-title" style="margin:0 0 8px">Attribuer mon point — Météo</h2>
+    <p>Choisissez une ville, puis répartissez <strong>1,0 point</strong> entre <em>soleil</em> et <em>pluie</em> (somme = 1,0). L’échéance va de 2 à 24 semaines.</p>
+
+    <form method="post" action="/allocate" id="weatherForm">
+      <input type="hidden" name="form_kind" value="weather">
+
+      <div class='grid' style='grid-template-columns:1fr auto;gap:12px;'>
+        <div>
+          <label>Choisir une ville</label>
+          <input name="wcity" type="text" placeholder="Paris, France" value="Paris, France">
+        </div>
+        <div style="align-self:end">
+          <button class="btn" type="button" id="btnCheckCity">Vérifier la ville</button>
+        </div>
+      </div>
+
+  <div id="cityInfo" class="muted" style="margin:8px 0 12px;"></div>
+
+  <div class='grid' style='grid-template-columns:1fr 1fr;gap:12px'>
+    <div>
+      <label>Part soleil (ex 0,5)</label>
+      <input name="ws" type="text" inputmode="decimal" value="0.5">
+    </div>
+    <div>
+      <label>Échéance soleil (semaines, 2 à 24)</label>
+      <input name="wss" type="number" min="2" max="24" step="1" value="2">
+    </div>
+    <div>
+      <label>Part pluie (ex 0,5)</label>
+      <input name="wr" type="text" inputmode="decimal" value="0.5">
+    </div>
+    <div>
+      <label>Échéance pluie (semaines, 2 à 24)</label>
+      <input name="wrs" type="number" min="2" max="24" step="1" value="2">
+    </div>
+  </div>
+  <div style='margin-top:12px;'>
+    <button class="btn" type="submit">Enregistrer (météo)</button>
+  </div>
+</form>
+  </div>
+</div>
+
+<script>
+// Normaliser les décimales FR → EN sur les deux formulaires
+document.addEventListener('DOMContentLoaded', () => {
+  // Humeur form
+  const moodForm = document.querySelector('form[action="/allocate"][method="post"]:not(#weatherForm)');
+  if (moodForm) {
+    moodForm.addEventListener('submit', () => {
+      for (const name of ['ap','am']) {
+        const el = moodForm.querySelector(`[name="\\${name}"]`);
+        if (el && typeof el.value === 'string') el.value = el.value.replace(',', '.');
+      }
+    });
+  }
+  // Météo form
+  const wForm = document.getElementById('weatherForm');
+  if (wForm) {
+    wForm.addEventListener('submit', () => {
+      for (const name of ['ws','wr']) {
+        const el = wForm.querySelector(`[name="${name}"]`);
+        if (el && typeof el.value === 'string') el.value = el.value.replace(',', '.');
+      }
+    });
+  }
+
+  // Vérifier la ville (afficher heures 3j)
+  const btn = document.getElementById('btnCheckCity');
+  if(btn){
+    btn.addEventListener('click', async ()=>{
+      const inp = document.querySelector('input[name="wcity"]');
+      const q = ((inp && inp.value) ? inp.value : '').trim();
+      const box = document.getElementById('cityInfo');
+      if(!q){ box.textContent='Saisissez une ville.'; return; }
+      box.textContent='Chargement…';
+      try{
+        const t = await fetch('/api/meteo/today?city='+encodeURIComponent(q)).then(r=>r.json());
+        if(t.error){ box.textContent='Ville introuvable.'; return; }
+        box.innerHTML = `Ville: <strong>${t.city}</strong> — ${t.date}<br>
+          Soleil (3j): <strong>${t.sun_hours_3d}</strong> h — Pluie (3j): <strong>${t.rain_hours_3d}</strong> h`;
+      }catch(e){ box.textContent='Erreur de récupération.' }
+    });
+  }
+});
+</script>
+</body></html>
+"""
+
+AUTH_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+{{ css|safe }}<title>{{ title }}</title></head>
+<body>
+<nav>
+  <div class='container topbar'>
+    <div class='spacer'></div>
+    <a href='/'>Accueil</a>
+    <a href='/register'>Créer un compte</a>
+    <a href='/login'>Se connecter</a>
+  </div>
+</nav>
+<div class='container' style='margin-top:16px;'>
+  <div class='card' style='max-width:540px;margin:auto;'>
+    <h2 style='margin-top:0;'>{{ title }}</h2>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for m in messages %}
+          <div class='alert'>{{ m }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {{ body|safe }}
+  </div>
+</div>
+</body></html>
+"""
+
+PPP_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Paris — Pluie ou Pas Pluie</title>
+{{ css|safe }}
+<style>
+  .brand { color:#2160f3; font-weight:800; text-decoration:none; text-shadow:none; }
+  .brand:hover { color:#64b5f6; }
+  .brand.active { color:#79e7ff; text-shadow:0 0 12px rgba(187,134,252,.35); }
+  .brand.active:hover { color:#79e7ff; }
+  .nav-left .brand + .brand { margin-left:14px; }
+
+  .ppp-day { position:relative; }
+  .ppp-day .forecast-wrap {
+    position:absolute; top:6px; right:8px; width:22px; height:22px;
+    display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:2; opacity:.95;
+  }
+  .ppp-day .forecast-wrap svg { width:20px; height:20px; }
+  .ppp-day .forecast-wrap .icon-drop path { fill:#79e7ff; }
+  .ppp-day.disabled .forecast-wrap { opacity:.9; }
+
+  /* Outil éclair */
+  .bolt-tool {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:28px; height:28px; margin-left:16px; font-size:22px; line-height:1;
+    cursor:grab; user-select:none; -webkit-user-drag:element;
+  }
+  .bolt-tool:active { cursor:grabbing; }
+
+  /* Feedback drop */
+  .ppp-day.drop-ok   { outline:2px dashed rgba(255,215,0,.65); outline-offset:3px; }
+  .ppp-day.drop-nope { outline:2px dashed rgba(220,20,60,.5); outline-offset:3px; }
+
+  /* Cote boostée */
+  .odds.boosted::before { content:"⚡"; margin-right:4px; }
+
+  /* Anti-bogue: même si .disabled global a pointer-events:none */
+  .ppp-grid .ppp-day,
+  .ppp-grid .ppp-day.disabled { pointer-events:auto; }
+
+  .user-menu { position: relative; display: inline-block; }
+  .user-trigger{
+    background: transparent; border: 0; color: #fff; font-weight: 800;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .user-trigger .caret{ opacity: .8; font-size: 12px; }
+  .user-dropdown{
+    position: absolute; right: 0; top: 120%;
+    background: rgba(13,20,40,.98);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.35);
+    min-width: 180px; padding: 6px; display: none; z-index: 1000;
+    backdrop-filter: blur(6px);
+  }
+  .user-dropdown.open{ display: block; }
+  .user-dropdown .item{
+    display: block; width: 100%; text-align: left;
+    padding: 10px 12px; border-radius: 10px;
+    background: transparent; color: #cfe3ff; text-decoration: none;
+    border: 0; cursor: pointer; font-weight: 700;
+  }
+  .user-dropdown .item:hover{ background: rgba(120,180,255,.12); color: #79e7ff; }
+  .user-dropdown .item.disabled{
+    opacity: .5; cursor: default; pointer-events: none;
+  }
+  /* Pousse le lien Cabine tout à droite sur PPP */
+  .topbar .nav-right { display: flex; align-items: center; }
+  .topbar .nav-right a[href^="/🧢"] { margin-left: auto; }
+
+  /* (optionnel) un petit espace fixe entre Carte et le bord avant Cabine */
+  .topbar .nav-right .brand-map { margin-right: 1px; }
+</style>
+</head><body>
+<div class="stars"></div>
+
+<nav>
+  <div class="container topbar">
+    <div class="nav-left">
+      <a class="brand" href="/wet" style="color:#2160f3;">Wet</a>
+      <a class="brand active" href="/ppp">Calendrier</a>
+    </div>
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box">
+          <span class="solde-label">Solde&nbsp;:</span>
+          <span class="solde-value">{{ solde_str }}</span>
+        </div>
+      {% endif %}
+    </div>
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <div class="user-menu">
+          <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+            <strong>{{ current_user.username }}</strong>
+            <span class="caret">▾</span>
+          </button>
+          <div class="user-dropdown" id="userDropdown" role="menu">
+            <a class="item"
+               href="{{ url_for('cabine_page') }}">Profil</a>
+            <a class="item" href="/logout">Se déconnecter</a>
+          </div>
+        </div>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+      <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
+      <a class="brand-map" href="/carte">🗺️</a>
+      <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
+         href="{{ url_for('cabine_page') }}"></a>
+      <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
+         href="{{ url_for('trade_page') }}">🤝</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container" style="margin-top:16px;">
+  <div class="card">
+    <h2>{{ city_label }}</h2>
+    <p class="muted"></p>
+    <div id="pppGrid" class="ppp-grid"></div>
+  </div>
+</div>
+
+<!-- modal -->
+<div id="pppModal" class="ppp-modal">
+  <div class="ppp-card">
+    <h3 style="margin:0 0 8px;" id="mTitle"></h3>
+    <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
+    <p id="mOddsWrap" style="margin:0 0 8px;">
+      <strong>Cote:</strong> x<span id="mOdds"></span>
+    </p>
+    <div id="mHistory" class="m-history" style="margin-bottom:10px; font-size:14px; color:#ccc; display:none;"></div>
+    <form method="post"
+          action="{{ url_for('ppp', station_id=station_id) if station_id else url_for('ppp') }}"
+          id="pppForm">
+      <input type="hidden" name="date" id="mDateInput">
+      {% if station_id is not none %}
+      <input type="hidden" name="station_id" value="{{ station_id }}">
+      {% endif %}
+      <div class="grid cols-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <label>Choix</label>
+          <select name="choice" id="mChoice" required>
+            <option value="PLUIE">Pluie</option>
+            <option value="PAS_PLUIE">Pas Pluie</option>
+          </select>
+        </div>
+        <div>
+          <label>Montant (points)</label>
+          <input type="number" name="amount" id="mAmount" min="0" step="0.1" value="1.0" required>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" class="btn" id="mCancel">Annuler</button>
+        <button class="btn primary">Miser</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function(){
+  function fmtPts(x){
+    // arrondi à 1 décimale, puis supprime la décimale inutile (,0)
+    const v = Math.round((Number(x) || 0) * 10) / 10;
+    let s = v.toFixed(1).replace('.', ',');
+    return s.replace(/,0$/, '');  // 2,0 -> 2
+  }
+  // --- Aujourd'hui (Europe/Paris) ---
+  const now = new Date();
+  const parisNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+  const today = new Date(parisNow.getFullYear(), parisNow.getMonth(), parisNow.getDate());
+
+  // Cotes de base côté client
+  const ODDS = {
+    0:null,1:1.0,2:1.0,3:1.0,4:1.0,5:1.0,6:1.1,7:1.2,8:1.2,9:1.3,10:1.3,
+    11:1.4,12:1.5,13:1.6,14:1.8,15:1.9,16:2.0,17:2.0,18:2.0,19:2.0,20:2.5,
+    21:2.0,22:2.0,23:2.0,24:2.0,25:2.0,26:2.0,27:2.7,28:2.0,29:2.0,30:2.0
+  };
+
+  // Refs DOM
+  const grid       = document.getElementById('pppGrid');
+  const modal      = document.getElementById('pppModal');
+  const mOddsEl    = document.getElementById('mOdds');
+  const mDateInput = document.getElementById('mDateInput');
+  const mCancel    = document.getElementById('mCancel');
+  const form       = document.getElementById('pppForm');
+
+  if (!grid) { console.error('[ppp] #pppGrid introuvable'); return; }
+
+  // Données serveur
+  const MY_BETS = {{ bets_map  | default({}) | tojson | safe }};
+  const BOOSTS  = {{ boosts_map| default({}) | tojson | safe }};
+
+  // Ville cible accessible partout
+  const qCity = {{ city_label | tojson }};
+
+  console.debug('[ppp] BOOSTS from server:', BOOSTS);
+
+  // Utils
+  function ymd(d){
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+  function fr(d){
+    return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' });
+  }
+  function hasBetFor(key){
+    const b = MY_BETS && MY_BETS[key];
+    if (!b) return false;
+    return (Array.isArray(b.bets) && b.bets.length > 0) || (typeof b.amount === 'number' && b.amount > 0);
+  }
+
+  // Icônes
+  const svgDrop = `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`;
+  const svgSun  = "☀️";
+
+  // Rendu des cotes
+  function renderOdds(oddsEl, baseOdds, boostVal){
+    if (!oddsEl) return;
+    const base  = Number.isFinite(Number(baseOdds)) ? Number(baseOdds) : 0;
+    const boost = Number.isFinite(Number(boostVal)) ? Number(boostVal) : 0;
+    const val   = base + boost;
+    oddsEl.textContent = val > 0 ? ('x' + val.toString().replace('.', ',')) : '';
+    oddsEl.classList.toggle('boosted', boost > 0);
+  }
+
+  // Submit guard
+  if (form) {
+    form.addEventListener('submit', function (e) {
+      if (!mDateInput.value) {
+        e.preventDefault();
+        alert("Cliquez d'abord sur un jour du calendrier pour choisir la date.");
+      }
+    });
+  }
+
+  // Normalisation ODDS/BOOSTS
+  const ODDS_SAFE = Array.from({ length: 31 }, (_, i) => {
+    const v = (ODDS && Object.prototype.hasOwnProperty.call(ODDS, i)) ? Number(ODDS[i]) : NaN;
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  });
+  const BOOSTS_SAFE = (BOOSTS && typeof BOOSTS === 'object') ? BOOSTS : {};
+
+  // --- Grille de 31 jours ---
+  for (let i = 0; i <= 30; i++) {
+    const d   = addDaysLocal(today, i);
+    const key = ymdParis(d);
+
+    const el = document.createElement('div');
+    el.className = 'ppp-day' + (i === 0 ? ' today' : '');
+    el.setAttribute('data-key', key);
+    el.setAttribute('data-idx', i);
+
+    const betInfo = (MY_BETS && MY_BETS[key]) ? MY_BETS[key] : null;
+    const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
+    const choice  = betInfo ? betInfo.choice : null;
+
+    if (i <= 5 && !hasBetFor(key)) el.classList.add('disabled');
+
+    let stakeBlock = '';
+    if (amount > 0) {
+      const icon = (choice === 'PLUIE') ? svgDrop : (choice === 'PAS_PLUIE') ? svgSun : '';
+
+      stakeBlock = `
+        <div class="stake-wrap">
+          ${icon}
+          <div class="stake-amt">+${fmtPts(amount)}</div>
+        </div>`;
+    }
+
+    el.innerHTML = `
+      <div class="date">${fr(d)}</div>
+      ${stakeBlock}
+      <div class="odds"></div>
+    `;
+
+    const oddsEl      = el.querySelector('.odds');
+    const baseOdds    = ODDS_SAFE[i];
+    const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key])) ? Number(BOOSTS_SAFE[key]) : 0;
+    renderOdds(oddsEl, baseOdds, boostForDay);
+
+    // Clic → modal
+    el.addEventListener('click', () => {
+      const hasBetNow = hasBetFor(key);
+      if (i <= 5 && !hasBetNow) return;
+
+      const titleEl  = document.getElementById('mTitle');
+      const oddsWrap = document.getElementById('mOddsWrap');
+      const histWrap = document.getElementById('mHistory');
+
+      if (titleEl) titleEl.textContent = (i <= 5 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
+
+      let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
+      const txt = (oddsEl.textContent || '').trim();
+      if (txt) {
+        const num = parseFloat(txt.replace(/^x/i,'').replace(',','.'));
+        if (!isNaN(num)) shownOdds = num;
+      }
+
+      if (histWrap) {
+        histWrap.innerHTML = '';
+        if (hasBetNow) {
+          const list = (betInfo && Array.isArray(betInfo.bets)) ? betInfo.bets : [];
+          const totalAmount = Math.round(list.reduce((acc, b) => acc + (Number(b.amount) || 0), 0) * 100) / 100;
+
+          // Somme pondérée des cotes stockées au moment des mises (SANS boosts)
+          let weightedSum = 0;
+          for (const b of list) {
+            const a = Number(b.amount) || 0;
+            const o = Number(b.odds);
+            const odd0 = (Number.isFinite(o) && o > 0) ? o : baseOdds; // fallback propre
+            weightedSum += a * odd0;
+          }
+
+          // Cote initiale (sans boosts) = moyenne pondérée des cotes des mises
+          const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
+            ? (weightedSum / totalAmount)
+            : baseOdds;
+
+          // Boosts actuels du jour
+          const boostTotal = Number(BOOSTS_SAFE[key] || 0);
+          const boltCount  = Math.round(boostTotal / 5);
+
+          // 💰 Gains potentiels totaux = Σ(amount_i * odds_i_initiale) + (boostTotal * Σ amount_i)
+          // = weightedSum + boostTotal * totalAmount
+          const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
+
+          const lines = [];
+
+          // === Chaque mise avec la DATE DE CRÉATION réelle (b.when) ===
+          for (const b of list) {
+            const whenDate = new Date(b.when);
+            const frWhen = whenDate.toLocaleDateString('fr-FR', { 
+              weekday: 'short', 
+              day: '2-digit', 
+              month: 'short', 
+              year: 'numeric' 
+            });
+
+            // Arrondi à deux décimales et supprime un éventuel zéro final
+           const amt = fmtPts(b.amount);
+
+           const o   = Number(b.odds);
+           const odd = (Number.isFinite(o) && o > 0 ? o : baseOdds)
+                         .toFixed(1)
+                         .replace('.', ',');
+
+            lines.push(`Mise du ${frWhen} : ${amt} pts — (x${odd})`);
+          }
+          if (boltCount > 0) {
+            lines.push(`Éclairs : ${boltCount} — (x5)`);
+          }
+          // Ligne de synthèse : gains potentiels totaux (AVEC boosts)
+          lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
+
+          histWrap.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+          histWrap.style.display = 'block';
+        } else {
+          histWrap.style.display = 'none';
+        }
+      }
+
+      if (i <= 5 && hasBetNow) {
+        if (form) form.style.display = 'none';
+        if (oddsWrap) oddsWrap.style.display = 'none';
+      } else {
+        if (form) form.style.display = 'block';
+        if (oddsWrap) oddsWrap.style.display = 'block';
+        if (mOddsEl) mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
+        if (mDateInput) mDateInput.value = key;
+      }
+
+      if (modal) modal.classList.add('open');
+    });
+
+    grid.appendChild(el);
+  }
+
+  // Nettoyage cotes
+  document.querySelectorAll('.ppp-day .odds').forEach(o => {
+    if (!o.textContent || !o.textContent.trim()) return;
+    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
+  });
+
+  // Icônes météo
+  function ensureForecastWrap(cell){
+    if (!cell) return null;
+    let wrap = cell.querySelector('.forecast-wrap');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'forecast-wrap';
+      cell.prepend(wrap);
+    }
+    return wrap;
+  }
+  function addDaysLocal(d, n){
+    const x = new Date(d.getTime());
+    x.setDate(x.getDate() + n); // gère DST correctement
+    return x;
+  }
+  function ymdParis(d){
+    // fabrique la clé YYYY-MM-DD en “Europe/Paris”
+    const y = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', year:'numeric' });
+    const m = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', month:'2-digit' });
+    const day = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', day:'2-digit' });
+    return `${y}-${m}-${day}`;
+  }
+  function frParis(d){
+    return d.toLocaleDateString('fr-FR', {
+      timeZone:'Europe/Paris',
+      weekday:'short', day:'2-digit', month:'short'
+    });
+  }
+
+  (function loadTodayIcon(){
+    const todayKey = ymd(today);
+    const cell = document.querySelector(`.ppp-day[data-key="${todayKey}"]`);
+    if (!cell) return;
+
+    const wrap = ensureForecastWrap(cell);
+
+    fetch('/api/meteo/today?city=' + encodeURIComponent(qCity))
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+
+        // Détermine pluie/pas pluie (même logique que chez toi)
+        let isRain = false;
+        if (data.pop != null) {
+          let pop = Number(data.pop); if (pop > 1) pop /= 100;
+          isRain = pop >= 0.45;
+        } else {
+          isRain = (Number(data.rain_hours) >= 4) || (Number(data.code) >= 60);
+        }
+
+        // Icône
+        wrap.innerHTML = isRain ? svgDrop : svgSun;
+
+        // Pari du jour ?
+        const betInfo = (MY_BETS && MY_BETS[todayKey]) ? MY_BETS[todayKey] : null;
+        const hasBet  = (typeof hasBetFor === 'function') ? hasBetFor(todayKey) : !!betInfo;
+
+        // Couleur du liseré (win/lose)
+        cell.classList.remove('today-win','today-loss');
+        if (hasBet) {
+          const choice = betInfo ? betInfo.choice : null; // 'PLUIE' ou 'PAS_PLUIE'
+          if (choice === 'PLUIE' || choice === 'PAS_PLUIE') {
+            const isWin = (choice === 'PLUIE' && isRain) || (choice === 'PAS_PLUIE' && !isRain);
+            cell.classList.add(isWin ? 'today-win' : 'today-loss');
+          }
+        }
+      })
+      .catch(()=>{});
+  })();
+
+  (async function loadForecastIcons(){
+    try {
+      const r5 = await fetch('/api/meteo/forecast5?city=' + encodeURIComponent(qCity));
+      if (!r5.ok) return;
+      const data = await r5.json();
+      if (!data || !Array.isArray(data.forecast5)) return;
+      const limitEnd = new Date(today.getTime() + 13*24*3600*1000);
+      for (const f of data.forecast5) {
+        const dt = new Date(f.date + 'T00:00:00');
+        if (dt < today || dt > limitEnd) continue;
+        const cell = document.querySelector(`.ppp-day[data-key="${f.date}"]`);
+        if (!cell) continue;
+        const wrap = ensureForecastWrap(cell);
+        let isRain = false;
+        if (f.pop != null) {
+          let pop = +f.pop; if (pop > 1) pop /= 100;
+          isRain = pop >= 0.45;
+        } else {
+          isRain = (f.rain_hours >= 4) || (f.code >= 60);
+        }
+        wrap.innerHTML = isRain ? svgDrop : svgSun;
+      }
+    } catch(e){
+      console.error('[ppp] forecast icons error:', e);
+    }
+  })();
+
+  // Fermer la modale
+  if (mCancel) {
+    mCancel.addEventListener('click', function () {
+      if (modal) modal.classList.remove('open');
+    });
+  }
+  if (modal) {
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) modal.classList.remove('open');
+    });
+  }
+
+  // --- Drag source de l’éclair (unique) ---
+  const bolt = document.getElementById('boltTool');
+  if (bolt){
+    bolt.setAttribute('draggable','true');
+    bolt.style.webkitUserDrag = 'element';
+    bolt.addEventListener('dragstart', (ev) => {
+      try {
+        ev.dataTransfer.setData('text/plain', 'bolt');
+        ev.dataTransfer.effectAllowed = 'copy';
+      } catch (e) { /* no-op */ }
+    });
+  }
+
+  // --- Utilitaire: cible -> cellule robuste ---
+  function cellFromEvent(ev){
+    let t = ev.target;
+    if (t && t.nodeType === 3) t = t.parentElement; // Text -> Element
+    if (!(t instanceof Element)) return null;
+    const cell = t.closest('.ppp-day');
+    return (cell && grid.contains(cell)) ? cell : null;
+  }
+
+  // --- DnD délégué (unique) ---
+  grid.addEventListener('dragenter', (ev) => {
+    const cell = cellFromEvent(ev);
+    if (!cell) return;
+    const ok = hasBetFor(cell.dataset.key);
+    cell.classList.add('drop-candidate');
+    cell.classList.toggle('drop-ok', ok);
+    cell.classList.toggle('drop-nope', !ok);
+  });
+
+  grid.addEventListener('dragover', (ev) => {
+    const cell = cellFromEvent(ev);
+    if (!cell) return;
+    ev.preventDefault(); // indispensable
+    const ok = hasBetFor(cell.dataset.key);
+    try { ev.dataTransfer.dropEffect = ok ? 'copy' : 'none'; } catch (_) {}
+  });
+
+  grid.addEventListener('dragleave', (ev) => {
+    const cell = cellFromEvent(ev);
+    if (!cell) return;
+    cell.classList.remove('drop-candidate','drop-ok','drop-nope');
+  });
+
+  grid.addEventListener('drop', async (ev) => {
+    const cell = cellFromEvent(ev);
+    if (!cell) return;
+    ev.preventDefault();
+    cell.classList.remove('drop-candidate','drop-ok','drop-nope');
+
+    const key = cell.dataset.key;
+    const idx = Number(cell.dataset.idx);
+
+    if (!hasBetFor(key)) {
+      cell.classList.add('shake');
+      setTimeout(() => cell.classList.remove('shake'), 500);
+      return;
+    }
+
+    const payload = (ev.dataTransfer && ev.dataTransfer.getData('text/plain')) || 'bolt';
+    if (payload !== 'bolt') return;
+
+    const oddsEl   = cell.querySelector('.odds');
+    const baseOdds = ODDS_SAFE[idx];
+
+    try {
+      const resp = await fetch('/ppp/boost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: key,
+          value: 5.0,
+          station_id: {{ station_id | default(None) | tojson }}
+        })
+      });
+
+    // Même si le serveur ne met pas ok:true, on essaie quand même d'extraire une valeur
+      let total = 0;
+      try {
+        const json = await resp.json();
+        // Liste de clés possibles renvoyées par l'API
+        const candidates = [
+          'total','new_total','boost_total','total_boost','boost','value','newTotal','cumul'
+        ];
+        for (const k of candidates) {
+          if (json && json[k] != null) {
+            const v = (typeof json[k] === 'string') ? parseFloat(String(json[k]).replace(',', '.')) : Number(json[k]);
+            if (!Number.isNaN(v)) { total = v; break; }
+          }
+        }
+        // Certains backends renvoient { ok:true, total:.. } → on log pour debug
+        console.debug('[ppp] boost resp:', json, '→ total=', total);
+      } catch (e) {
+        console.warn('[ppp] boost: réponse non-JSON ou vide, fallback +5', e);
+      }
+
+       // Filet de sécurité : si on n'a rien pu lire, on incrémente localement de +5
+      if (!Number.isFinite(total) || total <= 0) {
+        const prev = Number(BOOSTS_SAFE[key] || 0);
+        total = prev + 5;
+      }
+
+      BOOSTS_SAFE[key] = total;           // MAJ locale
+      renderOdds(oddsEl, baseOdds, total);
+
+    } catch(e){
+      console.error('[ppp] boost error:', e);
+    }
+  });
+})();
+
+// ---------- Menu utilisateur (topbar) ----------
+(function(){
+  const btn = document.getElementById('userMenuBtn');
+  const dd  = document.getElementById('userDropdown');
+  if (!btn || !dd) return;
+
+  function closeMenu(){
+    dd.classList.remove('open');
+    btn.setAttribute('aria-expanded','false');
+  }
+  function toggleMenu(){
+    const isOpen = dd.classList.toggle('open');
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMenu();
+  });
+  document.addEventListener('click', () => closeMenu());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenu();
+  });
+})();
+</script>
+</body></html>
+"""
+
+WET_HTML = """
+
+<!doctype html><html lang='fr'><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wet — Humidité (48h)</title>
+{{ css|safe }}
+<style>
+/* --- Topbar brand styles --- */
+.topbar .brand{
+  color:#2160f3;
+  font-weight:800;
+  text-decoration:none;
+  text-shadow:none;
+}
+.topbar .brand:hover{ color:#64b5f6; }
+
+.topbar .brand.active{
+  color:#79e7ff !important;
+  text-shadow:0 0 12px rgba(187,134,252,.35);
+}
+.topbar .brand.active:hover{ color:#64b5f6 !important; }
+
+.nav-left .brand + .brand { margin-left:14px; }
+
+.topbar-logo {
+  height:22px; margin-left:16px;
+  display:inline-block; vertical-align:middle;
+}
+
+.wet-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
+@media (min-width:900px){ .wet-grid{ grid-template-columns:1fr 1fr; } }
+.wet-daycard{ background:var(--card-bg); border:1px solid var(--card-border); border-radius:16px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+.wet-daytitle{ margin:0 0 10px; text-transform:capitalize; color:var(--text); font-size:16px; }
+.wet-innergrid{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+@media (min-width:700px){ .wet-innergrid{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
+@media (min-width:1000px){ .wet-innergrid{ grid-template-columns:repeat(4, minmax(0,1fr)); } }
+
+.wet-cell{
+  position:relative;
+  background: rgba(255,255,255,.03);
+  border:1px solid var(--card-border);
+  border-radius:12px;
+  padding:28px 14px;
+  min-height:70px;
+  transition: border-color .2s ease, transform .15s ease, background-color .2s ease, opacity .2s ease;
+}
+.wet-cell:hover{ transform: translateY(-2px); border-color: rgba(121,231,255,.25); }
+
+/* Heure en haut-gauche */
+.wet-time{
+  position:absolute; top:8px; left:10px; font-weight:600;
+}
+
+/* CIBLE (humidité misée) — maintenant au CENTRE-GAUCHE */
+.wet-target{
+  position:absolute;
+  left:10px;
+  top:50%;
+  transform: translateY(-50%);
+  font-weight:700;
+  opacity:.95;
+  color:#79e7ff;
+  text-shadow:0 0 8px rgba(121,231,255,.25);
+}
+
+/* Cote éventuelle en bas-droite (si utilisée) */
+.wet-odds{
+  position:absolute; right:10px; bottom:8px;
+  font-weight:700; text-shadow:0 0 12px rgba(187,134,252,.35);
+}
+
+/* Mise en bas-gauche (inchangé) */
+.wet-stake{
+  position:absolute; left:12px; bottom:8px;
+  color:#7ef7c0; font-weight:700;
+}
+
+/* HUMIDITÉ OBSERVÉE — centre-droite */
+.wet-cell .obs-rh{
+  position:absolute; right:6px; top:50%;
+  transform: translateY(-50%);
+  font-size:.9em; color: var(--muted);
+  background: rgba(0,0,0,0.3);
+  padding:1px 4px; border-radius:4px; z-index:1;
+}
+
+/* Édition verrouillée */
+.input-readonly{ opacity:.8; cursor:not-allowed; }
+
+/* Cases grisées (passé) — ta classe existante */
+.wet-cell.disabled{
+  opacity:.35;
+  pointer-events:none;
+  filter:grayscale(.4);
+}
+
+/* Menu utilisateur (inchangé) */
+.user-menu { position: relative; display: inline-block; }
+.user-trigger{
+  background: transparent; border: 0; color: #fff; font-weight: 800;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+}
+.user-trigger .caret{ opacity: .8; font-size: 12px; }
+.user-dropdown{
+  position: absolute; right: 0; top: 120%;
+  background: rgba(13,20,40,.98);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.35);
+  min-width: 180px; padding: 6px; display: none; z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+.user-dropdown.open{ display: block; }
+.user-dropdown .item{
+  display: block; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: 10px;
+  background: transparent; color: #cfe3ff; text-decoration: none;
+  border: 0; cursor: pointer; font-weight: 700;
+}
+.user-dropdown .item:hover{ background: rgba(120,180,255,.12); color: #79e7ff; }
+.user-dropdown .item.disabled{
+  opacity: .5; cursor: default; pointer-events: none;
+}
+
+.wet-cell .obs-rh.fade-in{ opacity:0; animation: fadeIn .4s forwards; }
+@keyframes fadeIn { from{opacity:0; transform:scale(0.9);} to{opacity:1; transform:scale(1);} }
+
+.wet-grid-wrap{ position: relative; }
+#wet-current-arrow{
+  position:absolute; top:-10px; width:0; height:0;
+  border-left:8px solid transparent; border-right:8px solid transparent;
+  border-top:10px solid #16a34a; /* green */
+  display:none; z-index:5;
+}
+
+</style>
+
+</head><body>
+<div class="stars"></div>
+
+<nav>
+  <div class="container topbar">
+    <div class="nav-left">
+      <a class="brand active" href="/wet">Wet</a>
+      <a class="brand" href="/ppp">Pluie Pas Pluie</a>
+    </div>
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box"><span class="solde-label">Solde&nbsp;:</span><span class="solde-value">{{ solde_str }}</span></div>
+      {% endif %}
+    </div>
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <div class="user-menu">
+          <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+            <strong>{{ current_user.username }}</strong>
+            <span class="caret">▾</span>
+          </button>
+          <div class="user-dropdown" id="userDropdown" role="menu">
+            <button class="item disabled" type="button" aria-disabled="true" title="Bientôt">Profil</button>
+            <a class="item" href="/logout">Se déconnecter</a>
+          </div>
+        </div>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+      <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
+         href="{{ url_for('cabine_page') }}"></a>
+    </div>
+  </div>
+</nav>
+
+<div class="container" style="margin-top:16px;">
+  <div class="card">
+    <h2>Wet — Miser sur l’humidité (prochaines 48h)</h2>
+    <p class="muted">Choisissez une heure parmi les 48 prochaines. Vous pariez sur un taux d’humidité cible. Gagnez si l’humidité <strong>∈ [cible−3%, cible+3%]</strong>. Si l’humidité est <strong>exactement</strong> égale à la cible, le gain est doublé.</p>
+    <div class="wet-grid-wrap"><div id="wet-current-arrow" aria-hidden="true"></div><div id="wetGrid" class="wet-grid"></div></div>
+  </div>
+</div>
+
+<div id="wetModal" class="ppp-modal">
+  <div class="ppp-card">
+    <h3 id="wTitle" style="margin:0 0 8px;"></h3>
+    <div id="wExisting" class="muted" style="margin:6px 0; display:none;"></div>
+    <p id="wOddsWrap" style="margin:0 0 8px;"><strong>Cote:</strong> x<span id="wOdds"></span></p>
+    <form method="post" action="/wet" id="wetForm">
+      <input type="hidden" name="slot" id="wSlot">
+      <div class="grid cols-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <div><label>Taux cible (%)</label><input type="number" name="target" id="wTarget" min="0" max="100" step="1" value="80" required></div>
+        <div><label>Montant (pts)</label><input type="number" name="amount" id="wAmount" min="0" step="0.1" value="1.0" required></div>
+        <div style="align-self:end;"><button class="btn primary" type="submit">Miser</button></div>
+      </div>
+      <div class="muted" style="margin-top:8px;">Fenêtre de gain : ±3 points. Exactement égal → gain doublé.</div>
+    </form>
+    <div style="margin-top:12px;display:flex;justify-content:flex-end;">
+      <button type="button" class="btn" id="wCancel">Fermer</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+const stationId = "{{ current_station_id }}";
+const date = "{{ today_str }}";
+
+function parisCurrentHourISO() {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Paris" }));
+  d.setMinutes(0,0,0);
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), da = String(d.getDate()).padStart(2,'0'), h = String(d.getHours()).padStart(2,'0');
+  return `${y}-${m}-${da}T${h}:00:00`;
+}
+
+(function(){
+  const grid   = document.getElementById('wetGrid');
+  const modal  = document.getElementById('wetModal');
+  const wTitle = document.getElementById('wTitle');
+  const wOdds  = document.getElementById('wOdds');
+  const wSlot  = document.getElementById('wSlot');
+  const wTarget= document.getElementById('wTarget');
+  const wCancel= document.getElementById('wCancel');
+
+  function openWetModal(){
+    const m = document.getElementById('wetModal');
+    if(!m) return;
+    m.style.display = 'block';
+    m.classList.add('open');
+    m.setAttribute('aria-hidden','false');
+  }
+  function closeWetModal(){
+    const m = document.getElementById('wetModal');
+    if(!m) return;
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden','true');
+    m.style.display = 'none';
+  }
+  function placeCurrentArrow(){
+    try{
+      const wrap = document.querySelector('.wet-grid-wrap');
+      const arrow = document.getElementById('wet-current-arrow');
+      if(!wrap || !arrow){ return; }
+      const nowCell = document.querySelector('.wet-cell.is-now') 
+                   || document.querySelector('.wet-cell[data-current="1"]');
+      const cells = Array.from(document.querySelectorAll('.wet-cell'));
+      const anchor = nowCell || (cells.length >= 3 ? cells[2] : cells[0]);
+      if(!anchor){ arrow.style.display='none'; return; }
+      const wrapRect = wrap.getBoundingClientRect();
+      const rect = anchor.getBoundingClientRect();
+      const x = (rect.left - wrapRect.left) + (rect.width/2);
+      arrow.style.left = Math.max(0, x - 8) + 'px';
+      arrow.style.display = 'block';
+    }catch(e){ /* no-op */ }
+  }
+  // Re-open/close bindings
+  if (wCancel){ wCancel.setAttribute('type','button'); wCancel.addEventListener('click', (e)=>{ e.preventDefault(); closeWetModal(); }); }
+  window.addEventListener('resize', placeCurrentArrow);
+  // Observe #wetGrid to place arrow once items are added
+  (function(){
+    try{
+      const grid = document.getElementById('wetGrid');
+      if(!grid) return;
+      const obs = new MutationObserver((mut)=>{ if(grid.children.length){ placeCurrentArrow(); obs.disconnect(); } });
+      obs.observe(grid, {childList:true});
+      // fallback call
+      setTimeout(placeCurrentArrow, 800);
+    }catch(e){}
+  })();
+
+  const SLOTS    = {{ slots|tojson|default('[]')|safe }};
+  const BETS_MAP = {{ bets_map|tojson|default('{}')|safe }};
+  const OBS_DATA = {{ obs_data|tojson|default('{}')|safe }};
+
+  const parisNow = new Date(new Date().toLocaleString("en-US", {timeZone:"Europe/Paris"}));
+  parisNow.setMinutes(0,0,0);
+  const cutoff = new Date(parisNow.getTime() + 2*3600*1000);
+  const currentIso = parisCurrentHourISO();
+
+  const daysMap = {};
+  SLOTS.forEach(s => {
+    const dayKey = s.iso.slice(0, 10);
+    if (!daysMap[dayKey]) daysMap[dayKey] = [];
+    daysMap[dayKey].push(s);
+  });
+
+  Object.keys(daysMap).sort().forEach(dayKey => {
+    const daySlots = daysMap[dayKey].sort((a,b)=>a.iso.localeCompare(b.iso));
+    const card = document.createElement('div');
+    card.className = 'wet-daycard';
+    const [yy,mm,dd]=dayKey.split('-').map(Number);
+    const d=new Date(yy,mm-1,dd);
+    card.innerHTML = `<h3 class="wet-daytitle">${d.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'short'})}</h3>`;
+    const inner=document.createElement('div');
+    inner.className='wet-innergrid';
+
+    for (const s of daySlots){
+      const slotDate = new Date(s.iso);
+      const el = document.createElement('div');
+      el.className='wet-cell';
+      el.dataset.iso = s.iso;
+
+      const mine = BETS_MAP[s.iso];
+      const stakedAmt    = (mine && typeof mine.amount !== 'undefined') ? mine.amount : 0;
+      const stakedTarget = (mine && mine.target != null) ? Math.round(mine.target) : null;
+
+      const hourLabel = s.iso.substring(11,13) + "h";
+      const disabled  = slotDate < cutoff && !mine;
+      if (disabled) el.classList.add('disabled');
+
+      el.innerHTML = `
+        <div class="wet-time">${hourLabel}</div>
+        <div class="obs-rh">${s.iso === currentIso ? '⏳' : ''}</div>
+        ${stakedTarget !== null ? `<div class="wet-target">${stakedTarget}%</div>` : ``}
+        <div class="wet-odds">x${Number(s.odds).toFixed(1).replace('.', ',')}</div>
+        ${stakedAmt > 0 ? `<div class="wet-stake">${String(stakedAmt).replace('.', ',')}</div>` : ``}
+      `;
+
+      if (!disabled){
+        el.addEventListener('click', ()=>{
+          wTitle.textContent = "Miser sur " + hourLabel;
+          wOdds.textContent  = Number(s.odds).toFixed(1).replace('.', ',');
+          wSlot.value = s.iso;
+          modal.classList.add('open');
+        });
+      }
+      inner.appendChild(el);
+    }
+
+    // Prefill with OBS_DATA
+    if (OBS_DATA && typeof OBS_DATA === 'object') {
+      for (const [slotIso, payload] of Object.entries(OBS_DATA)) {
+        const span = inner.querySelector(`.wet-cell[data-iso="${slotIso}"] .obs-rh`);
+        if (!span) continue;
+        if (payload && typeof payload.humidity === 'number') {
+          const newContent = Math.round(payload.humidity) + "%";
+          if (span.innerHTML !== newContent) {
+            span.innerHTML = newContent;
+            span.classList.add('fade-in');
+            setTimeout(() => span.classList.remove('fade-in'), 500);
+          }
+        }
+      }
+    }
+
+    card.appendChild(inner);
+    grid.appendChild(card);
+  });
+
+  async function backfillLastHours(n = 3) {
+    if (!stationId) return;
+    const cellsIso = Array.from(document.querySelectorAll('.wet-cell'))
+      .map(c => c.dataset.iso).filter(Boolean).sort();
+    if (cellsIso.length === 0) return;
+    const idx = cellsIso.indexOf(currentIso);
+    let targets = [];
+    if (idx >= 0) {
+      for (let k = idx; k >= 0 && targets.length < n; k--) targets.push(cellsIso[k]);
+    } else {
+      targets = cellsIso.slice(-n);
+    }
+    const params = new URLSearchParams({ station_id: stationId });
+    targets.forEach(iso => params.append('slot', iso));
+    try {
+      const resp = await fetch(`/api/wet/observations?` + params.toString());
+      if (!resp.ok) return;
+      const data = await resp.json();
+      console.log("[WET] API obs (backfill)", data);
+      for (const [slotIso, payload] of Object.entries(data)) {
+        const span = document.querySelector(`.wet-cell[data-iso="${slotIso}"] .obs-rh`);
+        if (!span) continue;
+        const newContent = (payload && typeof payload.humidity === 'number')
+          ? payload.humidity.toFixed(0) + "%"
+          : (slotIso === currentIso ? "⏳" : "");
+        if (span.innerHTML !== newContent) {
+          span.innerHTML = newContent;
+          span.classList.add('fade-in');
+          setTimeout(() => span.classList.remove('fade-in'), 500);
+        }
+      }
+    } catch(e){ console.warn("backfillLastHours failed:", e); }
+  }
+
+  async function refreshHumidityResults() {
+    if (!stationId) return;
+    const span = document.querySelector(`.wet-cell[data-iso="${currentIso}"] .obs-rh`);
+    if (!span) return;
+    const params = new URLSearchParams({ station_id: stationId });
+    params.append('slot', currentIso);
+    try {
+      const resp = await fetch(`/api/wet/observations?` + params.toString());
+      if (!resp.ok) return;
+      const data = await resp.json();
+      console.log("[WET] API obs (refresh)", data);
+      const payload = data[currentIso] ?? null;
+      const newContent = (payload && typeof payload.humidity === 'number')
+        ? payload.humidity.toFixed(0) + "%"
+        : "⏳";
+      if (span.innerHTML !== newContent) {
+        span.innerHTML = newContent;
+        span.classList.add('fade-in');
+        setTimeout(() => span.classList.remove('fade-in'), 500);
+      }
+    } catch(e){ console.warn("refreshHumidityResults failed:", e); }
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    await backfillLastHours(3);
+    await refreshHumidityResults();
+  });
+  setInterval(refreshHumidityResults, 60000);
+
+})();
+
+// ---------- Menu utilisateur (topbar) ----------
+(function(){
+  const btn = document.getElementById('userMenuBtn');
+  const dd  = document.getElementById('userDropdown');
+  if (!btn || !dd) return;
+  function closeMenu(){ dd.classList.remove('open'); btn.setAttribute('aria-expanded','false'); }
+  function toggleMenu(){
+    const isOpen = dd.classList.toggle('open');
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+  document.addEventListener('click', () => closeMenu());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+})();
+</script>
+
+</body></html>
+"""
+
+YOUBET_HTML = """
+<!doctype html><html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>You Bet</title>
+{{ css|safe }}
+<style>
+  :root {
+    --fog1: rgba(255,255,255,.06);
+    --fog2: rgba(255,255,255,.10);
+  }
+  html, body { height:100%; margin:0; background:#0b1020; }
+  .intro-wrap{
+    position:relative; height:100%;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  .fog{
+    position:absolute; inset:0;
+    background:
+      radial-gradient(60% 40% at 20% 30%, var(--fog2), transparent 60%),
+      radial-gradient(50% 35% at 80% 70%, var(--fog1), transparent 60%),
+      radial-gradient(70% 45% at 50% 50%, var(--fog1), transparent 70%);
+    filter: blur(20px);
+    animation: drift 16s linear infinite alternate;
+  }
+  @keyframes drift {
+    from { transform: translate3d(-2%, -2%, 0) scale(1.04); }
+    to   { transform: translate3d( 2%,  2%, 0) scale(1.06); }
+  }
+
+  /* Bigger logo */
+  .logo{
+    position:relative; z-index:1;
+    width:min(520px, 85vw);     /* bigger than before */
+    user-select:none; -webkit-user-drag:none;
+  }
+
+  /* Bigger, higher button */
+  .fallback{
+    position:absolute; bottom:160px;    /* higher than before */
+    left:0; right:0; text-align:center;
+    display:none;
+    z-index:2;
+  }
+  .fallback button{
+    background:#64b5f6;
+    color:#0b1020;
+    border:0;
+    border-radius:18px;
+    padding:18px 32px;
+    font-size:20px;
+    font-weight:800;
+    cursor:pointer;
+    box-shadow:0 10px 34px rgba(187,134,252,.45);
+    transition:transform .12s ease, filter .12s ease;
+  }
+  .fallback button:hover{
+    transform:scale(1.05);
+    filter: brightness(1.05);
+  }
+
+  .hint{
+    position:absolute; bottom:22px; left:0; right:0; text-align:center;
+    font-size:12px; color:#9fb3c8; opacity:.8; z-index:1;
+  }
+  .backlink{
+    position:absolute; bottom:84px; left:0; right:0; text-align:center;
+    z-index:2;
+  }
+  .backlink a{
+    color:#9fb3c8; text-decoration:none; font-weight:700;
+  }
+  .backlink a:hover{ color:#cfe7ff; }  
+</style>
+</head><body>
+<div class="intro-wrap">
+  <div class="fog"></div>
+  <img class="logo" src="{{ url_for('static', filename='img/you_bet.png') }}" alt="You Bet">
+  <div class="fallback"><button id="playBtn">Yes, I'm God</button></div>
+  <div class="backlink"><a id="backLink" href="#">Retour</a></div>
+  <div class="hint">Un instant…</div>
+</div>
+
+<script>
+(function(){
+  // ----- Config -----
+  const MIN_SHOW_MS = 2000;   // minimum time to show this page
+  const MAX_WAIT_MS = 5000;   // hard timeout: go back even if no sound
+  const AUDIO_SRC  = "{{ url_for('static', filename='audio/mise.mp3') }}";
+
+  // read ?back=/ppp or ?next=/ppp (accept both)
+  const sp = new URLSearchParams(location.search);
+  const backUrl = sp.get('back') || sp.get('next') || '/ppp';
+  const backLink = document.getElementById('backLink');
+  if (backLink) backLink.href = backUrl;
+
+  const startTs = performance.now();
+  let finished = false;
+
+  function goBack() {
+    if (finished) return;
+    finished = true;
+    // ensure min duration is respected
+    const elapsed = performance.now() - startTs;
+    const left = Math.max(0, MIN_SHOW_MS - elapsed);
+    setTimeout(() => { window.location.href = backUrl; }, left);
+  }
+
+  // Create audio element (tag form tends to be more consistent than new Audio in Safari)
+  const audio = document.createElement('audio');
+  audio.src = AUDIO_SRC;
+  audio.preload = 'auto';
+  audio.playsInline = true;       // iOS-friendly
+  audio.controls = false;         // hidden
+  audio.style.display = 'none';
+  document.body.appendChild(audio);
+
+  // If autoplay is blocked, show the manual button
+  const fallback = document.querySelector('.fallback');
+  const playBtn  = document.getElementById('playBtn');
+
+  function tryPlay() {
+    // Always reset to start to avoid partial leftovers
+    try { audio.pause(); audio.currentTime = 0; } catch(e) {}
+    return audio.play();
+  }
+
+  // When it ends: go back (respecting MIN_SHOW_MS)
+  audio.addEventListener('ended', goBack, { once:true });
+
+  // Hard timeout: go back even if no audio fired
+  setTimeout(goBack, MAX_WAIT_MS);
+
+  // Attempt autoplay shortly after load (let the page render a bit)
+  setTimeout(() => {
+    tryPlay().then(() => {
+      // Autoplay worked: ensure fallback stays hidden
+      if (fallback) fallback.style.display = 'none';
+    }).catch(() => {
+      // Autoplay blocked → show the button
+      if (fallback) fallback.style.display = 'block';
+    });
+  }, 150);
+
+  // Manual play button
+  if (playBtn) {
+    playBtn.addEventListener('click', () => {
+      tryPlay().then(()=>{
+        // hide button once playing
+        if (fallback) fallback.style.display = 'none';
+      }).catch(()=>{ /* still blocked; keep button visible */ });
+    });
+  }
+})();
+</script>
+</body></html>
+"""
+
+ADMIN_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+{{ css|safe }}<title>Admin</title>
+</head><body>
+<div class="stars"></div>
+<nav>
+  <div class="container topbar">
+    <!-- Left: main links -->
+    <div class="nav-left">
+      <a class="brand" href="/">Humeur</a>
+      <a href="/meteo" style="color:#ffd95e;">Météo</a>
+      {% if current_user.is_authenticated %}
+        <a href="/allocate">Attribuer (initial)</a>
+        <a href="/stake">Remiser</a>
+        {% if current_user.is_admin %}<a href="/admin">Admin</a>{% endif %}
+      {% endif %}
+    </div>
+
+    <!-- Center: Solde -->
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box" title="Points restants Humeur + Météo">
+          <span class="solde-label">Solde&nbsp;:</span>
+          <span class="solde-value">{{ solde_str }}</span>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="nav-right">
+      <a class="btn ppp-btn" href="/ppp" title="Paris — Pluie ou Pas Pluie">Pluie Pas Pluie</a>
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>
+
+    <!-- Right: auth -->
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+<div class='container grid' style='margin-top:16px;'>
+  <div class='card'>
+    <h3>Planifier des valeurs</h3>
+    <form method='post'>
+      <div class='grid cols-2'>
+        <div><label>Date</label><input type='date' name='the_date' required></div>
+        <div><label>Pierre</label><input type='number' step='0.01' min='0' name='pierre_value' required></div>
+        <div><label>Marie</label><input type='number' step='0.01' min='0' name='marie_value' required></div>
+      </div>
+      <div style='margin-top:12px;'><button class='btn primary' type='submit'>Enregistrer / Remplacer</button></div>
+    </form>
+  </div>
+
+  <div class='card'>
+    <h3>Historique publié</h3>
+    <table class='table'>
+      <tr><th>Date</th><th>Pierre</th><th>Marie</th><th>Publié à</th></tr>
+      {% for d in published %}
+        <tr>
+          <td>{{ d.the_date }}</td>
+          <td>{{ d.pierre_value }}</td>
+          <td>{{ d.marie_value }}</td>
+          <td>{{ d.published_at }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan='4'><em>Rien.</em></td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+</body></html>
+"""
+
+METEO_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Météo</title>
+{{ css|safe }}
+<style>
+.meteo-title{ color:#ffd95e; text-shadow:0 0 18px rgba(255,217,94,.25); }
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.14);font-size:12px;color:var(--muted)}
+.forecast-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+@media(max-width:900px){ .forecast-grid{grid-template-columns:repeat(2,1fr)} }
+.tile{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:10px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head><body>
+<div class="stars"></div>
+<nav>
+  <div class="container topbar">
+    <!-- Left: main links -->
+    <div class="nav-left">
+      <a class="brand" href="/">Humeur</a>
+      <a href="/meteo" style="color:#ffd95e;">Météo</a>
+      {% if current_user.is_authenticated %}
+        <a href="/allocate">Attribuer (initial)</a>
+        <a href="/stake">Remiser</a>
+        {% if current_user.is_admin %}<a href="/admin">Admin</a>{% endif %}
+      {% endif %}
+    </div>
+
+    <!-- Center: Solde -->
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box" title="Points restants Humeur + Météo">
+          <span class="solde-label">Solde&nbsp;:</span>
+          <span class="solde-value">{{ solde_str }}</span>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="nav-right">
+      <a class="btn ppp-btn" href="/ppp" title="Paris — Pluie ou Pas Pluie">Pluie Pas Pluie</a>
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+    </div>    
+
+    <!-- Right: auth -->
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <span><strong>{{ current_user.username }}</strong></span>
+        <a href="/logout">Se déconnecter</a>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+      <!-- Logo à droite -->
+      <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" 
+        alt="Meteo God" 
+        class="topbar-logo">
+    </div>         
+  </div>
+</nav>
+
+<div class='container' style='margin-top:16px;'>
+  <div class='card'>
+    <h2 class="meteo-title">Météo — heures cumulées (3 derniers jours)</h2>
+    <form id="cityForm" class="grid" style="grid-template-columns:1fr auto;gap:12px;margin-bottom:10px">
+      <input type="text" id="cityInput" placeholder="Paris, France" value="{{ default_city }}">
+      <button class="btn" type="submit">Afficher</button>
+    </form>
+    <div class="badge" id="cityBadge"></div>
+    <div class='grid' style='margin-top:12px;grid-template-columns:1fr 1fr;gap:12px'>
+      <div class='tile'>
+        <h3 style='margin:0 0 6px'>Derniers 3 jours</h3>
+        <div id="last3"></div>
+      </div>
+      <div class='tile'>
+        <h3 style='margin:0 0 6px'>Prévision 5 jours</h3>
+        <div id="forecast"></div>
+      </div>
+    </div>
+    <div class='tile' style='margin-top:12px'>
+      <h3 style='margin:0 0 6px'>Graphique (heures cumulées)</h3>
+      <div id="chartWrap" style="height:260px"><canvas id="meteoChart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _chart;
+function renderChart(series){
+  const ctx = document.getElementById('meteoChart').getContext('2d');
+  if(_chart) _chart.destroy();
+  _chart = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels: series.labels,
+      datasets:[
+        {label:'Soleil (h)', data: series.sun, tension:0.25, pointRadius:2},
+        {label:'Pluie (h)',  data: series.rain, tension:0.25, pointRadius:2}
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{ legend:{labels:{color:'#e8ecf2'}}, tooltip:{titleColor:'#e8ecf2',bodyColor:'#e8ecf2',backgroundColor:'rgba(17,22,36,.9)'} },
+      scales:{
+        x:{ ticks:{ color:'#a8b0c2' }, grid:{ color:'rgba(255,255,255,.06)'} },
+        y:{ ticks:{ color:'#a8b0c2' }, grid:{ color:'rgba(255,255,255,.06)'} }
+      }
+    }
+  });
+}
+
+async function loadCity(city){
+  const badge = document.getElementById('cityBadge');
+  badge.textContent = 'Chargement…';
+  const t = await fetch(`/api/meteo/today?city=${encodeURIComponent(city)}`).then(r=>r.json());
+  if(t.error){ badge.textContent = 'Ville introuvable'; return; }
+  badge.textContent = `${t.city} — ${t.date}`;
+
+  const f = await fetch(`/api/meteo/forecast5?city=${encodeURIComponent(city)}`).then(r=>r.json());
+  const fc = f.forecast5 || [];
+
+  // Fill last3
+  document.getElementById('last3').innerHTML =
+    `<table class="table">
+       <tr><th>Soleil (3j)</th><td><strong>${t.sun_hours_3d}</strong> h</td></tr>
+       <tr><th>Pluie (3j)</th><td><strong>${t.rain_hours_3d}</strong> h</td></tr>
+     </table>`;
+
+  // Fill forecast list (5 days)
+  document.getElementById('forecast').innerHTML =
+    '<table class="table"><tr><th>Jour</th><th>Soleil (h)</th><th>Pluie (h)</th><th>Min/Max (°C)</th></tr>' +
+    fc.map(d => `<tr><td>${d.date}</td><td>${d.sun_hours}</td><td>${d.rain_hours}</td><td>${d.t_min} / ${d.t_max}</td></tr>`).join('') +
+    '</table>';
+
+  // Build chart series: last3 “Aujourd’hui” then next 5 days predicted
+  const labels = ['Aujourd’hui (3j)'].concat(fc.map(d=>d.date));
+  const sun = [t.sun_hours_3d].concat(fc.map(d=>d.sun_hours));
+  const rain= [t.rain_hours_3d].concat(fc.map(d=>d.rain_hours));
+  renderChart({labels, sun, rain});
+}
+
+document.getElementById('cityForm').addEventListener('submit', (e)=>{
+  e.preventDefault();
+  const city = document.getElementById('cityInput').value.trim();
+  if(city) loadCity(city);
+});
+
+window.addEventListener('DOMContentLoaded', ()=>{
+  const def = document.getElementById('cityInput').value.trim() || 'Paris, France';
+  loadCity(def);
+});
+</script>
+</body></html>
+"""
+
+CARTE_HTML = """
+<!doctype html><html lang='fr'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Carte</title>
+{{ css|safe }}
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+  /* Lien "Carte" vert dans la topbar */
+  .brand-map { color:#30d158; font-weight:800; text-decoration:none; }
+  .brand-map:hover { color:#7ef5a5; }
+  .brand-map.active { text-shadow:0 0 12px rgba(48,209,88,.35); }
+
+  /* Layout carte + panneau */
+  .layout { display:grid; grid-template-columns: 1fr 360px; gap:16px; margin-top:16px; }
+  #worldMap {
+    height: calc(100vh - 120px);
+    min-height: 520px;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  /* Halo futuriste dans un pane Leaflet dédié (.fx-pane) */
+  #worldMap .leaflet-pane.fx-pane .fx-halo{
+    position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(80% 60% at 50% 10%, rgba(33,96,243,.22), transparent 60%),
+      radial-gradient(70% 50% at 50% 100%, rgba(0,255,195,.16), transparent 55%),
+      repeating-linear-gradient(90deg, rgba(120,180,255,.06) 0 1px, transparent 1px 40px);
+    mix-blend-mode: screen; /* se mélange aux tuiles sombres */
+  }
+
+  /* Fond + lisibilité */
+  .leaflet-container { background:#0e1627; filter: brightness(1.18) saturate(1.05) contrast(1.03); }
+
+  /* Fuseaux horaires */
+  .tz-line { opacity:.22; }
+  .tz-line.thick { opacity:.34; }
+
+  /* Panneau latéral (sélection stations) */
+  .panel {
+    background: rgba(18,26,44,.75);
+    border:1px solid rgba(120,180,255,.15);
+    border-radius:16px; padding:14px; backdrop-filter: blur(6px);
+  }
+  .panel h3 { margin: 6px 0 10px; color:#cfe6ff; }
+  .panel label { font-size:14px; color:#9fb5d1; display:block; margin-bottom:6px; }
+  .panel input {
+    width:100%; padding:10px; background:#0e1627;
+    border:1px solid rgba(120,180,255,.25); border-radius:10px; color:#eaf3ff;
+  }
+  .panel .muted { color:#9fb5d1; font-size:12px; margin-top:6px; }
+
+  .list { margin-top:10px; max-height: 50vh; overflow:auto; }
+  .item {
+    display:flex; align-items:center; justify-content:space-between;
+    background:#0e1627; border:1px solid rgba(120,180,255,.15);
+    border-radius:10px; padding:10px; margin-bottom:8px;
+  }
+  .item .lbl { color:#eaf3ff; font-weight:600; margin-right:10px; }
+  .item button {
+    background:#306bd1; color:#041021; border:none; border-radius:10px;
+    padding:8px 12px; font-weight:700; cursor:pointer;
+  }
+  .item button:hover{ filter:brightness(1.05); }
+
+    /* Bouton Partir (plus discret) */
+  .btn-partir {
+    background: #888;      /* gris neutre */
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.50; /* 👈 rend le bouton plus transparent */
+    transition: background 0.2s ease, opacity 0.2s ease;
+  }
+  .btn-partir:hover {
+    background: #666;      /* un peu plus foncé au survol */
+    opacity: 1; /* 👈 survol = bouton pleinement visible */
+  }
+
+    /* Forcer les boutons "Partir" en gris, quoi qu'il arrive */
+  .list .btn-partir,
+  button.btn-partir {
+    background: #888 !important;
+    color: #041021 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s ease, opacity .2s ease;
+  }
+  .list .btn-partir:hover,
+  button.btn-partir:hover {
+    background: #666 !important;
+  }
+
+  /* Drapeau station */
+  .flag { font-size:20px; line-height:1; }
+
+  /* Curseur "main" et survol avec le même effet que les mises */
+  #myStationsList .item .lbl {
+    cursor: pointer;
+    transition: color 0.2s ease, text-shadow 0.2s ease;
+  }
+  #myStationsList .item .lbl:hover {
+    color: #30d158; /* même vert que les mises */
+    text-shadow: 0 0 6px rgba(48, 209, 88, 0.7), 0 0 12px rgba(48, 209, 88, 0.4);
+  }
+
+  /* Aide visuelle sur résultat vide */
+  .empty { color:#9fb5d1; font-size:13px; padding:8px; text-align:center; }
+  .wx{
+  font-size: 22px;
+  filter: drop-shadow(0 0 6px rgba(120,180,255,.35));
+  user-select: none;
+  pointer-events: none; /* le clic reste sur le marqueur */
+  }
+  .user-menu { position: relative; display: inline-block; }
+  .user-trigger{
+    background: transparent; border: 0; color: #fff; font-weight: 800;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .user-trigger .caret{ opacity: .8; font-size: 12px; }
+  .user-dropdown{
+    position: absolute; right: 0; top: 120%;
+    background: rgba(13,20,40,.98);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.35);
+    min-width: 180px; padding: 6px; display: none; z-index: 1000;
+    backdrop-filter: blur(6px);
+  }
+  .user-dropdown.open{ display: block; }
+  .user-dropdown .item{
+    display: block; width: 100%; text-align: left;
+    padding: 10px 12px; border-radius: 10px;
+    background: transparent; color: #cfe3ff; text-decoration: none;
+    border: 0; cursor: pointer; font-weight: 700;
+  }
+  .user-dropdown .item:hover{ background: rgba(120,180,255,.12); color: #79e7ff; }
+  .user-dropdown .item.disabled{
+    opacity: .5; cursor: default; pointer-events: none;
+  }
+</style>
+</head><body>
+<div class="stars"></div>
+
+<nav>
+  <div class="container topbar">
+    <div class="nav-left">
+      <a class="brand" href="/wet" style="color:#2160f3;">Wet</a>
+      <a class="brand" href="/ppp">Pluie Pas Pluie</a>
+    </div>
+    <div class="nav-center">
+      {% if current_user.is_authenticated and solde_str %}
+        <div class="solde-box">
+          <span class="solde-label">Solde&nbsp;:</span>
+          <span class="solde-value">{{ solde_str }}</span>
+        </div>
+      {% endif %}
+    </div>
+    <div class="nav-right">
+      {% if current_user.is_authenticated %}
+        <div class="user-menu">
+          <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+            <strong>{{ current_user.username }}</strong>
+            <span class="caret">▾</span>
+          </button>
+          <div class="user-dropdown" id="userDropdown" role="menu">
+            <a class="item"
+               href="{{ url_for('cabine_page') }}">Profil</a>
+            <a class="item" href="/logout">Se déconnecter</a>
+          </div>
+        </div>
+      {% else %}
+        <a href="/register">Créer un compte</a>
+        <a href="/login">Se connecter</a>
+      {% endif %}
+      <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      <span id="boltTool" class="bolt-tool" draggable="false" title="Éclair x5" style="opacity:.7;cursor:default;">⚡</span>
+      <a class="brand-map active" href="/carte" title="Carte">🗺️</a>
+      <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
+         href="{{ url_for('cabine_page') }}"></a>
+      <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
+         href="{{ url_for('trade_page') }}">🤝</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container layout">
+  <div id="worldMap"></div>
+
+  <aside class="panel">
+    <h3>Ajouter une station météo</h3>
+    <label for="q">Ville (France) ou n° de département</label>
+    <input id="q" type="text" placeholder="Ex: Annecy ou 74" autocomplete="off">
+    <div class="muted">Saisissez au moins 2 caractères pour lancer la recherche.</div>
+
+    <!-- Résultats de recherche -->
+    <div class="list" id="stationList">
+      <div class="empty">Aucun résultat pour l’instant…</div>
+    </div>
+
+    <!-- Vos villes sélectionnées -->
+    <div class="selbox" style="margin-top:16px;">
+      <div class="selbox-title">Vos villes</div>
+      <div id="myStationsList" class="list">
+        <div class="empty">Aucune ville pour l’instant.</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  // ----------------- MAP + HALO + TUILES (inchangé) -----------------
+  const map = L.map('worldMap', {
+    worldCopyJump: true, zoomControl: true, scrollWheelZoom: true, attributionControl: true
+  }).setView([46.5, 2.5], 5);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',{
+    subdomains:'abcd', maxZoom:19, opacity:0.95,
+    attribution:'&copy; <a href="https://www.openstreetmap.org/">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+  }).addTo(map);
+
+  const fxPane = map.createPane('fx'); fxPane.style.zIndex = 350; fxPane.style.pointerEvents='none';
+  L.DomUtil.create('div','fx-halo',fxPane);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
+    {subdomains:'abcd', maxZoom:19, opacity:.96, pane:'overlayPane'}).addTo(map);
+
+  // (fuseaux etc… conservés si tu les avais)
+
+  // --- ÉTAT global sûr (évite ReferenceError si déjà défini ailleurs) ---
+  window._markers    = window._markers    || new Map();  // id -> Leaflet marker
+  window._myStations = window._myStations || new Map();  // id -> {id,label,lat,lon}
+  const markers    = window._markers;
+  const myStations = window._myStations;
+
+  // --- helpers ---
+  function escapeHtml(str){
+    return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+  function normalizeStation(s){
+    // id tolère id/icao/code/station_id
+    const id   = s.id || s.icao || s.code || s.station_id;
+
+    // Essaie d’extraire la ville proprement
+    let city = s.city || s.ville || null;
+    // Si pas de champ city, tente de la déduire du label "Nom — Ville (dept)"
+    if (!city && typeof s.label === 'string') {
+      const parts = s.label.split('—');
+      if (parts.length > 1) {
+        city = parts[1].trim().replace(/\\(.*\\)$/, '').trim() || null;
+      }
+    }
+
+    // Label lisible
+    const name  = s.name || '';
+    const label = s.label || (name && city ? `${name} — ${city}` : (city || name || id));
+
+    // Coordonnées
+    const lat = (typeof s.lat === 'number') ? s.lat : (s.latitude ?? null);
+    const lon = (typeof s.lon === 'number') ? s.lon : (s.longitude ?? null);
+
+    return id ? { id, city, label, lat, lon } : null;
+  }
+
+  async function emojiForCity(city){
+    if (!city) return '❓';
+    try{
+      const r = await fetch('/api/meteo/today?city=' + encodeURIComponent(city + ', France'));
+      if (!r.ok) return '❓';
+      const data = await r.json();
+      let isRain = false;
+      if (data.pop != null){
+        let pop = +data.pop; if (pop > 1) pop /= 100;
+        isRain = pop >= 0.45;
+      } else {
+        isRain = (+data.rain_hours >= 4) || (+data.code >= 60);
+      }
+      return isRain ? '💧' : '☀️';
+    } catch(e){
+      console.warn('emojiForCity error', e);
+      return '❓';
+    }
+  }  
+
+  // --- marqueurs carte ---
+  function addWeatherMarker(s){
+    if (!s || !s.lat || !s.lon) return;
+    if (markers.has(s.id)) return;
+
+    // Icône provisoire en attendant la réponse API
+    const icon = L.divIcon({
+      html: '<span class="wx">…</span>',
+      className: '',
+      iconSize: [24, 24],
+      iconAnchor: [12, 16]
+    });
+
+    const m = L.marker([s.lat, s.lon], { icon, title: s.label || s.id }).addTo(map);
+    m.on('click', () => window.location.href = '/ppp/' + encodeURIComponent(s.id));
+    markers.set(s.id, m);
+
+    // Met à jour l’emoji depuis l’API
+    updateWeatherIcon(s.id, s.city);
+  }
+
+  async function updateWeatherIcon(id, city){
+    const m = markers.get(id);
+    if (!m) return;
+    const emoji = await emojiForCity(city);
+    const el = document.createElement('div');
+    el.innerHTML = `<span class="wx">${emoji}</span>`;
+    const newIcon = L.divIcon({ html: el.innerHTML, className: '', iconSize:[24,24], iconAnchor:[12,16] });
+    m.setIcon(newIcon);
+  }
+  function removeFlagMarker(id){
+    const m = markers.get(id);
+    if (m){ map.removeLayer(m); markers.delete(id); }
+  }
+
+  // ----------------- Rendu de la liste de raccourcis -----------------
+  const myList = document.getElementById('myStationsList');
+
+  function renderSelectedList(){
+    if (!myList) return;
+    const arr = Array.from(myStations.values()).sort((a,b)=> (a.label||'').localeCompare(b.label||''));
+    if (!arr.length){
+      myList.innerHTML = '<div class="empty">Aucune ville pour l’instant.</div>';
+      return;
+    }
+    myList.innerHTML = '';
+    for (const s of arr){
+      const row = document.createElement('div');
+      row.className = 'item';
+      row.innerHTML = `
+        <div class="lbl" title="Ouvrir le calendrier">${escapeHtml(s.label || s.id)}</div>
+        <button class="btn-partir" type="button" title="Retirer" data-id="${s.id}">Partir</button>
+      `;
+      row.querySelector('.lbl').addEventListener('click', () => {
+        window.location.href = '/ppp/' + encodeURIComponent(s.id);
+      });
+      row.querySelector('.btn-partir').addEventListener('click', async () => {
+        try{
+          const r = await fetch('/api/my_stations/' + encodeURIComponent(s.id), { method:'DELETE' });
+          if (!r.ok) console.error('DELETE /api/my_stations failed', r.status);
+          myStations.delete(s.id);
+          removeFlagMarker(s.id);
+          renderSelectedList();
+        }catch(e){ console.error(e); }
+      });
+      myList.appendChild(row);
+    }
+  }
+
+  // ----------------- Charger mes stations persistées -----------------
+  fetch('/api/my_stations')
+    .then(r => r.ok ? r.json() : {stations:[]})
+    .then(json => {
+      const arr = Array.isArray(json.stations) ? json.stations : [];
+      arr.forEach(raw => {
+        const s = normalizeStation(raw);
+        if (!s){ console.warn('station invalide côté /api/my_stations:', raw); return; }
+        myStations.set(s.id, s);
+        addWeatherMarker(s);
+      });
+      renderSelectedList();
+    })
+    .catch(e => console.error('/api/my_stations error', e));
+
+  // ----------------- Recherche stations -----------------
+  const q    = document.getElementById('q');
+  const list = document.getElementById('stationList');
+  let debounce;
+
+  q.addEventListener('input', () => {
+    clearTimeout(debounce);
+    const val = (q.value || '').trim();
+    if (val.length < 2){
+      list.innerHTML = '<div class="empty">Saisissez au moins 2 caractères…</div>';
+      return;
+    }
+    debounce = setTimeout(() => searchStations(val), 220);
+  });
+
+  async function searchStations(term){
+    try{
+      const r = await fetch('/api/stations?q=' + encodeURIComponent(term));
+      const json = await r.json();
+      const items = Array.isArray(json.stations) ? json.stations : (Array.isArray(json.items) ? json.items : []);
+      renderResults(items);
+    }catch(e){
+      console.error('stations search error', e);
+      list.innerHTML = '<div class="empty">Erreur de recherche.</div>';
+    }
+  }
+
+  function renderResults(items){
+    list.innerHTML = '';
+    if (!items.length){
+      list.innerHTML = '<div class="empty">Aucun résultat.</div>';
+      return;
+    }
+    items.forEach(raw => {
+      const s = normalizeStation(raw);
+      if (!s){ console.warn('station invalide côté /api/stations:', raw); return; }
+      const added = myStations.has(s.id);
+
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.innerHTML = `
+        <div class="lbl">${escapeHtml(s.label)}</div>
+        ${added
+          ? `<button class="btn-partir" type="button" data-id="${s.id}">Partir</button>`
+          : `<button class="btn" type="button" data-id="${s.id}">Gérer</button>`}
+      `;
+      const btn = el.querySelector('button');
+
+      // ouvrir le calendrier au clic sur le label
+      el.querySelector('.lbl').addEventListener('click', () => {
+        window.location.href = '/ppp/' + encodeURIComponent(s.id);
+      });
+
+      if (!added){
+        // --- Gérer -> ajoute la station ---
+        btn.addEventListener('click', async () => {
+          try{
+            const r = await fetch('/api/my_stations', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ id:s.id, label:s.label, lat:s.lat, lon:s.lon })
+            });
+            if (!r.ok) { console.error('POST /api/my_stations failed', r.status); return; }
+            myStations.set(s.id, s);
+            addWeatherMarker(s);
+            // bascule visuelle immédiate
+            btn.textContent = 'Partir';
+            btn.className = 'btn-partir';
+            renderSelectedList();
+            if (s.lat && s.lon) map.flyTo([s.lat, s.lon], 9, {duration:0.6});
+          }catch(e){ console.error(e); }
+        });
+      } else {
+        // --- Partir -> retire la station ---
+        btn.addEventListener('click', async () => {
+          try{
+            const r = await fetch('/api/my_stations/' + encodeURIComponent(s.id), { method:'DELETE' });
+            if (!r.ok) console.error('DELETE /api/my_stations failed', r.status);
+          }catch(e){ console.error(e); }
+          myStations.delete(s.id);
+          removeFlagMarker(s.id);
+          btn.textContent = 'Gérer';
+          btn.className = 'btn';
+          renderSelectedList();
+        });
+      }
+
+      list.appendChild(el);
+    });
+  }
+})();
+// ---------- Menu utilisateur (topbar) ----------
+(function(){
+  const btn = document.getElementById('userMenuBtn');
+  const dd  = document.getElementById('userDropdown');
+  if (!btn || !dd) return;
+
+  function closeMenu(){
+    dd.classList.remove('open');
+    btn.setAttribute('aria-expanded','false');
+  }
+  function toggleMenu(){
+    const isOpen = dd.classList.toggle('open');
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMenu();
+  });
+  document.addEventListener('click', () => closeMenu());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenu();
+  });
+})();
+</script>
+</body></html>
+"""
+
+# -----------------------------------------------------------------------------
+# Routes publiques API/UI
+# -----------------------------------------------------------------------------
+@app.route('/')
+def index():
+    return redirect(url_for('intro'))
+
+@app.route('/api/moods')
+def api_moods():
+    rows = DailyMood.query.order_by(DailyMood.the_date.asc()).all()
+    return jsonify([
+        { 'date': r.the_date.isoformat(), 'pierre': r.pierre_value, 'marie': r.marie_value }
+        for r in rows
+    ])
+
+@app.route('/api/today')
+def api_today():
+    d = today_paris()
+    r = last_published_on_or_before(d)
+    if not r:
+        return jsonify({})
+    return jsonify({
+        'date': r.the_date.isoformat(),
+        'pierre': r.pierre_value,
+        'marie': r.marie_value,
+        'published_at': r.published_at.astimezone(APP_TZ).strftime('%Y-%m-%d %H:%M'),
+        'note': "Valeur du jour indisponible — utilisation de la dernière valeur publiée"
+                if r.the_date != d else "Valeur publiée aujourd'hui"
+    })
+
+@app.route('/api/me')
+@login_required
+def api_me():
+    positions = Position.query.filter_by(user_id=current_user.id, status='ACTIVE').all()
+    return jsonify({
+        'bal_pierre': float(current_user.bal_pierre or 0.0),
+        'bal_marie': float(current_user.bal_marie or 0.0),
+        'positions': [
+            {
+                'id': p.id, 'asset': p.asset, 'principal_points': p.principal_points,
+                'start_value': p.start_value, 'start_date': p.start_date.isoformat(),
+                'maturity_date': p.maturity_date.isoformat(), 'status': p.status,
+            } for p in positions
+        ]
+    })
+
+@app.route('/api/meteo/today')
+def api_meteo_today():
+    city = (request.args.get("city") or "").strip()
+    refresh = request.args.get("refresh") == "1"
+    if not city:
+        return jsonify({"error":"city required"}), 400
+    d = today_paris()
+    snap = get_city_snapshot(city, d, force_refresh=refresh)  # <-- add param
+    if not snap:
+        return jsonify({"error":"city not found"}), 404
+    return jsonify({
+        "city": city,
+        "date": d.isoformat(),
+        "sun_hours_3d": snap.sun_hours_3d,
+        "rain_hours_3d": snap.rain_hours_3d,
+        "lat": snap.lat, "lon": snap.lon
+    })
+
+@app.route('/api/meteo/forecast5')
+def api_meteo_forecast5():
+    city = (request.args.get("city") or "").strip()
+    refresh = request.args.get("refresh") == "1"
+    if not city:
+        return jsonify({"error": "city required"}), 400
+
+    d = today_paris()
+    snap = get_city_snapshot(city, d, force_refresh=refresh)
+    if not snap:
+        return jsonify({"error": "city not found"}), 404
+
+    j = json.loads(snap.forecast_json)
+
+    #  guard against list vs dict
+    if isinstance(j, list):
+        j = {"forecast5": j}
+
+    return jsonify({"city": city, **j})
+
+@app.route('/meteo')
+def meteo():
+    flash("La section Météo a été retirée. Tout se passe désormais dans « Pluie Pas Pluie ».")
+    return redirect(url_for('ppp'))
+
+@app.route('/intro')
+def intro():
+    return render_template_string(INTRO_HTML, css=BASE_CSS)
+
+@app.route('/youbet')
+def you_bet():
+    back = request.args.get('back') or url_for('ppp')
+    return render_template_string(YOUBET_HTML, css=BASE_CSS, back=back)
+
+# -----------------------------------------------------------------------------
+# Auth minimal
+# -----------------------------------------------------------------------------
+@app.route('/register', methods=['GET','POST'])
+def register():
+    if request.method == 'GET':
+        body = """
+        <form method=post>
+          <label>Pseudo</label><input name=username maxlength=40 required>
+          <label>Email</label><input type=email name=email required>
+          <label>Mot de passe</label><input type=password name=password required>
+          <div style='margin-top:12px;'><button class='btn primary'>Créer le compte</button></div>
+        </form>"""
+        return render(AUTH_HTML, css=BASE_CSS, title='Créer un compte', body=body)
+    from sqlalchemy import or_
+    username = (request.form.get('username') or '').strip()
+    email = (request.form.get('email') or '').strip().lower()
+    password = (request.form.get('password') or '').strip()
+    try:
+        validate_email(email)
+    except EmailNotValidError:
+        flash('Email invalide.')
+        return redirect(url_for('register'))
+    if User.query.filter(or_(User.username==username, User.email==email)).first():
+        flash('Pseudo ou email déjà pris.')
+        return redirect(url_for('register'))
+    u = User(username=username, email=email, pw_hash=generate_password_hash(password))
+    db.session.add(u); db.session.commit()
+    login_user(u)
+    flash("Compte créé (mode démo).")
+    return redirect(url_for('ppp'))
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if request.method == 'GET':
+        body = """
+        <form method=post>
+          <label>Email</label><input type=email name=email required>
+          <label>Mot de passe</label><input type=password name=password required>
+          <div style='margin-top:12px;'><button class='btn primary'>Se connecter</button></div>
+        </form>"""
+        return render(AUTH_HTML, css=BASE_CSS, title='Se connecter', body=body)
+    email = (request.form.get('email') or '').strip().lower()
+    pw = (request.form.get('password') or '').strip()
+    u = User.query.filter_by(email=email).first()
+    if not u or not check_password_hash(u.pw_hash, pw):
+        flash('Identifiants invalides.')
+        return redirect(url_for('login'))
+    login_user(u)
+    return redirect(url_for('index'))
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user(); return redirect(url_for('index'))
+
+# -----------------------------------------------------------------------------
+# Allocation initiale + création de positions avec échéance
+# -----------------------------------------------------------------------------
+MIN_WEEKS = 3
+MAX_MONTHS = 6
+
+def clamp_maturity(start: date, weeks: int) -> date:
+    weeks = max(MIN_WEEKS, min(weeks, MAX_MONTHS*4))
+    return start + timedelta(weeks=weeks)
+
+@app.route('/allocate', methods=['GET','POST'])
+@login_required
+def allocate():
+    flash("La section « Attribuer (initial) » a été retirée. Utilisez « Pluie Pas Pluie ».")
+    return redirect(url_for('ppp'))
+
+# -----------------------------------------------------------------------------
+# Remiser (créer de nouvelles positions depuis les soldes libres)
+# -----------------------------------------------------------------------------
+@app.route('/stake', methods=['GET','POST'])
+@login_required
+def stake():
+    flash("La section « Remiser » a été retirée. Utilisez « Pluie Pas Pluie ».")
+    return redirect(url_for('ppp'))
+
+from datetime import datetime, timedelta
+from flask_login import login_required, current_user
+
+def paris_now():
+    # If you already have a tz-aware helper, use it. Otherwise:
+    # We approximate by taking server now and formatting as Europe/Paris by API/JS elsewhere.
+    # For slot validation we only need date+hour granularity.
+    return datetime.now(timezone.utc)  # keep simple; your JS aligns display; adjust if you have tzinfo helper
+
+def paris_floor_to_hour(dt: datetime) -> datetime:
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+def station_by_id(sid):
+    for s in load_stations():
+        if s["id"] == sid:
+            return s
+    return None
+
+@app.route('/ppp', methods=['GET','POST'])
+@app.route('/ppp/<station_id>', methods=['GET','POST'])
+@login_required
+def ppp(station_id=None):
+    # --------- contexte (ville & scope station) ----------
+    if station_id:
+        S = station_by_id(station_id)
+        if not S:
+            flash("Station introuvable.")
+            return redirect(url_for('carte'))
+        city_label = f"{S['city']}, France"
+        scope_station_id = S["id"]
+        page_title = f"{S['city']} — Pluie ou Pas Pluie"
+    else:
+        city_label = "Paris, France"
+        scope_station_id = None
+        page_title = "Paris — Pluie ou Pas Pluie"
+
+    def _ppp_url():
+        return url_for('ppp', station_id=scope_station_id) if scope_station_id else url_for('ppp')    
+
+    # ------------------ POST: créer une mise ------------------
+    if request.method == 'POST':
+        try:
+            target_str = (request.form.get('date') or '').strip()
+            choice     = (request.form.get('choice') or '').strip().upper()
+            amount     = round(float(request.form.get('amount') or 0), 2)
+        except Exception:
+            flash("Entrées invalides.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        if not target_str:
+            flash("Cliquez sur une case du calendrier pour choisir la date.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        if choice not in ('PLUIE', 'PAS_PLUIE') or amount <= 0:
+            flash("Choix ou montant invalides.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        # parse date choisie
+        try:
+            y, m, d = [int(x) for x in target_str.split('-')]
+            target = date(y, m, d)
+        except Exception:
+            flash("Date invalide.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        # validations métier (garde tes helpers existants)
+        today = today_paris_date()  # ta fonction existante
+        ok, msg, offset, odds = ppp_validate_can_bet(target, today)  # ta fonction existante
+        if not ok:
+            flash(msg or "Mise impossible pour ce jour.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        # empêcher paris contradictoires le même jour pour le même scope
+        existing = (
+            PPPBet.query
+            .filter(
+                PPPBet.user_id == current_user.id,
+                PPPBet.bet_date == target,
+                PPPBet.status == 'ACTIVE',
+                PPPBet.station_id == scope_station_id
+            )
+            .order_by(PPPBet.id.asc())
+            .all()
+        )
+        if existing and existing[0].choice != choice:
+            flash(f"Vous avez déjà misé « {existing[0].choice.replace('_',' ')} » pour ce jour.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        # budget
+        grem = remaining_points(current_user)  # ton helper
+        if amount > grem + 1e-6:
+            flash(f"Budget insuffisant. Points restants : {grem:.3f}.")
+            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+
+        # insertion
+        db.session.add(PPPBet(
+            user_id=current_user.id,
+            bet_date=target,
+            choice=choice,
+            amount=amount,
+            odds=float(odds),         # cote initiale (sans boost) renvoyée par ton helper
+            status='ACTIVE',
+            station_id=scope_station_id
+        ))
+        db.session.commit()
+
+        flash(f"Mise enregistrée pour le {target.isoformat()} — {choice.replace('_',' ')} à x{odds:.1f}.")
+
+        # support AJAX si tu l'utilises
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({"ok": True})
+
+        return redirect(url_for('you_bet', back=url_for('ppp', station_id=station_id) if station_id else url_for('ppp')))
+
+    # ------------------ GET: afficher la page ------------------
+    solde_str = format_points_fr(remaining_points(current_user))
+    bets_map = {}
+
+    rows_q = PPPBet.query.filter(
+        PPPBet.user_id == current_user.id,
+        PPPBet.status == 'ACTIVE',
+        PPPBet.station_id == scope_station_id
+    )
+
+    # PPP doit ignorer les bets verrouillés (mis en vente)
+    if hasattr(PPPBet, "locked_for_trade"):
+        rows_q = rows_q.filter(PPPBet.locked_for_trade == False)
+
+    rows = rows_q.order_by(PPPBet.bet_date.asc(), PPPBet.id.asc()).all()
+    for r in rows:
+        key = r.bet_date.isoformat()
+        entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
+        entry["amount"] += float(r.amount or 0.0)
+        entry["choice"] = r.choice
+        try:
+            when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
+        except Exception:
+            when_iso = key + "T00:00:00"
+        entry["bets"].append({
+            "when": when_iso,
+            "amount": float(r.amount or 0.0),
+            "odds": float(r.odds or 1.0),
+        })
+        bets_map[key] = entry
+
+    # Boosts groupés par jour pour CE scope
+    boosts_map = {}
+    res = db.session.execute(
+        text("""
+          SELECT substr(bet_date,1,10) AS d, SUM(COALESCE(value,0)) AS total
+          FROM ppp_boosts
+          WHERE user_id = :uid
+            AND (
+              (:sid IS NULL AND station_id IS NULL)
+              OR station_id = :sid
+            )
+          GROUP BY d
+        """),
+        {"uid": current_user.id, "sid": scope_station_id}
+    )
+    for d, total in res:
+        boosts_map[str(d)] = float(total or 0.0)
+
+    return render_template_string(
+        PPP_HTML.replace("Paris — Pluie ou Pas Pluie", page_title),
+        css=BASE_CSS,
+        solde_str=solde_str,
+        bets_map=bets_map,
+        boosts_map=boosts_map,
+        city_label=city_label,
+        station_id=scope_station_id  # pour que le JS puisse l'envoyer lors des boosts
+    )
+
+# --- WET: 48h humidity betting ----------------------------------------------
+@app.route('/wet', methods=['GET', 'POST'])
+@login_required
+def wet():
+    # ---------- POST: enregistrement d'une mise ----------
+    if request.method == 'POST':
+        try:
+            slot_iso   = (request.form.get('slot') or '').strip()
+            target_pct = int(request.form.get('target') or 0)
+            amount     = float(request.form.get('amount') or 0)
+        except Exception:
+            flash("Entrées invalides.")
+            return redirect(url_for('wet'))
+
+        if not slot_iso:
+            flash("Heure manquante.")
+            return redirect(url_for('wet'))
+        if target_pct < 0 or target_pct > 100 or amount <= 0:
+            flash("Valeurs invalides.")
+            return redirect(url_for('wet'))
+
+        # Parse
+        try:
+            slot_dt = datetime.fromisoformat(slot_iso)  # naive local hour as per your model
+        except Exception:
+            flash("Créneau invalide.")
+            return redirect(url_for('wet'))
+
+        # Paris cutoff: current hour (floor) + 2h
+        now_paris = paris_now()
+        hour0     = now_paris.replace(minute=0, second=0, microsecond=0)
+        cutoff    = hour0 + timedelta(hours=2)
+        if slot_dt < cutoff.replace(tzinfo=None):
+            flash(f"Vous pouvez miser à partir de {cutoff.strftime('%Hh')} (heure de Paris).")
+            return redirect(url_for('wet'))
+
+        # Budget
+        u   = db.session.get(User, current_user.id)
+        rem = remaining_points(u)
+        if amount > rem + 1e-9:
+            flash(f"Budget insuffisant. Points restants : {rem:.2f}")
+            return redirect(url_for('wet'))
+
+        # Interdire de changer la cible si une mise existe déjà pour ce slot
+        existing = WetBet.query.filter_by(
+            user_id=current_user.id,
+            slot_dt=slot_dt,
+            status='ACTIVE'
+        ).first()
+        if existing and abs(existing.target_pct - target_pct) > 1e-6:
+            flash(
+                f"Vous avez déjà misé sur {existing.target_pct:.0f}% pour ce créneau. "
+                "Vous pouvez ajouter du montant sur la même cible, mais pas la changer."
+            )
+            return redirect(url_for('wet'))
+
+        # Guard against past (keep the same naive-Paris style as slot_dt)
+        now_paris_aware = datetime.now(ZoneInfo("Europe/Paris"))
+        now_paris_naive = now_paris_aware.replace(tzinfo=None)
+
+        if slot_dt <= now_paris_naive:
+            flash("Impossible de miser sur une heure passée.")
+            return redirect(url_for('wet'))
+
+        # Cote simple: augmente légèrement avec l’horizon (1.2 .. 3.0)
+        hours_ahead = max(0.0, (slot_dt - now_paris_naive).total_seconds() / 3600.0)
+        odds = max(1.2, min(3.0, 1.2 + 0.02 * hours_ahead))
+
+        # Enregistrer
+        db.session.add(WetBet(
+            user_id=current_user.id,
+            slot_dt=slot_dt,
+            target_pct=target_pct,
+            amount=round(amount, 6),
+            odds=float(odds),
+            status='ACTIVE'
+        ))
+        db.session.commit()
+
+        flash(f"Mise Wet enregistrée — {slot_iso}, cible {target_pct}%, {amount:.2f} pts (x{odds:.1f}).")
+
+        # AJAX short-circuit
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({"ok": True})
+
+        # Redirect to "You Bet" splash, then back to Wet
+        return redirect(url_for('you_bet', back=url_for('wet')))
+
+    # ---------- GET ----------
+    # Safely try to resolve due bets (don’t break the page if resolver fails)
+    try:
+        resolve_due_wet_bets(current_user)
+    except Exception as e:
+        app.logger.warning("resolve_due_wet_bets skipped: %s", e)
+
+    solde_str = format_points_fr(remaining_points(current_user))
+
+    # Build future 48h slots (Paris hours)
+    now_paris = paris_now()
+    hour0     = now_paris.replace(minute=0, second=0, microsecond=0)
+    cutoff    = hour0 + timedelta(hours=2)
+
+    slots = []
+    for i in range(48):
+        dt = hour0 + timedelta(hours=i)
+        slots.append({
+            "iso": dt.replace(tzinfo=None).isoformat(),
+            "label": dt.strftime("%a %d %Hh"),
+            "odds": 2.0,
+        })
+
+    # Past/resolved tiles (last 28h, not dismissed)
+    cutoff_resolved = datetime.now(timezone.utc) - timedelta(hours=28)
+    resolved = (WetBet.query
+        .filter(WetBet.user_id == current_user.id,
+                WetBet.status == 'RESOLVED',
+                WetBet.slot_dt >= cutoff_resolved,
+                WetBet.dismissed_at.is_(None))
+        .all())
+
+    past_tiles = []
+    for r in resolved:
+        if r.outcome == 'EXACT':
+            cls = 'past-exact'
+        elif r.outcome == 'WIN':
+            cls = 'past-win'
+        else:
+            cls = 'past-lose'
+        past_tiles.append({
+            "iso": r.slot_dt.isoformat(),
+            "label": r.slot_dt.strftime("%a %d %Hh"),
+            "odds": float(r.odds or 1.0),
+            "amount": float(r.amount or 0.0),
+            "target": int(r.target_pct or 0),
+            "observed": (int(r.observed_pct) if r.observed_pct is not None else None),
+            "payout": float(r.payout or 0.0),
+            "klass": cls,
+        })
+
+    # Active stakes map for display
+    rows = (WetBet.query
+        .filter(WetBet.user_id == current_user.id, WetBet.status == 'ACTIVE')
+        .with_entities(WetBet.slot_dt, WetBet.target_pct, db.func.sum(WetBet.amount))
+        .group_by(WetBet.slot_dt, WetBet.target_pct)
+        .all())
+
+    bets_map = {}
+    for slot_dt, target_pct, total_amt in rows:
+        key = slot_dt.isoformat()
+        bets_map[key] = {"target": float(target_pct or 0.0), "amount": float(total_amt or 0.0)}
+
+    try:
+        today_utc0 = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        has_today = (HumidityObservation.query
+                     .filter(HumidityObservation.station_id == "cdg_07157",
+                             HumidityObservation.obs_time >= today_utc0)
+                     .first() is not None)
+        if not has_today:
+            app.logger.info("No obs for today -> ingest Infoclimat CDG")
+            ingest_infoclimat_cdg("cdg_07157")
+    except Exception as e:
+        app.logger.warning("Auto-ingest skipped: %s", e)    
+
+    # Build obs_data from HumidityObservation for the slots and current station
+    current_station_id = request.args.get("station_id") or getattr(current_user, "default_station_id", None) or "cdg_07157"
+    obs_data = {}
+    try:
+        tz_paris = ZoneInfo("Europe/Paris")
+        for s in slots:
+            slot_iso = s["iso"]
+            slot_dt = dtparse.parse(slot_iso)
+            if slot_dt.tzinfo is None:
+                slot_dt = slot_dt.replace(tzinfo=tz_paris)
+            slot_utc = slot_dt.astimezone(timezone.utc)
+            obs = (HumidityObservation.query
+                   .filter_by(station_id=current_station_id)
+                   .filter(HumidityObservation.obs_time >= slot_utc)
+                   .order_by(HumidityObservation.obs_time.asc())
+                   .first())
+            if obs:
+                obs_data[slot_iso] = {"humidity": float(obs.humidity), "obs_time": obs.obs_time.isoformat()}
+    except Exception as e:
+        app.logger.warning("obs_data build skipped: %s", e)
+        obs_data = {}
+
+    return render_template_string(
+        WET_HTML,
+        css=BASE_CSS,
+        solde_str=solde_str,
+        slots=slots,
+        bets_map=bets_map,
+        past_tiles=past_tiles,
+        obs_data=obs_data,
+        today_str=date.today().isoformat(),
+        current_station_id=(request.args.get('station_id') or getattr(current_user, 'default_station_id', None) or 'cdg_07157'),   # station courante
+    )
+
+@app.route('/wet/dismiss', methods=['POST'])
+@login_required
+def wet_dismiss():
+    iso = (request.form.get('slot') or '').strip()
+    if not iso:
+        return jsonify({"ok": False, "err": "slot missing"}), 400
+    try:
+        dt = datetime.fromisoformat(iso)
+    except Exception:
+        return jsonify({"ok": False, "err": "bad iso"}), 400
+
+    b = (WetBet.query
+         .filter_by(user_id=current_user.id, slot_dt=dt)
+         .first())
+    if not b:
+        return jsonify({"ok": False, "err": "not found"}), 404
+
+    b.dismissed_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+@app.delete("/api/my_stations/<sid>")
+@login_required
+def delete_my_station(sid):
+    """
+    Retire l'association user->station (📅) et RÉINITIALISE le calendrier
+    de cette station pour cet utilisateur (supprime ses mises & boosts).
+    On NE supprime PAS la station du catalogue.
+    """
+    uid = current_user.id
+    try:
+        # 1) Enlever l'association (le drapeau n’apparaîtra plus)
+        db.session.execute(
+            text("DELETE FROM user_station WHERE user_id = :uid AND station_id = :sid"),
+            {"uid": uid, "sid": sid}
+        )
+        # 2) Vider le calendrier de CET utilisateur sur CETTE station
+        db.session.execute(
+            text("DELETE FROM ppp_bet WHERE user_id = :uid AND station_id = :sid"),
+            {"uid": uid, "sid": sid}
+        )
+        db.session.execute(
+            text("DELETE FROM ppp_boosts WHERE user_id = :uid AND station_id = :sid"),
+            {"uid": uid, "sid": sid}
+        )
+        db.session.commit()
+        return jsonify(ok=True)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(ok=False, error=str(e)), 500   
+
+# -----------------------------------------------------------------------------
+# Admin (identique à v1 mais sans publication instantanée pour concision)
+# -----------------------------------------------------------------------------
+from flask_login import current_user
+
+def require_admin():
+    if not current_user.is_authenticated or not current_user.is_admin:
+        abort(403)
+
+@app.route('/admin', methods=['GET','POST'])
+@login_required
+def admin():
+    require_admin()
+    if request.method == 'POST':
+        try:
+            the_date = datetime.strptime(request.form.get('the_date'), '%Y-%m-%d').date()
+            pv = float(request.form.get('pierre_value'))
+            mv = float(request.form.get('marie_value'))
+        except Exception:
+            flash('Entrées invalides.')
+            return redirect(url_for('admin'))
+        row = PendingMood.query.filter_by(the_date=the_date).first()
+        if not row:
+            db.session.add(PendingMood(the_date=the_date, pierre_value=pv, marie_value=mv))
+        else:
+            row.pierre_value, row.marie_value = pv, mv
+        db.session.commit(); flash('Valeurs enregistrées.')
+        return redirect(url_for('admin'))
+    published = DailyMood.query.order_by(DailyMood.the_date.desc()).limit(60).all()
+    return render(ADMIN_HTML, css=BASE_CSS, published=published)
+
+from datetime import date, datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz
+    UTC = _tz.utc
+from flask import request, jsonify
+from flask_login import login_required, current_user
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+# ✅ ensure you have your db import
+# from yourapp import db  # <-- adjust to your app structure
+
+@app.post("/ppp/boost")
+@login_required
+def ppp_boost():
+    """
+    Ajoute un boost (éclair) de +value à la cote d'une date,
+    éventuellement pour une station donnée.
+    Réponse: { ok: true, total: <cumul pour ce user+date(+station)> }
+    """
+    data = request.get_json(silent=True) or {}
+    date_str = (data.get("date") or "").strip()
+    station_id = data.get("station_id")  # peut être None / null côté JS
+
+    # Parse & validation
+    try:
+        inc = float(data.get("value") or 5.0)
+    except Exception:
+        return jsonify(ok=False, error="bad value"), 400
+
+    if not date_str:
+        return jsonify(ok=False, error="missing date"), 400
+    try:
+        bet_date = date.fromisoformat(date_str)
+    except Exception:
+        return jsonify(ok=False, error="bad date"), 400
+
+    if inc <= 0:
+        return jsonify(ok=False, error="bad value"), 400
+
+    # UPSERT avec prise en compte station_id dans la clé unique
+    upsert_sql = text("""
+        INSERT INTO ppp_boosts (user_id, bet_date, station_id, total, value, created_at)
+        VALUES (:uid, :d, :sid, :inc, :inc, :now)
+        ON CONFLICT(user_id, bet_date, station_id)
+        DO UPDATE SET
+            total = COALESCE(ppp_boosts.total, 0) + :inc,
+            value = COALESCE(ppp_boosts.value, 0) + :inc
+    """)
+
+    sel_sql = text("""
+      SELECT value FROM ppp_boosts
+      WHERE user_id = :uid
+        AND bet_date = :d
+        AND (
+          (:sid IS NULL AND station_id IS NULL)
+          OR station_id = :sid
+        )
+    """)
+
+    params = {
+        "uid": current_user.id,
+        "d": bet_date.isoformat(),
+        "sid": station_id,
+        "inc": inc,
+        "now": datetime.now(UTC),
+    }
+
+    try:
+        db.session.execute(upsert_sql, params)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(ok=False, error=str(e)), 500
+
+    total = db.session.execute(sel_sql, {"uid": params["uid"], "d": params["d"], "sid": params["sid"]}).scalar() or 0.0
+    return jsonify(ok=True, total=float(total)), 200
+
+@app.get("/carte")
+@login_required
+def carte():
+    solde_str = format_points_fr(remaining_points(current_user)) if current_user.is_authenticated else None
+    return render_template_string(CARTE_HTML, css=BASE_CSS, solde_str=solde_str)
+
+@app.get("/api/stations")
+@login_required
+def api_stations():
+    q = (request.args.get("q") or "").strip().lower()
+    stations = load_stations()
+    if q:
+        def match(s):
+            return (
+                q in (s.get("city","") or "").lower()
+                or q == (s.get("dept","") or "").lower()
+                or q in (s.get("name","") or "").lower()
+                or q == (s.get("icao","") or "").lower()
+            )
+        stations = [s for s in stations if match(s)]
+    # ne renvoie que ce qu’il faut côté front
+    out = []
+    for s in stations:
+        out.append({
+            "id": s["id"], "name": s["name"], "city": s["city"], "dept": s["dept"],
+            "icao": s["icao"], "lat": s["lat"], "lon": s["lon"], "label": s["label"]
+        })
+    return jsonify({"stations": out})
+
+@app.post("/api/my_stations")
+@login_required
+def add_my_station():
+    data = request.get_json(force=True)  # {id,label,lat,lon}
+    sid   = (data.get("id") or "").strip()
+    label = (data.get("label") or "").strip()
+    lat   = data.get("lat")
+    lon   = data.get("lon")
+    if not sid or not label:
+        return jsonify(ok=False, error="missing id/label"), 400
+
+    # upsert simple sur user_station
+    try:
+        db.session.execute(
+            text("""
+                INSERT INTO user_station (user_id, station_id, station_label, lat, lon)
+                VALUES (:uid, :sid, :lbl, :lat, :lon)
+                ON CONFLICT(user_id, station_id) DO UPDATE SET
+                    station_label = excluded.station_label,
+                    lat = excluded.lat,
+                    lon = excluded.lon
+            """),
+            {"uid": current_user.id, "sid": sid, "lbl": label, "lat": lat, "lon": lon}
+        )
+        db.session.commit()
+        return jsonify(ok=True)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(ok=False, error=str(e)), 500
+
+@app.get("/api/my_stations")
+@login_required
+def list_my_stations():
+    rows = db.session.execute(
+        text("""
+            SELECT station_id AS id, station_label AS label, lat, lon
+            FROM user_station
+            WHERE user_id = :uid
+            ORDER BY station_label ASC
+        """),
+        {"uid": current_user.id}
+    ).mappings().all()
+    return jsonify(stations=[dict(r) for r in rows])
+
+from dateutil import parser as dtparse
+from datetime import timezone, timedelta
+
+@app.route('/api/wet/observations', methods=['GET'])
+@login_required
+def wet_observations():
+    station_id = (request.args.get('station_id') or '').strip()
+    slots = request.args.getlist('slot')
+    if not station_id or not slots:
+        return jsonify({}), 200
+
+    tz_paris = ZoneInfo('Europe/Paris')
+    out = {}
+
+    for slot_iso in slots:
+        try:
+            # 1) Interpréter le slot comme heure de Paris (si naïf)
+            slot_local = dtparse.parse(slot_iso)
+            if slot_local.tzinfo is None:
+                slot_local = slot_local.replace(tzinfo=tz_paris)
+            start_utc = slot_local.astimezone(timezone.utc)
+            end_utc   = start_utc + timedelta(minutes=59, seconds=59)
+
+            # 2) D'abord: première obs DANS la fenêtre [start, end] (asc)
+            qwin = (HumidityObservation.query
+                    .filter_by(station_id=station_id)
+                    .filter(HumidityObservation.obs_time >= start_utc,
+                            HumidityObservation.obs_time <= end_utc)
+                    .order_by(HumidityObservation.obs_time.asc()))
+            obs = qwin.first()
+
+            # 3) Fallback: si rien, dernière obs <= end (desc)
+            if not obs:
+                qfb = (HumidityObservation.query
+                       .filter_by(station_id=station_id)
+                       .filter(HumidityObservation.obs_time <= end_utc)
+                       .order_by(HumidityObservation.obs_time.desc()))
+                obs = qfb.first()
+
+            out[slot_iso] = (
+                {'humidity': float(obs.humidity), 'obs_time': obs.obs_time.isoformat()}
+                if obs else None
+            )
+        except Exception as e:
+            app.logger.warning('wet_observations slot=%s error=%s', slot_iso, e)
+            out[slot_iso] = None
+
+    return jsonify(out), 200
+
+@app.get('/admin/wet/debug')
+@login_required
+def wet_debug():
+    station = request.args.get('station_id', 'cdg_07157')
+    last = (HumidityObservation.query
+            .filter_by(station_id=station)
+            .order_by(HumidityObservation.obs_time.desc())
+            .first())
+    count = (HumidityObservation.query
+             .filter_by(station_id=station)
+             .count())
+    return jsonify({
+        "station_id": station,
+        "count": count,
+        "latest_obs_time_utc": (last.obs_time.isoformat() if last else None),
+        "latest_humidity": (float(last.humidity) if last else None),
+    }), 200
+
+import os
+from flask import send_file
+
+AVATAR_DIR = os.path.join(app.static_folder, "avatars")
+os.makedirs(AVATAR_DIR, exist_ok=True)  # s'assure que le dossier existe
+
+DEFAULT_AVATAR_PATH = os.path.join(app.static_folder, "img", "avatar_default.png")
+if not os.path.exists(DEFAULT_AVATAR_PATH):
+    # petit filet: utilise l'avatar de la cabine comme placeholder si tu n'as pas de default
+    DEFAULT_AVATAR_PATH = os.path.join(app.static_folder, "cabine", "assets", "avatar.png")
+    
+# -----------------------------------------------------------------------------
+# Init DB avec quelques données si vide
+# -----------------------------------------------------------------------------
+@app.cli.command('init-db')
+def init_db_cmd():
+  with app.app_context():
+    with app.app_context():
+        db.create_all()
+    if DailyMood.query.count() == 0:
+        base = today_paris() - timedelta(days=30)
+        for i in range(0, 30):
+            d = base + timedelta(days=i)
+            db.session.add(DailyMood(the_date=d, pierre_value=100 + i*1.0, marie_value=120 + i*0.8, published_at=dt_paris_now()))
+        db.session.commit()
+        print('DB initialisée avec des données exemples.')
+    else:
+        print('DB déjà initialisée.')
+
+# -----------------------------------------------------------------------------
+# Run
+# -----------------------------------------------------------------------------
+@app.route('/_debug')
+def _debug():
+    return jsonify({
+        "db_uri": app.config['SQLALCHEMY_DATABASE_URI'],
+        "moods_count": DailyMood.query.count(),
+        "today_has_value": DailyMood.query.filter_by(the_date=today_paris()).count() > 0
+    })
+
+from datetime import datetime, timezone, timedelta
+from flask import g
+from sqlalchemy import text
+
+@app.before_request
+def _touch_online():
+    # Throttle: pas plus d'une MAJ toutes les 20s par session
+    g._touch_done = False
+    if not current_user.is_authenticated:
+        return
+    now = datetime.now(timezone.utc)
+    last_touched = getattr(g, "_last_touch_ts", None)
+    if last_touched and (now - last_touched) < timedelta(seconds=20):
+        return
+    try:
+        tbl = User.__table__.name
+        db.session.execute(
+            text(f"UPDATE {tbl} SET last_seen = :ts WHERE id = :uid"),
+            {"ts": now, "uid": current_user.id}
+        )
+        db.session.commit()
+        g._last_touch_ts = now
+        g._touch_done = True
+    except Exception:
+        db.session.rollback()
+
+# --- 1b) Ping: met à jour last_seen ---
+from datetime import datetime, timezone
+
+@app.post('/api/users/ping')
+@login_required
+def api_users_ping():
+    try:
+        current_user.last_seen = datetime.now(timezone.utc)
+        db.session.commit()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        app.logger.exception("users_ping failed")
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500        
+   
+# === CABINE INTEGRATION (auto) ===
+import os
+from sqlalchemy import inspect, exc
+from sqlalchemy.sql.compiler import IdentifierPreparer
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+CABINE_DIR = os.path.join(APP_DIR, "static", "cabine")
+
+# --- Page Cabine ---
+@app.route("/cabine/")
+def cabine_page():
+    # sert index.html depuis static/cabine/
+    return send_from_directory(CABINE_DIR, "index.html")
+
+@app.route("/cabine/<path:path>")
+def cabine_assets(path):
+    # sert CSS/JS/assets supplémentaires (au cas où)
+    return send_from_directory(CABINE_DIR, path)
+
+from flask_login import current_user
+
+def current_user_id():
+    try:
+        if getattr(current_user, "is_authenticated", False):
+            return str(current_user.get_id())
+    except Exception:
+        pass
+    # visiteur non connecté → pas d'ID
+    return None
+
+# Table légère pour préférences Cabine
+from sqlalchemy import Column, String, Text
+try:
+    # Si le modèle existe déjà, ne pas redéclarer
+    AvatarPrefs = globals().get("AvatarPrefs")
+    if AvatarPrefs is None:
+        class AvatarPrefs(db.Model):
+            __tablename__ = "avatar_prefs"
+            user_id = Column(String(128), primary_key=True)
+            data_json = Column(Text, nullable=False, default="{}")
+        globals()["AvatarPrefs"] = AvatarPrefs
+except Exception:
+    pass
+
+# Crée table si absente (idempotent)
+with app.app_context():
+    with app.app_context():
+        db.create_all()
+
+# --- tiny self-heal for bet_listings schema on SQLite ---
+def ensure_bet_listings_columns():
+    from sqlalchemy import text
+    with db.engine.begin() as conn:
+        cols = set()
+        for row in conn.execute(text("PRAGMA table_info(bet_listings)")):
+            cols.add(row[1])  # name
+
+        # add missing columns (SQLite syntax)
+        if "kind" not in cols:
+            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN kind VARCHAR(16)"))
+            conn.execute(text("UPDATE bet_listings SET kind = 'PPP' WHERE kind IS NULL"))
+
+        if "status" not in cols:
+            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN status VARCHAR(16)"))
+            conn.execute(text("UPDATE bet_listings SET status = 'OPEN' WHERE status IS NULL"))
+
+        if "expires_at" not in cols:
+            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN expires_at DATETIME"))
+
+        if "payload" not in cols:
+            # JSON sera stocké en TEXT sur SQLite
+            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN payload JSON"))
+            conn.execute(text("UPDATE bet_listings SET payload = '{}' WHERE payload IS NULL"))        
+
+# === Page Trade (front) ======================================================
+from flask import render_template, url_for
+from flask_login import login_required, current_user
+import time  # <-- nécessaire
+# (assure-toi aussi d'avoir: from datetime import datetime, timezone si besoin ailleurs)
+
+from time import time
+
+@app.route("/trade/")
+@login_required
+def trade_page():
+    uid = str(current_user.get_id())
+
+    # URL de l’avatar via la route /u/<id>/avatar.png (pas le chemin static direct)
+    avatar_url = url_for("user_avatar_png", user_id=uid) + f"?v={int(time())}"
+
+    # Solde
+    try:
+        solde_txt = format_points_fr(remaining_points(current_user))
+    except Exception:
+        solde_txt = "0 pts"
+
+    return render_template(
+        "trade/index.html",
+        me_avatar_url=avatar_url,   # <— on passe bien me_avatar_url
+        solde_str=solde_txt
+    )
+
+# (optionnel) accepter /trade sans slash et rediriger vers /trade/
+@app.route("/trade")
+@login_required
+def trade_page_noslash():
+    return redirect(url_for("trade_page"))
+
+from flask_login import login_required, current_user
+from datetime import datetime, timezone, timedelta
+
+# Utilitaire d'affichage du compte à rebours H-xx
+def _fmt_countdown(dt_utc):
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    delta = dt_utc - datetime.now(timezone.utc)
+    hours = int(delta.total_seconds() // 3600)
+    return f"H-{hours if hours >= 0 else 0}"
+
+def _fmt_label(b):
+    """
+    Construit la ligne type :
+    "H-26 - Lundi 27 novembre - 12 pts (x1,4) - 2 ⚡ (x10) - 💧 GP: 134,4 pts"
+    Ajuste selon tes champs de modèle.
+    """
+    h = _fmt_countdown(b.deadline_utc)             # b.deadline_utc = échéance UTC (datetime)
+    jour = b.deadline_utc.strftime("%A %d %B")     # FR selon locale système
+    mise = f"{b.stake:.2f}".rstrip('0').rstrip('.')  # b.stake = mise en points (float)
+    cote = f"{b.odds:.2f}".replace('.', ',')       # b.odds = cote initiale (float)
+    n_bolts = getattr(b, "boosts_count", 0)        # nombre d'éclairs éventuels
+    mult_bolts = getattr(b, "boosts_multiplier", 1.0)  # multiplicateur cumulé
+    symb = {"PLUIE":"💧","PAS_PLUIE":"☀️","NUAGES":"☁️"}.get(b.kind, b.kind or "❓")  # b.kind = PLUIE/SOLEIL/...
+    gp = f"{b.potential_gain:.2f}".replace('.', ',')  # b.potential_gain = gains potentiels
+
+    bolts_part = f" - {n_bolts} ⚡️(x{int(mult_bolts)})" if n_bolts else ""
+    return f"{h} - {jour} - {mise} pts (x{cote}){bolts_part} - {symb} GP: {gp} pts"
+
+from flask import jsonify
+from flask_login import login_required, current_user
+from sqlalchemy import text
+from datetime import datetime
+
+# -- petits helpers d’affichage, alignés PPP --
+def fmt_fr(x, nd=2):
+    try:
+        x = float(x)
+    except Exception:
+        return "0"
+    s = f"{x:.{nd}f}".rstrip('0').rstrip('.')
+    return s.replace('.', ',')
+
+def _fmt_date_fr_daykey(daykey: str):
+    try:
+        dt = datetime.strptime(daykey, "%Y-%m-%d")
+        mois  = ["janvier","février","mars","avril","mai","juin",
+                 "juillet","août","septembre","octobre","novembre","décembre"][dt.month-1]
+        jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"][dt.weekday()]
+        return f"{jours.capitalize()} {dt.day} {mois}"
+    except Exception:
+        return daykey or "—"
+
+def _station_label(station_id):
+    if station_id:
+        s = station_by_id(station_id)
+        if s:  # format ex: "CDG — Paris"
+            return s.get("city") or s.get("name") or str(station_id)
+    return "Paris"
+
+from datetime import date
+
+@app.get("/api/trade/my-bets")
+@login_required
+def trade_my_bets():
+    uid = str(current_user.get_id())
+
+    try:
+        today = today_paris_date()   # ta fonction existante
+    except Exception:
+        today = date.today()
+
+    rows = (
+        PPPBet.query
+        .filter(
+            PPPBet.user_id == uid,
+            PPPBet.status == 'ACTIVE',
+            PPPBet.locked_for_trade == 0,
+            PPPBet.bet_date >= today,     # 👈 ne garde que les échéances à venir
+        )
+        .order_by(PPPBet.bet_date.asc(), PPPBet.id.asc())
+        .limit(300)
+        .all()
+    )
+
+    out = []
+    for b in rows:
+        # --- échéance (calendrier) ---
+        daykey = b.bet_date.isoformat()           # "YYYY-MM-DD"
+        date_label = _fmt_date_fr_daykey(daykey)  # Lundi 27 novembre
+
+        # --- ville (scope PPP) ---
+        if b.station_id is None:
+            city = "Paris"
+        else:
+            S = station_by_id(b.station_id) or {}
+            city = (S.get("city") or "—")
+
+        # --- côté (Pluie / Pas Pluie) ---
+        choice = b.choice  # 'PLUIE' | 'PAS_PLUIE'
+
+        # --- montant & cote initiale (sans boosts) ---
+        amount = float(b.amount or 0.0)
+        odds   = float(b.odds   or 1.0)
+
+        # --- boosts du jour (additifs à la cote), pour CE scope ---
+        # même logique SQL que dans /ppp pour construire boosts_map
+        params = {"uid": uid, "sid": b.station_id, "d": daykey}
+        # station NULL <-> station NULL
+        sql = text("""
+          SELECT SUM(COALESCE(value,0)) AS total
+          FROM ppp_boosts
+          WHERE user_id = :uid
+            AND substr(bet_date,1,10) = :d
+            AND (
+              (:sid IS NULL AND station_id IS NULL)
+              OR station_id = :sid
+            )
+        """)
+        total_boost = db.session.execute(sql, params).scalar() or 0.0
+        boosts_add   = float(total_boost)
+        boosts_count = int(round(boosts_add / 5.0)) if boosts_add > 0 else 0
+
+        total_odds = odds + boosts_add
+        gp = amount * total_odds
+
+        icon = "💧" if (choice or "").upper() == "PLUIE" else "☀️"
+        # ---- étiquette lisible pour Trade (HTML OK) ----
+        label = f"{city} — {date_label} - {fmt_fr(amount)} pts (x{fmt_fr(odds)})"
+        if boosts_count > 0:
+            label += f" - {boosts_count} ⚡️(x{fmt_fr(boosts_add)})"
+        # ⬇️ GP en vert via CSS .gp
+        label += f" - {icon} <span class=\"gp\">GP: {fmt_fr(gp)} pts</span>"
+
+        out.append({
+            "id": b.id,
+            "kind": "PPP",
+            "city": city,
+            "deadline_key": daykey,
+            "date_label": date_label,
+            "choice": choice,
+            "amount": amount,
+            "odds": odds,
+            "boosts_count": boosts_count,
+            "boosts_add": boosts_add,
+            "total_odds": total_odds,
+            "potential_gain": gp,
+            "label": label,
+        })
+
+    return jsonify(out), 200
+
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+def _compute_expires_at(payload: dict):
+    # 1) si le client a déjà envoyé expires_at ISO
+    iso = (payload.get("expires_at") or "").strip()
+    if iso:
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            # stocke naïf UTC si tes colonnes sont naïves
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception:
+            pass
+
+    # 2) sinon, déduis de la deadline_key (YYYY-MM-DD) -> 23:59:59 Europe/Paris
+    dk = (payload.get("deadline_key") or "").strip()
+    if dk:
+        try:
+            d = date.fromisoformat(dk)
+            dt_paris = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=ZoneInfo("Europe/Paris"))
+            return dt_paris.astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception:
+            pass
+
+    # 3) dernier recours : +24h
+    return (datetime.now(timezone.utc) + timedelta(hours=24)).replace(tzinfo=None)
+
+from datetime import datetime, timezone
+
+@app.post("/api/trade/listings/from-ppp")
+@login_required
+def trade_list_from_ppp():
+    uid = str(current_user.get_id())
+    data = request.get_json(silent=True) or {}
+    bet_id = data.get("bet_id")
+    if not bet_id:
+        return jsonify({"error": "bet_id requis"}), 400
+
+    bet = PPPBet.query.filter_by(id=bet_id, user_id=uid).first()
+    if not bet:
+        return jsonify({"error": "pari introuvable"}), 404
+    if getattr(bet, "locked_for_trade", False):
+        return jsonify({"error": "déjà en vente"}), 409
+
+    # verrouille la mise chez le vendeur
+    bet.locked_for_trade = True
+
+    payload = {
+        "origin": "PPP",
+        "bet_id": bet.id,
+        "daykey": bet.date,
+        "choice": bet.choice,
+        "amount": float(bet.amount or 0.0),
+        "odds": float(bet.odds or 1.0),
+        # pour affichage:
+        "label": f"{bet.date} – {bet.amount} pts (x{bet.odds})"
+    }
+    # (optionnel) ajoute ville/station si dispo
+    if hasattr(bet, "city") and bet.city: payload["city"] = bet.city
+    if hasattr(bet, "station_id") and bet.station_id: payload["station_id"] = bet.station_id
+
+    listing = BetListing(
+        user_id=uid,
+        kind="PPP",          # ← !!! Ton erreur “no such column kind”: il te faut bien cette colonne
+        payload=payload,
+        status="OPEN",
+        # Optionnel: date d’échéance utile pour purger / trier
+        expires_at=datetime.strptime(bet.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    )
+    db.session.add(listing)
+    db.session.commit()
+    return jsonify({"ok": True, "listing_id": listing.id}), 200
+
+@app.post("/api/trade/accept")
+@login_required
+def trade_accept():
+    buyer_id = str(current_user.get_id())
+    payload  = request.get_json(silent=True) or {}
+    listing_id = payload.get("listing_id")
+    if not listing_id:
+        return jsonify({"error":"listing_id requis"}), 400
+
+    lst = BetListing.query.filter_by(id=listing_id, status="OPEN").first()
+    if not lst:
+        return jsonify({"error":"listing introuvable/fermée"}), 404
+    if lst.user_id == buyer_id:
+        return jsonify({"error":"tu es le vendeur"}), 400
+
+    if (lst.kind or "") != "PPP":
+        return jsonify({"error":"listing non-PPP"}), 400
+
+    bet_id = (lst.payload or {}).get("bet_id")
+    bet = PPPBet.query.filter_by(id=bet_id).first() if bet_id else None
+    if not bet or not getattr(bet, "locked_for_trade", False):
+        return jsonify({"error":"pari indisponible"}), 409
+
+    # transfert
+    bet.user_id = buyer_id
+    bet.locked_for_trade = False
+    lst.status = "SOLD"
+    db.session.commit()
+    return jsonify({"ok": True}), 200
+
+# --- Cabine API unique (par utilisateur) ---
+
+# ---- Cabine API (per-user) ----
+from flask_login import login_required, current_user
+from flask import jsonify, request
+
+@app.route("/api/cabine", methods=["GET", "POST"])
+@login_required
+def cabine_api():
+    import json
+    uid = str(current_user.get_id())
+
+    def row_to_dict(row):
+        """Retourne un dict à partir du row, quel que soit le schéma stocké."""
+        if not row:
+            return {}
+        # Priorité à data_json si présent
+        if hasattr(row, "data_json"):
+            raw = row.data_json or "{}"
+            try:
+                return json.loads(raw) if isinstance(raw, str) else {}
+            except Exception:
+                return {}
+        # Sinon data
+        if hasattr(row, "data"):
+            raw = row.data
+            if isinstance(raw, dict):
+                return raw
+            try:
+                return json.loads(raw) if isinstance(raw, str) else {}
+            except Exception:
+                return {}
+        return {}
+
+    def assign_payload(row, payload: dict):
+        """Assigne payload selon le champ dispo, en restant tolérant."""
+        if hasattr(row, "data_json"):
+            row.data_json = json.dumps(payload, ensure_ascii=False)
+            return
+        if hasattr(row, "data"):
+            # Essaye de stocker le dict tel quel (JSON type) sinon string
+            try:
+                row.data = payload
+            except Exception:
+                row.data = json.dumps(payload, ensure_ascii=False)
+            return
+        # Si aucun champ attendu, on lève une erreur explicite
+        raise AttributeError("CabineSelection has neither data_json nor data")
+
+    # --- GET ---
+    if request.method == "GET":
+        row = CabineSelection.query.filter_by(user_id=uid).first()
+        return jsonify(row_to_dict(row)), 200
+
+    # --- POST ---
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    row = CabineSelection.query.filter_by(user_id=uid).first()
+    if row is None:
+        row = CabineSelection(user_id=uid)
+        db.session.add(row)
+    assign_payload(row, payload)
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": "db_commit_failed"}), 500
+
+    # Optionnel : (re)génère la vignette de l’avatar sans casser la sauvegarde si échec.
+    try:
+        if 'generate_user_avatar_png' in globals():
+            generate_user_avatar_png(uid, payload)
+    except Exception:
+        pass
+
+    return jsonify({"ok": True}), 200
+
+from flask import send_from_directory, redirect
+
+# Sauvegarde du PNG envoyé depuis Cabine
+@app.post("/api/cabine/snapshot")
+@login_required
+def cabine_snapshot():
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"ok": False, "error": "missing file"}), 400
+
+    # Dossier de sortie
+    out_dir = os.path.join(app.static_folder, "avatars")
+    os.makedirs(out_dir, exist_ok=True)
+
+    uid = str(current_user.get_id())
+    out_path = os.path.join(out_dir, f"{uid}.png")
+
+    # Écrit tel quel, pas besoin de Pillow
+    f.save(out_path)
+    return jsonify({"ok": True, "url": url_for("static", filename=f"avatars/{uid}.png")}), 200
+
+# Exposer l’avatar PNG d’un utilisateur (avec fallback)
+@app.get("/u/<user_id>/avatar.png")
+def user_avatar_png(user_id):
+    out_dir = os.path.join(app.static_folder, "avatars")
+    fs_path = os.path.join(out_dir, f"{user_id}.png")
+    if os.path.exists(fs_path):
+        return send_from_directory(out_dir, f"{user_id}.png")
+    # Fallback (met un petit PNG par défaut dans static/img/avatar_placeholder.png)
+    return redirect(url_for("static", filename="img/avatar_placeholder.png"), code=302)
+
+# --- Cabine: réception du snapshot PNG de l'avatar ---
+@app.post("/api/cabine/snapshot")
+@login_required
+def cabine_snapshot_png():
+    uid = str(current_user.get_id())
+    data = request.get_json(silent=True) or {}
+    data_url = data.get("png", "")
+
+    if not data_url.startswith("data:image/png;base64,"):
+        return jsonify({"ok": False, "error": "invalid PNG data"}), 400
+
+    import base64, re
+    b64 = re.sub(r"^data:image/png;base64,", "", data_url)
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return jsonify({"ok": False, "error": "b64 decode failed"}), 400
+
+    out_dir = os.path.join(app.static_folder, "avatars")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{uid}.png")
+
+    try:
+        with open(out_path, "wb") as f:
+            f.write(raw)
+    except Exception as e:
+        app.logger.exception("write avatar png failed")
+        return jsonify({"ok": False, "error": "write failed"}), 500
+
+    return jsonify({
+        "ok": True,
+        "url": url_for("static", filename=f"avatars/{uid}.png")
+    }), 200
+
+@app.get("/api/config_ui")
+def config_ui():
+    out = {
+        "PPP_URL": url_for("ppp", _external=False),
+        "USER_ID": (int(current_user.id) if getattr(current_user, "is_authenticated", False) else None),
+    }
+    return jsonify(out)
+
+from datetime import datetime
+from sqlalchemy import text
+
+@app.post('/api/users/heartbeat')
+@login_required
+def users_heartbeat():
+    try:
+        now = datetime.utcnow()  # naïf UTC pour rester cohérent avec /roster
+        tbl = User.__table__.name
+        db.session.execute(
+            text(f"UPDATE {tbl} SET last_seen = :ts WHERE id = :uid"),
+            {"ts": now, "uid": current_user.get_id()}
+        )
+        db.session.commit()
+        return jsonify({"ok": True}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"ok": False}), 500
+
+# alias, même implémentation
+@app.post('/api/users/ping')
+@login_required
+def users_ping():
+    return users_heartbeat()
+
+# --- Trade API ---------------------------------------------------------------------
+from flask_login import login_required, current_user
+import json
+
+def _jsonify_listing(row):
+    # payload sûr (dict)
+    pl = row.payload
+    if isinstance(pl, str):
+        try:
+            pl = json.loads(pl)
+        except Exception:
+            pl = {}
+    if not isinstance(pl, dict):
+        pl = {}
+
+    def pick(attr_name, pl_key=None, default=None):
+        # 1) attribut sur la row si déclaré et non None
+        if hasattr(row, attr_name):
+            v = getattr(row, attr_name)
+            if v is not None:
+                return v
+        # 2) sinon dans le payload
+        if pl_key:
+            v = pl.get(pl_key)
+            if v is not None:
+                return v
+        return default
+
+    city           = pick('city', 'city', 'Paris')
+    date_label     = pick('date_label', 'date_label')
+    deadline_key   = pick('deadline_key', 'deadline_key')
+    choice         = pick('choice', 'choice')
+    stake          = pick('stake', 'amount', 0.0)
+    base_odds      = pick('base_odds', 'odds', 1.0)
+    boosts_count   = pick('boosts_count', 'boosts_count', 0)
+    boosts_add     = pick('boosts_add', 'boosts_add', 0.0)
+    total_odds     = pick('total_odds', 'total_odds', (float(base_odds) or 1.0) + float(boosts_add or 0.0))
+    potential_gain = pick('potential_gain', 'potential_gain', float(stake or 0.0) * float(total_odds or 1.0))
+    # 🔶 fallback ask_price: colonne si dispo, sinon payload
+    ask_price      = pick('ask_price', 'ask_price', None)
+
+    # Label prêt pour l’affichage (avec GP en <span class="gp">…</span>)
+    def fmt_fr(x, nd=2):
+        try:
+            x = float(x)
+        except Exception:
+            return "0"
+        s = f"{x:.{nd}f}".rstrip('0').rstrip('.')
+        return s.replace('.', ',')
+
+    icon = "💧" if str(choice or '').upper() == "PLUIE" else "☀️"
+    base_txt = f"x{fmt_fr(base_odds)}"
+    label = f"{city} — {(date_label or deadline_key or '—')} - {fmt_fr(stake)} pts ({base_txt})"
+    if int(boosts_count or 0) > 0:
+        label += f" - {int(boosts_count)} ⚡️(x{fmt_fr(boosts_add)})"
+    label += f" - {icon} <span class=\"gp\">GP: {fmt_fr(potential_gain)} pts</span>"
+
+    return {
+        "id": row.id,
+        "user_id": row.user_id,
+        "is_mine": str(row.user_id) == str(current_user.get_id()),  # utile pour afficher Retirer/Acheter
+        "kind": row.kind,
+        "city": city,
+        "date_label": date_label,
+        "deadline_key": deadline_key,
+        "choice": choice,
+        "stake": float(stake or 0.0),
+        "base_odds": float(base_odds or 1.0),
+        "boosts_count": int(boosts_count or 0),
+        "boosts_add": float(boosts_add or 0.0),
+        "total_odds": float(total_odds or 1.0),
+        "potential_gain": float(potential_gain or 0.0),
+        "ask_price": (float(ask_price) if ask_price is not None else None),  # 👈 renvoyé systématiquement
+        "payload": pl,
+        "created_at": (row.created_at.isoformat() if getattr(row, "created_at", None) else None),
+        "expires_at": (row.expires_at.isoformat() if getattr(row, "expires_at", None) else None),
+        "status": row.status,
+        "label": label
+    }
+
+# --- 1c) Roster: calcule is_online de façon sûre (UTC/naive-safe) ---
+from datetime import datetime, timezone, timedelta
+
+@app.get('/api/users/roster')
+@login_required
+def api_users_roster():
+    now = datetime.now(timezone.utc)
+
+    rows = User.query.order_by(User.username.asc()).all()
+    out = []
+    for u in rows:
+        last = getattr(u, 'last_seen', None)
+        if last is not None and getattr(last, 'tzinfo', None) is None:
+            # si naïf en DB, assume UTC
+            last = last.replace(tzinfo=timezone.utc)
+
+        # en ligne si ping < 90s
+        is_online = False
+        if last is not None:
+            is_online = (now - last) <= timedelta(seconds=90)
+
+        out.append({
+            "id": u.id,
+            "username": u.username,
+            "solde": float(getattr(u, 'points', 0.0)),
+            "last_seen": (last.isoformat() if last else None),
+            "is_online": is_online,
+        })
+    return jsonify(out), 200
+
+from datetime import datetime, timezone
+from sqlalchemy import or_
+
+@app.get('/api/trade/listings')
+@login_required
+def trade_listings():
+    uid = str(current_user.get_id())
+    now_utc = datetime.now(timezone.utc)
+
+    q = (
+        BetListing.query
+        .filter(
+            BetListing.status == 'OPEN',
+            or_(BetListing.expires_at.is_(None), BetListing.expires_at >= now_utc)
+        )
+        .order_by(BetListing.created_at.desc())
+        .limit(500)
+    )
+    rows = q.all()
+
+    def _json_with_mine(r):
+        d = _jsonify_listing(r)         # ta fonction existante
+        d["is_mine"] = (str(r.user_id) == uid)
+        return d
+
+    return jsonify([_json_with_mine(r) for r in rows]), 200
+
+
+# -------- util: n’écrire que les colonnes déclarées --------
+def _set_if_declared(row, **kv):
+    for k, v in kv.items():
+        if hasattr(type(row), k):
+            setattr(row, k, v)
+
+def _as_float(x, default=None):
+    try:
+        return float(x)
+    except Exception:
+        return default
+
+def _as_int(x, default=None):
+    try:
+        return int(x)
+    except Exception:
+        return default
+
+def _guess_expires(deadline_key: str):
+    """deadline_key = 'YYYY-MM-DD' → renvoie un datetime en fin de journée Europe/Paris."""
+    if not deadline_key:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        y, m, d = [int(p) for p in deadline_key.split("-")]
+        dt_paris = datetime(y, m, d, 23, 59, 59, tzinfo=ZoneInfo("Europe/Paris"))
+        return dt_paris.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+def _derive_city_from_station(station_id):
+    if station_id is None:
+        return "Paris"
+    S = station_by_id(station_id) or {}
+    return S.get("city") or "—"
+
+def _choice_to_side(c: str | None) -> str:
+    c = (c or "").upper()
+    if c == "PLUIE": return "RAIN"
+    if c == "PAS_PLUIE": return "SUN"
+    return "RAIN"  # valeur sûre
+
+# -------- route: créer une annonce --------
+@app.post('/api/trade/listings')
+@login_required
+def trade_create_listing():
+    try:
+        payload = request.get_json(silent=True) or {}
+        kind = payload.get('kind') or 'PPP'
+
+        # champs courants
+        city         = payload.get('city')
+        date_label   = payload.get('date_label')
+        deadline_key = payload.get('deadline_key')  # 'YYYY-MM-DD'
+        choice       = payload.get('choice')
+        price        = _as_float(payload.get('price'), None)  # <— NOUVEAU
+
+        stake       = _as_float(payload.get('stake') or payload.get('amount'), None)
+        base_odds   = _as_float(payload.get('base_odds') or payload.get('odds'), None)
+        ask_price   = _as_float(payload.get('ask_price'), None)
+        boosts_cnt  = _as_int(payload.get('boosts_count'), None)
+        boosts_add  = _as_float(payload.get('boosts_add'), None)
+        total_odds  = _as_float(payload.get('total_odds'), None)
+        potential   = _as_float(payload.get('potential_gain'), None)
+
+        if not potential and stake is not None:
+            if total_odds is None and (base_odds is not None):
+                total_odds = (base_odds or 0.0) + (boosts_add or 0.0)
+            if total_odds is not None:
+                potential = round(stake * total_odds, 2)
+
+        # s’il y a un bet_id, on complète
+        bet_id = payload.get("bet_id")
+        if not city and bet_id:
+            b = PPPBet.query.get(int(bet_id))
+            if b:
+                if not city:
+                    city = _derive_city_from_station(getattr(b, "station_id", None))
+                if not deadline_key and getattr(b, "bet_date", None):
+                    deadline_key = b.bet_date.isoformat()
+                if not choice:
+                    choice = getattr(b, "choice", None)
+                if stake is None:
+                    stake = _as_float(getattr(b, "amount", None), stake)
+                if base_odds is None:
+                    base_odds = _as_float(getattr(b, "odds", None), base_odds)
+
+        if not city:
+            city = "Paris"
+        if (not date_label) and deadline_key:
+            date_label = _fmt_date_fr_daykey(deadline_key)
+
+        expires_at = None
+        if deadline_key:
+            expires_at = _guess_expires(deadline_key)  # 23:59 Paris → UTC
+
+        # IMPORTANT : rien de "lock" ici
+        row = BetListing(
+            user_id=str(current_user.get_id()),
+            kind=kind,
+            payload=payload,
+            expires_at=expires_at,
+            status="OPEN",
+        )
+        _set_if_declared(
+            row,
+            city=city,
+            date_label=date_label,
+            deadline_key=deadline_key,
+            choice=choice,
+            stake=stake,
+            base_odds=base_odds,
+            boosts_count=boosts_cnt,
+            boosts_add=boosts_add,
+            total_odds=total_odds,
+            potential_gain=potential,
+            price=price,
+            ask_price=ask_price,
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        return jsonify({
+            "id": row.id,
+            "ok": True
+        }), 200
+
+    except Exception as e:
+        app.logger.exception("trade_create_listing failed")
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+from datetime import datetime, timezone
+
+@app.post('/api/trade/listings/<int:listing_id>/cancel')
+@login_required
+def trade_cancel_listing(listing_id):
+    # Utilise l’API 2.0 (pas de LegacyAPIWarning)
+    row = db.session.get(BetListing, listing_id)
+    if not row:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    uid = str(current_user.get_id() or "")
+    # compare toujours des strings
+    if str(row.user_id) != uid:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    if row.status != 'OPEN':
+        return jsonify({"ok": False, "error": f"not_open (status={row.status})"}), 409
+
+    # Soft-cancel
+    row.status = 'CANCELLED'
+    # Si tu as un champ cancelled_at, dé-commente:
+    # row.cancelled_at = datetime.now(timezone.utc)
+
+    # Si certains anciens flux avaient verrouillé la mise PPP, on déverrouille par sécurité
+    try:
+        bet_id = None
+        if hasattr(row, "payload") and isinstance(row.payload, dict):
+            bet_id = row.payload.get("bet_id")
+        if bet_id:
+            b = db.session.get(PPPBet, int(bet_id))
+            if b is not None and hasattr(b, "locked_for_trade"):
+                b.locked_for_trade = 0
+    except Exception:
+        # on ne bloque pas l’annulation si l’unlock échoue
+        pass
+
+    db.session.commit()
+    return jsonify({"ok": True}), 200
+
+@app.post('/api/trade/listings/<int:listing_id>/buy')
+@login_required
+def trade_buy_listing(listing_id):
+    me = str(current_user.get_id())
+    row = BetListing.query.get(listing_id)
+    if not row or row.status != 'OPEN':
+        return jsonify({"ok": False, "error": "not_open"}), 400
+    if row.user_id == me:
+        return jsonify({"ok": False, "error": "cannot_buy_own"}), 400
+
+    # On s’attend à avoir bet_id dans payload
+    bet_id = None
+    try:
+        bet_id = (row.payload or {}).get("bet_id")
+    except Exception:
+        pass
+
+    if not bet_id:
+        return jsonify({"ok": False, "error": "no_bet_to_transfer"}), 400
+
+    b = PPPBet.query.get(int(bet_id))
+    if not b or b.status != 'ACTIVE':
+        return jsonify({"ok": False, "error": "bet_not_active"}), 400
+
+    # (Optionnel) vérifier que l’échéance n’est pas passée
+    if getattr(b, "bet_date", None):
+        try:
+            today = today_paris_date()
+        except Exception:
+            today = date.today()
+        if b.bet_date < today:
+            return jsonify({"ok": False, "error": "expired"}), 400
+
+    # (Optionnel) points transferts — à brancher sur tes helpers si dispo
+    # price = getattr(row, "price", None) or 0.0
+    # debit_points(me, price); credit_points(row.user_id, price)
+
+    # Transfert de propriété
+    b.user_id = me
+    db.session.commit()
+
+    # On marque l’annonce vendue
+    row.status = 'SOLD'
+    db.session.commit()
+
+    return jsonify({"ok": True}), 200
+    
+@app.get('/api/trade/proposals')
+@login_required
+def trade_list_proposals():
+    listing_id = request.args.get('listing_id', type=int)
+    q = TradeProposal.query
+    if listing_id:
+        q = q.filter(TradeProposal.listing_id == listing_id)
+    rows = q.order_by(TradeProposal.created_at.desc()).limit(200).all()
+    def _json(p):
+        return {
+            "id": p.id,
+            "listing_id": p.listing_id,
+            "from_user_id": p.from_user_id,
+            "kind": p.kind,
+            "data": p.data or {},
+            "status": p.status,
+            "created_at": (p.created_at.isoformat() if p.created_at else None)
+        }
+    return jsonify([_json(p) for p in rows]), 200
+
+@app.post('/api/trade/propose')
+@login_required
+def trade_propose():
+    payload = request.get_json(silent=True) or {}
+    listing_id = payload.get('listing_id')
+    kind = payload.get('kind')
+    data = payload.get('data') or {}
+    if not listing_id or not kind:
+        return jsonify({"ok": False, "error": "missing listing_id or kind"}), 400
+    listing = BetListing.query.get(int(listing_id))
+    if not listing:
+        return jsonify({"ok": False, "error": "listing_not_found"}), 404
+    me = str(current_user.get_id())
+    if listing.user_id == me:
+        return jsonify({"ok": False, "error": "cannot_propose_on_own_listing"}), 400
+    prop = TradeProposal(
+        listing_id=listing.id,
+        from_user_id=me,
+        kind=kind,
+        data=data
+    )
+    db.session.add(prop)
+    db.session.commit()
+    return jsonify({"ok": True, "proposal_id": prop.id}), 200
+
+# tout en haut avec les imports
+from sqlalchemy import text
+
+def ensure_column(table_name: str, column: str, coltype_sql: str):
+    """
+    Ajoute la colonne si elle n'existe pas déjà.
+    'table_name' doit être le NOM DE TABLE RÉEL (ex: PPPBet.__table__.name).
+    Ne fait rien si la table n'existe pas.
+    """
+    # 0) la table existe ?
+    exists_tbl = db.session.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"),
+        {"t": table_name}
+    ).fetchone()
+    if not exists_tbl:
+        # table pas encore créée -> on ne fait rien (db.create_all la créera)
+        return
+
+    # 1) la colonne existe ?
+    col = db.session.execute(
+        text(f"SELECT 1 FROM pragma_table_info('{table_name}') WHERE name=:c"),
+        {"c": column}
+    ).fetchone()
+    if col:
+        return
+
+    # 2) ajouter la colonne
+    db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column} {coltype_sql}"))
+    db.session.commit()
+
+    
+
+# ---------- Ingestor Infoclimat : Roissy–Charles-de-Gaulle (07157) ----------
+IC_CDG_URL = "https://www.infoclimat.fr/observations-meteo/temps-reel/roissy-charles-de-gaulle/07157.html"
+PARIS_TZ = ZoneInfo("Europe/Paris")
+
+def _parse_ic_cdg_humidity_rows(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    # Try to find a table that contains Humidité rows
+    for t in soup.find_all("table"):
+        header = " ".join(t.get_text(" ", strip=True).split())
+        if ("Humidité" in header) or ("Humi" in header):
+            rows = []
+            now_paris = datetime.now(PARIS_TZ)
+            for tr in t.find_all("tr"):
+                txt = " ".join(tr.get_text(" ", strip=True).split())
+                if not txt:
+                    continue
+                m_time = re.search(r"\b([01]?\d|2[0-3])(?:[:h]([0-5]\d))?\b", txt)
+                m_hum  = re.search(r"\b(\d{1,3})\s*%\b", txt)
+                if not m_time or not m_hum:
+                    continue
+                hour   = int(m_time.group(1))
+                minute = int(m_time.group(2)) if m_time.group(2) else 0
+                hum    = int(m_hum.group(1))
+                dt_paris = now_paris.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if dt_paris > now_paris:
+                    dt_paris = dt_paris - timedelta(days=1)
+                rows.append((dt_paris, hum))
+            if rows:
+                return rows
+    # Fallback: scan text
+    all_txt = " ".join(soup.get_text(" ", strip=True).split())
+    rows, now_paris = [], datetime.now(PARIS_TZ)
+    for m in re.finditer(r"\b([01]?\d|2[0-3])(?:[:h]([0-5]\d))?\b[^%]{0,50}?(\d{1,3})\s?%", all_txt):
+        hour   = int(m.group(1))
+        minute = int(m.group(2)) if m.group(2) else 0
+        hum    = int(m.group(3))
+        dt_paris = now_paris.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if dt_paris > now_paris:
+            dt_paris = dt_paris - timedelta(days=1)
+        rows.append((dt_paris, hum))
+    return rows
+
+def ingest_infoclimat_cdg(station_id="cdg_07157") -> int:
+    r = requests.get(IC_CDG_URL, timeout=12)
+    r.raise_for_status()
+    pairs = _parse_ic_cdg_humidity_rows(r.text)
+    if not pairs:
+        return 0
+    inserted = 0
+    with app.app_context():
+        for dt_paris, hum in pairs:
+            dt_utc = dt_paris.astimezone(timezone.utc)
+            exists = (HumidityObservation.query
+                      .filter_by(station_id=station_id)
+                      .filter(HumidityObservation.obs_time == dt_utc)
+                      .first())
+            if exists:
+                continue
+            db.session.add(HumidityObservation(
+                station_id=station_id,
+                obs_time=dt_utc,
+                humidity=float(hum)
+            ))
+            inserted += 1
+        if inserted:
+            db.session.commit()
+    return inserted
+
+@app.route("/admin/ingest/cdg")
+@login_required
+def admin_ingest_cdg():
+    try:
+        n = ingest_infoclimat_cdg(station_id="cdg_07157")
+        return jsonify({"inserted": n})
+    except Exception as e:
+        app.logger.exception("admin_ingest_cdg failed")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    with app.app_context():
+        # 1) créer toutes les tables connues des modèles
+        db.create_all()
+
+        # BetListing : colonnes nécessaires
+        try:
+            tbl = BetListing.__table__.name
+            ensure_column(tbl, "kind",           "TEXT")
+            ensure_column(tbl, "city",           "TEXT")
+            ensure_column(tbl, "date_label",     "TEXT")
+            ensure_column(tbl, "deadline_key",   "TEXT")
+            ensure_column(tbl, "choice",         "TEXT")
+            ensure_column(tbl, "side",           "TEXT NOT NULL DEFAULT 'RAIN'")  # <— IMPORTANT
+            ensure_column(tbl, "stake",          "REAL")
+            ensure_column(tbl, "base_odds",      "REAL")
+            ensure_column(tbl, "boosts_count",   "INTEGER")
+            ensure_column(tbl, "boosts_add",     "REAL")
+            ensure_column(tbl, "total_odds",     "REAL")
+            ensure_column(tbl, "potential_gain", "REAL")
+            ensure_column(tbl, "ask_price",       "REAL")
+            # si payload était TEXT chez toi, laisse tomber cette ligne
+            # ensure_column(tbl, "payload", "TEXT")
+            # NB: expires_at est déjà NOT NULL dans ton schéma → on ne le modifie pas ici.
+        except Exception as e:
+            app.logger.warning(f"[migrate] bet_listings extra cols: {e}")
+
+        # PPPBet : verrouillage trade
+        try:
+            ensure_column(PPPBet.__table__.name, "locked_for_trade", "INTEGER DEFAULT 0")
+        except Exception as e:
+            app.logger.warning(f"[migrate] ppp_bets.locked_for_trade: {e}")
+        try:
+            ensure_column(BetListing.__table__.name, "price", "REAL")
+        except Exception as e:
+            app.logger.warning(f"[migrate] bet_listings.price: {e}")
+        try:
+            ensure_column(User.__table__.name, "last_seen", "TIMESTAMP")  # en UTC
+        except Exception as e:
+            app.logger.warning(f"[migrate] users.last_seen: {e}")    
+
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

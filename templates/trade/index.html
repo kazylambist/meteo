@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <title>Trade</title>
+  <link rel="stylesheet" href="/static/trade/styles.css">
+</head>
+<body class="trade-page">
+  <header class="topbar">
+    <div class="container">
+      <a class="navlink" href="/ppp">Retour</a>
+      <span class="spacer"></span>
+      <a class="navlink active" href="/trade/">🤝</a>
+    </div>
+  </header>
+
+  <main class="trade-layout">
+    <!-- Colonne gauche : moi -->
+    <section class="me-card">
+      <div
+        class="avatar-mini"
+        style="
+          display:inline-block;
+          background-image:url('{{ me_avatar_url }}');
+          background-size:cover;
+          background-position:center;
+          border-radius:50%;
+          border:1px solid rgba(0,0,0,.15);
+          flex:0 0 auto;
+        ">
+      </div>
+
+      <div class="me-info">
+        <div id="me-pseudo">{{ current_user.username }}</div>
+        <div id="me-points">{{ solde_str }} ⛃</div>
+      </div>
+    </section>
+
+    <!-- Centre : le marché -->
+    <section class="market">
+      <!-- Bouton + menu déroulant “Mettre en vente” -->
+      <div class="sell-wrapper">
+        <button id="sellBtn" class="btn" type="button">Mettre en vente</button>
+        <div id="sellMenu" class="sell-menu overlay" hidden>
+          <header class="sell-header">
+            <strong>Mes mises disponibles</strong>
+            <button id="closeSellMenu" class="btn btn-ghost" type="button" title="Fermer">×</button>
+          </header>
+          <ul id="myBetsList" class="sell-list">
+            <!-- rempli par JS via /api/trade/my-bets -->
+          </ul>
+        </div>
+      </div>
+
+      <!-- Résumé de l’annonce sélectionnée -->
+      <div id="selectedListing" class="selected-listing" hidden>
+        <div class="label">Annonce sélectionnée :</div>
+        <div id="selectedListingLabel" class="value"></div>
+      </div>
+
+      <div id="selectedListing" class="selected" hidden>
+        <div id="selectedListingLabel"></div>
+        <div class="sell-controls">
+          <label>Prix de vente</label>
+          <input type="number" id="sellPrice" min="0" step="0.1" value="1.0">
+          <button class="btn" id="confirmSellBtn" type="button">OK</button>
+        </div>
+      </div>
+
+      <!-- Flux d’annonces publiques -->
+      <div id="listings" class="listing-list"></div>
+
+    </section>
+
+    <!-- Droite : autres joueurs -->
+    <aside class="roster">
+      <h3>Joueurs connectés</h3>
+      <div id="roster" class="roster-list"></div>
+    </aside>
+  </main>
+
+  <div id="chat-dock" class="chat-dock"></div>
+
+  <script>
+    window.TRADE_CFG = {
+      MANIFEST_URL: "{{ url_for('static', filename='cabine/assets/manifest.json') }}",
+      USER_ID: {{ (current_user.get_id() if current_user.is_authenticated else 'null') | tojson }}
+    };
+  </script>
+  <script src="/static/trade/app.js" defer></script>
+</body>
+</html>

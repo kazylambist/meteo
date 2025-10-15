@@ -1,0 +1,492 @@
+[
+  {
+    "id": "lfpg_95",
+    "name": "Paris-Charles de Gaulle",
+    "city": "Roissy-en-France",
+    "dept": "95",
+    "icao": "LFPG"
+  },
+  {
+    "id": "lfpo_94",
+    "name": "Paris-Orly",
+    "city": "Orly",
+    "dept": "94",
+    "icao": "LFPO"
+  },
+  {
+    "id": "lfpb_93",
+    "name": "Paris-Le Bourget",
+    "city": "Le Bourget",
+    "dept": "93",
+    "icao": "LFPB"
+  },
+  {
+    "id": "lfqq_59",
+    "name": "Lille-Lesquin",
+    "city": "Lesquin",
+    "dept": "59",
+    "icao": "LFQQ"
+  },
+  {
+    "id": "lfaq_62",
+    "name": "Arras-Roclincourt",
+    "city": "Roclincourt",
+    "dept": "62",
+    "icao": "LFAQ"
+  },
+  {
+    "id": "lfat_62",
+    "name": "Le Touquet-Côte d’Opale",
+    "city": "Le Touquet-Paris-Plage",
+    "dept": "62",
+    "icao": "LFAT"
+  },
+  {
+    "id": "lfac_62",
+    "name": "Calais-Dunkerque",
+    "city": "Marck",
+    "dept": "62",
+    "icao": "LFAC"
+  },
+  {
+    "id": "lfaq_62b",
+    "name": "Merville-Calonne",
+    "city": "Merville",
+    "dept": "59",
+    "icao": "LFQT"
+  },
+  {
+    "id": "lfqy_80",
+    "name": "Amiens-Glisy",
+    "city": "Glisy",
+    "dept": "80",
+    "icao": "LFAY"
+  },
+  {
+    "id": "lfob_60",
+    "name": "Beauvais-Tillé",
+    "city": "Tillé",
+    "dept": "60",
+    "icao": "LFOB"
+  },
+  {
+    "id": "lfrk_14",
+    "name": "Caen-Carpiquet",
+    "city": "Carpiquet",
+    "dept": "14",
+    "icao": "LFRK"
+  },
+  {
+    "id": "lfrg_14",
+    "name": "Deauville-Normandie",
+    "city": "Saint-Gatien-des-Bois",
+    "dept": "14",
+    "icao": "LFRG"
+  },
+  {
+    "id": "lfoh_76",
+    "name": "Le Havre-Octeville",
+    "city": "Le Havre",
+    "dept": "76",
+    "icao": "LFOH"
+  },
+  {
+    "id": "lfop_76",
+    "name": "Rouen-Vallée de Seine",
+    "city": "Boos",
+    "dept": "76",
+    "icao": "LFOP"
+  },
+  {
+    "id": "lfrc_50",
+    "name": "Cherbourg-Maupertus",
+    "city": "Maupertus-sur-Mer",
+    "dept": "50",
+    "icao": "LFRC"
+  },
+  {
+    "id": "lfrf_50",
+    "name": "Granville-Mont Saint-Michel",
+    "city": "Bréville-sur-Mer",
+    "dept": "50",
+    "icao": "LFRF"
+  },
+  {
+    "id": "lfrb_29",
+    "name": "Brest-Guipavas",
+    "city": "Guipavas",
+    "dept": "29",
+    "icao": "LFRB"
+  },
+  {
+    "id": "lfrq_29",
+    "name": "Quimper-Pluguffan",
+    "city": "Pluguffan",
+    "dept": "29",
+    "icao": "LFRQ"
+  },
+  {
+    "id": "lfrh_56",
+    "name": "Lorient-Lann-Bihoué",
+    "city": "Ploemeur",
+    "dept": "56",
+    "icao": "LFRH"
+  },
+  {
+    "id": "lfru_22",
+    "name": "Lannion-Servel",
+    "city": "Lannion",
+    "dept": "22",
+    "icao": "LFRO"
+  },
+  {
+    "id": "lfrd_35",
+    "name": "Dinard-Pleurtuit-Saint-Malo",
+    "city": "Dinard",
+    "dept": "35",
+    "icao": "LFRD"
+  },
+  {
+    "id": "lfrn_35",
+    "name": "Rennes-Saint-Jacques",
+    "city": "Rennes",
+    "dept": "35",
+    "icao": "LFRN"
+  },
+  {
+    "id": "lfrs_44",
+    "name": "Nantes-Atlantique",
+    "city": "Bouguenais",
+    "dept": "44",
+    "icao": "LFRS"
+  },
+  {
+    "id": "lfrz_44",
+    "name": "Saint-Nazaire-Montoir",
+    "city": "Montoir-de-Bretagne",
+    "dept": "44",
+    "icao": "LFRZ"
+  },
+  {
+    "id": "lfri_85",
+    "name": "La Roche-sur-Yon Les Ajoncs",
+    "city": "La Roche-sur-Yon",
+    "dept": "85",
+    "icao": "LFRI"
+  },
+  {
+    "id": "lfbh_17",
+    "name": "La Rochelle-Île de Ré",
+    "city": "La Rochelle",
+    "dept": "17",
+    "icao": "LFBH"
+  },
+  {
+    "id": "lfbd_33",
+    "name": "Bordeaux-Mérignac",
+    "city": "Mérignac",
+    "dept": "33",
+    "icao": "LFBD"
+  },
+  {
+    "id": "lfby_40",
+    "name": "Mont-de-Marsan",
+    "city": "Mont-de-Marsan",
+    "dept": "40",
+    "icao": "LFBY"
+  },
+  {
+    "id": "lfrp_64",
+    "name": "Biarritz-Pays Basque",
+    "city": "Anglet",
+    "dept": "64",
+    "icao": "LFBZ"
+  },
+  {
+    "id": "lfbp_64",
+    "name": "Pau-Pyrénées",
+    "city": "Uzein",
+    "dept": "64",
+    "icao": "LFBP"
+  },
+  {
+    "id": "lfbt_65",
+    "name": "Tarbes-Lourdes-Pyrénées",
+    "city": "Ossun",
+    "dept": "65",
+    "icao": "LFBT"
+  },
+  {
+    "id": "lfch_33",
+    "name": "Arcachon-La Teste",
+    "city": "La Teste-de-Buch",
+    "dept": "33",
+    "icao": "LFCH"
+  },
+  {
+    "id": "lfbq_47",
+    "name": "Agen-La Garenne",
+    "city": "Le Passage",
+    "dept": "47",
+    "icao": "LFBA"
+  },
+  {
+    "id": "lfcb_12",
+    "name": "Rodez-Aveyron",
+    "city": "Salles-la-Source",
+    "dept": "12",
+    "icao": "LFCR"
+  },
+  {
+    "id": "lfmp_66",
+    "name": "Perpignan-Rivesaltes",
+    "city": "Rivesaltes",
+    "dept": "66",
+    "icao": "LFMP"
+  },
+  {
+    "id": "lfmk_11",
+    "name": "Carcassonne-Salvaza",
+    "city": "Carcassonne",
+    "dept": "11",
+    "icao": "LFMK"
+  },
+  {
+    "id": "lfmt_34",
+    "name": "Montpellier-Méditerranée",
+    "city": "Mauguio",
+    "dept": "34",
+    "icao": "LFMT"
+  },
+  {
+    "id": "lfbo_31",
+    "name": "Toulouse-Blagnac",
+    "city": "Blagnac",
+    "dept": "31",
+    "icao": "LFBO"
+  },
+  {
+    "id": "lfmw_11",
+    "name": "Castres-Mazamet",
+    "city": "Labruguière",
+    "dept": "81",
+    "icao": "LFCK"
+  },
+  {
+    "id": "lftw_30",
+    "name": "Nîmes-Garons",
+    "city": "Garons",
+    "dept": "30",
+    "icao": "LFTW"
+  },
+  {
+    "id": "lfmt_34b",
+    "name": "Béziers-Cap d’Agde",
+    "city": "Vias",
+    "dept": "34",
+    "icao": "LFMU"
+  },
+  {
+    "id": "lflc_63",
+    "name": "Clermont-Ferrand Auvergne",
+    "city": "Aulnat",
+    "dept": "63",
+    "icao": "LFLC"
+  },
+  {
+    "id": "lfll_69",
+    "name": "Lyon-Saint-Exupéry",
+    "city": "Colombier-Saugnieu",
+    "dept": "69",
+    "icao": "LFLL"
+  },
+  {
+    "id": "lfly_69",
+    "name": "Lyon-Bron",
+    "city": "Lyon",
+    "dept": "69",
+    "icao": "LFLY"
+  },
+  {
+    "id": "lflb_73",
+    "name": "Chambéry-Savoie",
+    "city": "Voglans",
+    "dept": "73",
+    "icao": "LFLB"
+  },
+  {
+    "id": "lflp_74",
+    "name": "Annecy-Meythet",
+    "city": "Annecy",
+    "dept": "74",
+    "icao": "LFLP"
+  },
+  {
+    "id": "lfhu_38",
+    "name": "Grenoble-Le Versoud",
+    "city": "Le Versoud",
+    "dept": "38",
+    "icao": "LFLG"
+  },
+  {
+    "id": "lfls_38",
+    "name": "Grenoble-Isère (St-Geoirs)",
+    "city": "Saint-Étienne-de-Saint-Geoirs",
+    "dept": "38",
+    "icao": "LFLS"
+  },
+  {
+    "id": "lfmh_42",
+    "name": "Saint-Étienne-Bouthéon",
+    "city": "Andrézieux-Bouthéon",
+    "dept": "42",
+    "icao": "LFMH"
+  },
+  {
+    "id": "lfml_13",
+    "name": "Marseille-Provence (Marignane)",
+    "city": "Marignane",
+    "dept": "13",
+    "icao": "LFML"
+  },
+  {
+    "id": "lfmd_06",
+    "name": "Cannes-Mandelieu",
+    "city": "Cannes",
+    "dept": "06",
+    "icao": "LFMD"
+  },
+  {
+    "id": "lfmn_06",
+    "name": "Nice-Côte d’Azur",
+    "city": "Nice",
+    "dept": "06",
+    "icao": "LFMN"
+  },
+  {
+    "id": "lfth_83",
+    "name": "Toulon-Hyères",
+    "city": "Hyères",
+    "dept": "83",
+    "icao": "LFTH"
+  },
+  {
+    "id": "lfmv_84",
+    "name": "Avignon-Provence",
+    "city": "Avignon",
+    "dept": "84",
+    "icao": "LFMV"
+  },
+  {
+    "id": "lfmf_04",
+    "name": "Gap-Tallard",
+    "city": "Tallard",
+    "dept": "05",
+    "icao": "LFNA"
+  },
+  {
+    "id": "lfma_13",
+    "name": "Aix-Les Milles",
+    "city": "Aix-en-Provence",
+    "dept": "13",
+    "icao": "LFMA"
+  },
+  {
+    "id": "lfkj_2a",
+    "name": "Ajaccio-Napoléon Bonaparte",
+    "city": "Ajaccio",
+    "dept": "2A",
+    "icao": "LFKJ"
+  },
+  {
+    "id": "lfkc_2b",
+    "name": "Calvi-Sainte-Catherine",
+    "city": "Calvi",
+    "dept": "2B",
+    "icao": "LFKC"
+  },
+  {
+    "id": "lfkb_2b",
+    "name": "Bastia-Poretta",
+    "city": "Lucciana",
+    "dept": "2B",
+    "icao": "LFKB"
+  },
+  {
+    "id": "lfkf_2a",
+    "name": "Figari-Sud Corse",
+    "city": "Figari",
+    "dept": "2A",
+    "icao": "LFKF"
+  },
+  {
+    "id": "lfst_67",
+    "name": "Strasbourg-Entzheim",
+    "city": "Entzheim",
+    "dept": "67",
+    "icao": "LFST"
+  },
+  {
+    "id": "lfjl_57",
+    "name": "Metz-Nancy-Lorraine",
+    "city": "Goin",
+    "dept": "57",
+    "icao": "LFJL"
+  },
+  {
+    "id": "lfsb_68",
+    "name": "Bâle-Mulhouse",
+    "city": "Saint-Louis",
+    "dept": "68",
+    "icao": "LFSB"
+  },
+  {
+    "id": "lfsd_21",
+    "name": "Dijon-Longvic",
+    "city": "Ouges",
+    "dept": "21",
+    "icao": "LFSD"
+  },
+  {
+    "id": "lfsa_25",
+    "name": "Besançon-La Vèze",
+    "city": "La Vèze",
+    "dept": "25",
+    "icao": "LFQM"
+  },
+  {
+    "id": "lfrj_22",
+    "name": "Saint-Brieuc-Armor",
+    "city": "Trémuson",
+    "dept": "22",
+    "icao": "LFRT"
+  },
+  {
+    "id": "lfot_37",
+    "name": "Tours Val de Loire",
+    "city": "Tours",
+    "dept": "37",
+    "icao": "LFOT"
+  },
+  {
+    "id": "lfbl_87",
+    "name": "Limoges-Bellegarde",
+    "city": "Limoges",
+    "dept": "87",
+    "icao": "LFBL"
+  },
+  {
+    "id": "lfbi_86",
+    "name": "Poitiers-Biard",
+    "city": "Biard",
+    "dept": "86",
+    "icao": "LFBI"
+  },
+  {
+    "id": "lfoz_18",
+    "name": "Bourges",
+    "city": "Bourges",
+    "dept": "18",
+    "icao": "LFLD"
+  }
+]

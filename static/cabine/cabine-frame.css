@@ -1,0 +1,110 @@
+
+/* cabine-frame.css — Cadre de miroir doré pour la fenêtre avatar */
+
+/* === Option A : Cadre doré 100% CSS (sans images) ========================= */
+
+.frame-mirror{
+  /* Place ce wrapper autour de .stage */
+  position: relative;
+  padding: 22px;                 /* largeur du cadre */
+  border-radius: 26px;           /* angles adoucis façon cadre ancien */
+  background:
+    /* relief intérieur foncé */
+    linear-gradient(#2a1f0f, #1b130a) padding-box,
+    /* liseré sombre (filet) */
+    linear-gradient(#000, #000) border-box;
+  border: 1px solid transparent; /* nécessaire pour le "filet" via border-box layer */
+  box-shadow:
+    0 0 0 2px rgba(0,0,0,.35) inset,
+    0 8px 24px rgba(0,0,0,.45),     /* ombre portée extérieure */
+    0 2px 4px rgba(0,0,0,.6) inset; /* ombre intérieure */
+  isolation: isolate;
+}
+
+.frame-mirror::before,
+.frame-mirror::after{
+  content:"";
+  position:absolute; inset:0;
+  border-radius: 24px;
+  pointer-events:none;
+}
+
+/* Dorures (reliefs) par dégradés coniques superposés */
+.frame-mirror::before{
+  padding: 8px;          /* épaisseur du motif doré */
+  border: 10px solid transparent;
+  /* Trois couches: base or, reflets, motifs */
+  background:
+    /* base or satinée */
+    conic-gradient(from 0deg, #6b4a12, #d9a83a 20%, #f5d174 40%, #a87522 60%, #d9a83a 80%, #6b4a12) border-box,
+    /* reflets obliques */
+    linear-gradient(130deg, rgba(255,255,255,.35), rgba(255,255,255,0) 35%,
+                           rgba(0,0,0,.2) 65%, rgba(255,255,255,.2) 85%) border-box,
+    /* nervures/gravure légère */
+    repeating-conic-gradient(from 0deg, rgba(255,255,255,.08) 0 6deg, rgba(0,0,0,.08) 6deg 12deg) padding-box;
+  -webkit-mask:
+    radial-gradient(140% 140% at -10% -10%, transparent 35px, #000 36px) top left,
+    radial-gradient(140% 140% at 110% -10%, transparent 35px, #000 36px) top right,
+    radial-gradient(140% 140% at -10% 110%, transparent 35px, #000 36px) bottom left,
+    radial-gradient(140% 140% at 110% 110%, transparent 35px, #000 36px) bottom right,
+    linear-gradient(#000,#000);
+  -webkit-mask-composite: source-over, source-over, source-over, source-over, xor;
+  mask-composite: exclude;
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.35) inset,
+    0 0 0 2px rgba(255,255,255,.12) inset;
+}
+
+/* Lueurs animées très discrètes (donne vie au métal) */
+@keyframes gildShine {
+  0%   { filter: hue-rotate(0deg) saturate(115%); }
+  50%  { filter: hue-rotate(-6deg) saturate(105%); }
+  100% { filter: hue-rotate(0deg) saturate(115%); }
+}
+.frame-mirror::before{ animation: gildShine 14s ease-in-out infinite; }
+
+/* Le contenu (.stage) à l'intérieur du cadre */
+.frame-mirror > .stage{
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+  border: 1px solid rgba(255,255,255,.06); /* discret liseré intérieur */
+}
+
+/* === Option B : Cadre 9‑pans (images PNG) ================================== */
+/*
+Si tu ajoutes des images dans static/cabine/assets/frame/ :
+  corners:  frame-corner-tl.png, frame-corner-tr.png, frame-corner-bl.png, frame-corner-br.png
+  sides:    frame-edge-top.png, frame-edge-right.png, frame-edge-bottom.png, frame-edge-left.png
+Décommente la section ci-dessous et commente Option A pour un rendu plus réaliste.
+*/
+/*
+.frame-mirror{
+  position: relative;
+  padding: 24px;
+  border-radius: 0;
+  background: #1b130a;
+}
+.frame-mirror::before,
+.frame-mirror::after{
+  content:""; position:absolute; inset:0; pointer-events:none;
+}
+.frame-mirror::before{
+  /* bords * /
+  background:
+    url('assets/frame/frame-edge-top.png') top center / 100% 24px no-repeat,
+    url('assets/frame/frame-edge-right.png') right center / 24px 100% no-repeat,
+    url('assets/frame/frame-edge-bottom.png') bottom center / 100% 24px no-repeat,
+    url('assets/frame/frame-edge-left.png') left center / 24px 100% no-repeat;
+}
+.frame-mirror::after{
+  /* coins * /
+  background:
+    url('assets/frame/frame-corner-tl.png') top left / 48px 48px no-repeat,
+    url('assets/frame/frame-corner-tr.png') top right / 48px 48px no-repeat,
+    url('assets/frame/frame-corner-bl.png') bottom left / 48px 48px no-repeat,
+    url('assets/frame/frame-corner-br.png') bottom right / 48px 48px no-repeat;
+}
+.frame-mirror > .stage{ border:none; border-radius:0; }
+*/

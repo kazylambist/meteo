@@ -1,0 +1,139 @@
+*{box-sizing:border-box}
+:root{
+  --bg:#061a2c;
+  --bg-grad:linear-gradient(180deg,#051627 0%,#0a2341 100%);
+  --card:#0e2e57;
+  --ink:#e6f0ff;
+  --ink-dim:#aac1e6;
+  --accent:#2bb3ff;
+  --accent-2:#4567ff;
+  --radius:18px;
+}
+html,body{margin:0;height:100%;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial}
+body{background:var(--bg-grad)}
+
+.topbar{
+  display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06);
+  background:rgba(0,0,0,.2);backdrop-filter:blur(6px);position:sticky;top:0;z-index:1000
+}
+.brand{font-weight:800;letter-spacing:.5px}
+.brand span{color:var(--accent)}
+.spacer{flex:1}
+.navlink{color:var(--ink);text-decoration:none;padding:8px 12px;border-radius:10px}
+.navlink.active{background:rgba(255,255,255,.08)}
+
+.cabine{display:grid;grid-template-columns:minmax(380px,1fr) minmax(340px,480px);gap:28px;max-width:1200px;margin:28px auto;padding:0 20px}
+.canvas-col{display:flex;flex-direction:column;gap:16px}
+.stage{
+  width:100%;aspect-ratio:3/4;border-radius:var(--radius);
+  background:radial-gradient(120% 120% at 50% 10%, #0b315e 0%, #081f38 40%, #07192e 100%);
+  border:1px solid rgba(255,255,255,.08);
+  position:relative;overflow:hidden;display:grid;place-items:center;
+}
+.layer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.layer img{max-width:100%;max-height:100%;object-fit:contain;image-rendering:auto}
+
+.actions{display:flex;gap:12px;margin-top:8px}
+.btn{padding:12px 16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;background:#122a48;color:var(--ink);cursor:pointer;font-weight:600}
+.btn.primary{background:linear-gradient(180deg,var(--accent) 0%,var(--accent-2) 100%);border:none}
+.btn.ghost{background:transparent}
+
+/* ----- panneau de droite par défaut (mais on le rend “invisible” plus bas) */
+.controls-col{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:var(--radius);padding:16px}
+.controls-col h1{margin:0 0 8px 0}
+.muted{color:var(--ink-dim);margin-top:0}
+.control{margin:10px 0 14px 0}
+.control label{display:block;margin:0 0 6px 2px;font-size:14px;color:var(--ink-dim)}
+select{
+  width:100%;padding:10px 12px;border-radius:10px;background:#0b2443;color:var(--ink);
+  border:1px solid rgba(255,255,255,.15);outline:none
+}
+
+/* === Fond plein écran image pour LA page Cabine uniquement ================= */
+body.cabine-page{
+  position:relative;
+  background:#040b16; /* fallback sombre */
+  min-height:100vh;
+}
+body.cabine-page::before{
+  content:"";position:fixed;inset:0;z-index:0;
+  background-image:url('assets/img/ciel1.jpg'); /* chemin depuis /cabine/ */
+  background-size:cover;background-position:center;background-attachment:fixed;
+  filter:saturate(110%) contrast(105%)
+}
+body.cabine-page::after{
+  content:"";position:fixed;inset:0;z-index:0;
+  background:linear-gradient(180deg,rgba(3,10,22,.55),rgba(3,10,22,.75))
+}
+/* le contenu est au-dessus du fond */
+header,main,footer{position:relative;z-index:1}
+
+/* --- Rendre les “fenêtres” invisibles : on ne garde que le contenu ---- */
+.controls-col{
+  background:transparent !important;border:0 !important;box-shadow:none !important;padding:0 !important;
+  position:static !important;top:auto !important;max-height:none !important;overflow:visible !important;
+}
+.controls-col::before,.controls-col::after{display:none !important}
+.controls-col > *{padding-left:0;padding-right:0;margin-left:0;margin-right:0}
+.controls-col h1{margin:0 0 8px 0}.controls-col .muted{margin:0 0 12px 0}
+
+.stage{
+  background:transparent !important;border:0 !important;box-shadow:none !important;
+  /* overflow:visible !important;  // décommente si tu veux autoriser le dépassement */
+}
+.canvas-col{background:transparent !important;border:0 !important;box-shadow:none !important}
+
+/* ====== Menus custom ULTRA-COMPACTS en OVERLAY (ne prennent pas de place) ====== */
+.combo{position:relative}
+.combo-btn{
+  width:100%;padding:10px 12px;border-radius:10px;background:#0b2443;color:var(--ink);
+  border:1px solid rgba(255,255,255,.15);font-weight:700;text-align:left;cursor:pointer
+}
+.combo.open .combo-btn{border-color:rgba(120,180,255,.5);box-shadow:0 0 0 3px rgba(120,180,255,.12)}
+
+/* Panneau overlay : absolu, compact, avec scroll interne (pas de scroll de la colonne) */
+.combo-panel{
+  position:absolute;z-index:100;left:0;right:0;top:calc(100% + 6px);
+  background:rgba(9,18,35,.98);border:1px solid rgba(255,255,255,.08);border-radius:10px;
+  box-shadow:0 10px 28px rgba(0,0,0,.35);list-style:none;margin:0;padding:6px;
+  max-height:220px;overflow:auto;backdrop-filter:blur(6px)
+}
+.combo-panel[data-dir="up"]{top:auto;bottom:calc(100% + 6px)}
+.combo-item{
+  padding:8px 10px;border-radius:8px;color:#cfe3ff;cursor:pointer;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.combo-item:hover{background:rgba(120,180,255,.12);color:#79e7ff}
+.controls-col .actions{
+  display: flex;
+  justify-content: center;  /* centre horizontalement */
+  gap: 12px;
+  margin-top: 32px;         /* ↑ ajuste pour les descendre davantage */
+  width: 100%;
+}
+.controls-col .actions .btn{ min-width: 140px; }
+/* Bouton Réinitialiser (discret) dans la colonne de droite */
+.controls-col .controls-extra{
+  display: flex;
+  justify-content: flex-end; /* aligne à droite */
+  margin-top: 10px;
+}
+
+.controls-col .reset-all{
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.15);
+  background: transparent;
+  color: #cfe3ff;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: .8;
+}
+.controls-col .reset-all:hover{
+  opacity: 1;
+  background: rgba(255,255,255,.06);
+}
+.controls-col .reset-all:active{
+  transform: translateY(1px);
+}
