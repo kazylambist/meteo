@@ -1809,7 +1809,7 @@ AUTH_HTML = """
 PPP_HTML = """
 <!doctype html><html lang='fr'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>Paris — Pluie ou Pas Pluie</title>
+<title>Zeus</title>
 {{ css|safe }}
 <style>
   .brand { color:#2160f3; font-weight:800; text-decoration:none; text-shadow:none; }
