@@ -2,332 +2,103 @@
   "avatar": "assets/avatar.png",
   "categories": {
     "PIEDS": [
-      {
-        "src": "assets/pieds/Caoutchouc.png",
-        "label": "Caoutchouc"
-      },
-      {
-        "src": "assets/pieds/Provence.png",
-        "label": "Provence"
-      },
-      {
-        "src": "assets/pieds/Vitesse.png",
-        "label": "Vitesse"
-      },
-      {
-        "src": "assets/pieds/Detente.png",
-        "label": "Détente"
-      },
-      {
-        "src": "assets/pieds/Cruise.png",
-        "label": "Cruise"
-      },
-      {
-        "src": "assets/pieds/La Notte.png",
-        "label": "La Notte"
-      },
-      {
-        "src": "assets/pieds/Altitude.png",
-        "label": "Altitude"
-      },
-      {
-        "src": "assets/pieds/Surf.png",
-        "label": "Surf"
-      }
+      "assets/pieds/Caoutchouc.png",
+      "assets/pieds/Provence.png",
+      "assets/pieds/Vitesse.png",
+      "assets/pieds/Detente.png",
+      "assets/pieds/Cruise.png",
+      "assets/pieds/La Notte.png",
+      "assets/pieds/Altitude.png",
+      "assets/pieds/Surf.png"
     ],
     "JAMBES": [
-      {
-        "src": "assets/jambes/Britney.png",
-        "label": "Britney"
-      },
-      {
-        "src": "assets/jambes/Enzo.png",
-        "label": "Enzo"
-      },
-      {
-        "src": "assets/jambes/Cleopatre.png",
-        "label": "Cléopâtre"
-      },
-      {
-        "src": "assets/jambes/Boxer Blanc.png",
-        "label": "Boxer Blanc"
-      },
-      {
-        "src": "assets/jambes/Dior.png",
-        "label": "Dior"
-      },
-      {
-        "src": "assets/jambes/Couche.png",
-        "label": "Couche"
-      }
+      "assets/jambes/Britney.png",
+      "assets/jambes/Enzo.png",
+      "assets/jambes/Cleopâtre.png",
+      "assets/jambes/Boxer Blanc.png",
+      "assets/jambes/Dior.png",
+      "assets/jambes/Couche.png"
     ],
     "TORSE": [
-      {
-        "src": "assets/torse/Audrey.png",
-        "label": "Audrey"
-      },
-      {
-        "src": "assets/torse/Nerd.png",
-        "label": "Nerd"
-      },
-      {
-        "src": "assets/torse/Prof.png",
-        "label": "Prof"
-      },
-      {
-        "src": "assets/torse/Mark.png",
-        "label": "Mark"
-      },
-      {
-        "src": "assets/torse/Maria.png",
-        "label": "Maria"
-      },
-      {
-        "src": "assets/torse/John.png",
-        "label": "John"
-      },
-      {
-        "src": "assets/torse/Cindy.png",
-        "label": "Cindy"
-      },
-      {
-        "src": "assets/torse/Kevin.png",
-        "label": "Kevin"
-      },
-      {
-        "src": "assets/torse/Gwendo.png",
-        "label": "Gwendo"
-      },
-      {
-        "src": "assets/torse/T-shirt Blanc.png",
-        "label": "T-shirt Blanc"
-      },
-      {
-        "src": "assets/torse/Sophie.png",
-        "label": "Sophie"
-      },
-      {
-        "src": "assets/torse/Zaina.png",
-        "label": "Zaina"
-      },
-      {
-        "src": "assets/torse/Jacques.png",
-        "label": "Jacques"
-      }
+      "assets/torse/Audrey.png",
+      "assets/torse/Nerd.png",
+      "assets/torse/Prof.png",
+      "assets/torse/Mark.png",
+      "assets/torse/Maria.png",
+      "assets/torse/John.png",
+      "assets/torse/Cindy.png",
+      "assets/torse/Kevin.png",
+      "assets/torse/Gwendo.png",
+      "assets/torse/T-shirt Blanc.png",
+      "assets/torse/Sophie.png",
+      "assets/torse/Zaina.png",
+      "assets/torse/Jacques.png"
+
     ],
     "CEINTURE": [
-      {
-        "src": "assets/ceinture/Roi Soleil.png",
-        "label": "Roi Soleil"
-      },
-      {
-        "src": "assets/ceinture/Secretariat.png",
-        "label": "Secrétariat"
-      },
-      {
-        "src": "assets/ceinture/Gaule.png",
-        "label": "Gaule"
-      },
-      {
-        "src": "assets/ceinture/Licorne.png",
-        "label": "Licorne"
-      }
+      "assets/ceinture/Roi Soleil.png",
+      "assets/ceinture/Secretariat.png",
+      "assets/ceinture/Gaule.png",
+      "assets/ceinture/Licorne.png"
     ],
     "ARME": [
-      {
-        "src": "assets/arme/Manche a air.png",
-        "label": "Manche à air"
-      },
-      {
-        "src": "assets/arme/Glace Vanille.png",
-        "label": "Glace Vanille"
-      },
-      {
-        "src": "assets/arme/Pistolet Vert.png",
-        "label": "Pistolet Vert"
-      },
-      {
-        "src": "assets/arme/Pistolet Rouge.png",
-        "label": "Pistolet Rouge"
-      },
-      {
-        "src": "assets/arme/Pistolet Orange.png",
-        "label": "Pistolet Orange"
-      },
-      {
-        "src": "assets/arme/Sac a vomi Air France.png",
-        "label": "Sac à vomi Air France"
-      },
-      {
-        "src": "assets/arme/Guitare Mustang.png",
-        "label": "Guitare Mustang"
-      },
-      {
-        "src": "assets/arme/Drapeau Palestinien.png",
-        "label": "Drapeau Palestinien"
-      }
+      "assets/arme/Manche a air.png",
+      "assets/arme/Glace Vanille.png",
+      "assets/arme/Pistolet Vert.png",
+      "assets/arme/Pistolet Rouge.png",
+      "assets/arme/Pistolet Orange.png",
+      "assets/arme/Sac a vomi Air France.png",
+      "assets/arme/Guitare Mustang.png",
+      "assets/arme/Drapeau Palestinien.png"
     ],
     "ACCESSOIRE": [
-      {
-        "src": "assets/accessoire/Bouquet Rose.png",
-        "label": "Bouquet Rose"
-      },
-      {
-        "src": "assets/accessoire/Bouquet Orange.png",
-        "label": "Bouquet Orange"
-      },
-      {
-        "src": "assets/accessoire/Epagneul Fou.png",
-        "label": "Épagneul Fou"
-      },
-      {
-        "src": "assets/accessoire/Bouledogue Francais.png",
-        "label": "Bouledogue Français"
-      },
-      {
-        "src": "assets/accessoire/Blue Pill.png",
-        "label": "Blue Pill"
-      },
-      {
-        "src": "assets/accessoire/Parapluie Jaune.png",
-        "label": "Parapluie Jaune"
-      },
-      {
-        "src": "assets/accessoire/Et Coucou.png",
-        "label": "Et Coucou"
-      },
-      {
-        "src": "assets/accessoire/Butin.png",
-        "label": "Butin"
-      }
+      "assets/accessoire/Bouquet Rose.png",
+      "assets/accessoire/Bouquet Orange.png",
+      "assets/accessoire/Epagneul Fou.png",
+      "assets/accessoire/Bouledogue Français.png",
+      "assets/accessoire/Blue Pill.png",
+      "assets/accessoire/Parapluie Jaune.png",
+      "assets/accessoire/Et Coucou.png",
+      "assets/accessoire/Butin.png"
+
     ],
     "FACIAL": [
-      {
-        "src": "assets/facial/Hanghover.png",
-        "label": "Hanghover"
-      },
-      {
-        "src": "assets/facial/Aviateur.png",
-        "label": "Aviateur"
-      },
-      {
-        "src": "assets/facial/Redneck.png",
-        "label": "Redneck"
-      },
-      {
-        "src": "assets/facial/Gamer.png",
-        "label": "Gamer"
-      },
-      {
-        "src": "assets/facial/Entrepreneur.png",
-        "label": "Entrepreneur"
-      },
-      {
-        "src": "assets/facial/Esthete.png",
-        "label": "Esthète"
-      }
+      "assets/facial/Hanghover.png",
+      "assets/facial/Aviateur.png",
+      "assets/facial/Redneck.png",
+      "assets/facial/Gamer.png",
+      "assets/facial/Entrepreneur.png",
+      "assets/facial/Esthete.png"
     ],
     "MASQUE": [
-      {
-        "src": "assets/masque/Igor.png",
-        "label": "Igor"
-      },
-      {
-        "src": "assets/masque/Cat Woman.png",
-        "label": "Cat Woman"
-      },
-      {
-        "src": "assets/masque/Grant.png",
-        "label": "Grant"
-      },
-      {
-        "src": "assets/masque/Stewart.png",
-        "label": "Stewart"
-      },
-      {
-        "src": "assets/masque/Hepburn.png",
-        "label": "Hepburn"
-      },
-      {
-        "src": "assets/masque/Daft.png",
-        "label": "Daft"
-      },
-      {
-        "src": "assets/masque/Taylor.png",
-        "label": "Taylor"
-      },
-      {
-        "src": "assets/masque/JDV Classic.png",
-        "label": "JDV Classic"
-      },
-      {
-        "src": "assets/masque/JDV Legend.png",
-        "label": "JDV Legend"
-      },
-      {
-        "src": "assets/masque/Kim.png",
-        "label": "Kim"
-      },
-      {
-        "src": "assets/masque/Cache-Cou.png",
-        "label": "Cache Cou"
-      }
+      "assets/masque/Igor.png",
+      "assets/masque/Cat Woman.png",
+      "assets/masque/Grant.png",
+      "assets/masque/Stewart.png",
+      "assets/masque/Hepburn.png",
+      "assets/masque/Daft.png",
+      "assets/masque/Taylor.png",
+      "assets/masque/JDV Classic.png",
+      "assets/masque/JDV Legend.png",
+      "assets/masque/Kim.png",
+      "assets/masque/Cache-Cou.png"
     ],
     "LUNETTES": [
-      {
-        "src": "assets/lunettes/ShowOff.png",
-        "label": "ShowOff"
-      },
-      {
-        "src": "assets/lunettes/Vedette.png",
-        "label": "Vedette"
-      },
-      {
-        "src": "assets/lunettes/Anarchiste.png",
-        "label": "Anarchiste"
-      },
-      {
-        "src": "assets/lunettes/Batman.png",
-        "label": "Batman"
-      },
-      {
-        "src": "assets/lunettes/68ard.png",
-        "label": "68ard"
-      }
+      "assets/lunettes/ShowOff.png",
+      "assets/lunettes/Vedette.png",
+      "assets/lunettes/Anarchiste.png",
+      "assets/lunettes/Batman.png",
+      "assets/lunettes/68ard.png"
     ],
     "CHAPEAU": [
-      {
-        "src": "assets/chapeau/Champetre.png",
-        "label": "Champêtre"
-      },
-      {
-        "src": "assets/chapeau/Marilyn.png",
-        "label": "Marilyn"
-      },
-      {
-        "src": "assets/chapeau/Cowboy.png",
-        "label": "Cowboy"
-      },
-      {
-        "src": "assets/chapeau/UFO.png",
-        "label": "UFO"
-      },
-      {
-        "src": "assets/chapeau/Rohmer.png",
-        "label": "Rohmer"
-      },
-      {
-        "src": "assets/chapeau/MMGA.png",
-        "label": "MMGA"
-      },
-      {
-        "src": "assets/chapeau/Tuque.png",
-        "label": "Tuque"
-      },
-      {
-        "src": "assets/chapeau/Bibi.png",
-        "label": "Bibi"
-      }
+      "assets/chapeau/Champêtre.png",
+      "assets/chapeau/Marilyn.png",
+      "assets/chapeau/Cowboy.png",
+      "assets/chapeau/UFO.png",
+      "assets/chapeau/Rohmer.png",
+      "assets/chapeau/MMGA.png",
+      "assets/chapeau/Tuque.png",
+      "assets/chapeau/Bibi.png"
     ]
   }
 }

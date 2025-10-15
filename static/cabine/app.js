@@ -40,45 +40,10 @@ const Z_INDEX = {
   'CHAPEAU': 80
 };
 
-// --- Helpers for manifest items that can be strings or {src,label} objects ---
-function autoLabelFromPath(p){
-  const base = (p || "").split("/").pop().replace(/\.(png|jpe?g|webp|svg)$/i,"");
-  // Replace underscores/dashes with spaces, keep accents for display
-  return base.replace(/[_-]+/g," ").trim();
-}
-
-// Force un chemin vers /static/...
-function ensureStaticPrefix(p){
-  if (!p) return "";
-  if (p.startsWith("http")) return p;
-  if (p.startsWith("/static/")) return p;
-  return "/static/" + p.replace(/^\/+/, "");
-}
-
-// Normalise an item of the manifest -> { src, label }
-function toItem(objOrString){
-  if (objOrString && typeof objOrString === "object"){
-    const src = ensureStaticPrefix(objOrString.src || "");
-    const label = objOrString.label || autoLabelFromPath(src);
-    return { src, label };
-  }
-  const src = ensureStaticPrefix(String(objOrString || ""));
-  return { src, label: autoLabelFromPath(src) };
-}
-
 async function loadManifest(){
-  // Chemin absolu vers /static pour éviter les 404 depuis /cabine
-  const res = await fetch('/static/assets/manifest.json?v=3', { credentials: 'same-origin' });
+  const res = await fetch('assets/manifest.json', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('manifest HTTP ' + res.status);
-  const m = await res.json();
-
-  if (m.avatar) m.avatar = ensureStaticPrefix(m.avatar);
-  if (m.categories){
-    for (const [cat, arr] of Object.entries(m.categories)){
-      m.categories[cat] = (arr || []).map(toItem);
-    }
-  }
-  return m;
+  return res.json();
 }
 
 function el(tag, attrs={}, ...children){
@@ -114,37 +79,32 @@ function populateControls(manifest){
   controls.innerHTML = '';
 
   // Base avatar
-  if (manifest.avatar){
+  if(manifest.avatar){
     setLayer('layer-avatar', manifest.avatar, 5);
   }
 
   CONTROLS_ORDER.forEach(cat => {
     const items = (manifest.categories && manifest.categories[cat]) ? manifest.categories[cat] : [];
     const id = `select-${cat.replace(/\s+/g, '_')}`;
-    const select = el('select', { id });
-
-    // option vide
-    select.append(el('option', { value: '' }, ''));
-
-    // options à partir des items normalisés
-    items.forEach(item => {
-      const { src, label } = toItem(item);
-      select.append(el('option', { value: src }, label));
+    const select = el('select', {id});
+    // option vide (servira à “∅” côté bouton custom si tu l’utilises)
+    select.append(el('option', {value:''}, ''));
+    items.forEach(path => {
+      const name = path.split('/').pop()
+        .replace(/\.(png|jpe?g|webp|svg)$/i,'')
+        .replace(/[_-]+/g,' ');
+      select.append(el('option', {value:path}, name));
     });
+    if(saved[cat]) select.value = saved[cat];
 
-    // valeur sauvegardée (si existante), normalisée vers /static/...
-    if (saved[cat]){
-      const norm = ensureStaticPrefix(saved[cat]);
-      select.value = norm;
-      setLayer(`layer-${cat}`, norm, Z_INDEX[cat]);
-    }
-
-    // changement → maj layer
     select.addEventListener('change', e => {
-      const choice = ensureStaticPrefix(e.target.value || '');
-      if (!choice){ setLayer(`layer-${cat}`, null, Z_INDEX[cat]); }
+      const choice = e.target.value || '';
+      if(!choice){ setLayer(`layer-${cat}`, null, Z_INDEX[cat]); }
       else { setLayer(`layer-${cat}`, choice, Z_INDEX[cat]); }
     });
+
+    // init couche si sauvegardée
+    if(saved[cat]) setLayer(`layer-${cat}`, saved[cat], Z_INDEX[cat]);
 
     const control = el('div', {class:'control'},
       el('label', {for:id}, cat),
