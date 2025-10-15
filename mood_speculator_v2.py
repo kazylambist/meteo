@@ -5756,7 +5756,7 @@ def admin_ingest_cdg():
 if __name__ == "__main__":
     with app.app_context():
         # 1) créer toutes les tables connues des modèles
-        db.create_all()
+        "db.create_all()"
 
         # BetListing : colonnes nécessaires
         try:
