@@ -5704,17 +5704,6 @@ def ensure_column(table_name: str, column: str, coltype_sql: str):
     db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column} {coltype_sql}"))
     db.session.commit()
 
-import os
-from flask import send_from_directory
-
-@app.route("/favicon.ico")
-def favicon():
-    return send_from_directory(
-        os.path.join(app.static_folder, "img"),
-        "favicon.ico",
-        mimetype="image/vnd.microsoft.icon",
-    )
-
 # ---------- Ingestor Infoclimat : Roissy–Charles-de-Gaulle (07157) ----------
 IC_CDG_URL = "https://www.infoclimat.fr/observations-meteo/temps-reel/roissy-charles-de-gaulle/07157.html"
 PARIS_TZ = ZoneInfo("Europe/Paris")
