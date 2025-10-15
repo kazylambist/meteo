@@ -1809,6 +1809,24 @@ AUTH_HTML = """
 PPP_HTML = """
 <!doctype html><html lang='fr'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2" type="image/x-icon">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=2">
+<link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=2">
+<link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2">
+<link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}?v=2">
+
+<meta property="og:title" content="Zeus Meteo">
+<meta property="og:description" content="La probabilité de pluie par station, heure par heure, claire et rapide.">
+<meta property="og:url" content="https://zeus-meteo.com/">
+<meta property="og:type" content="website">
+<meta property="og:image" content="{{ url_for('static', filename='img/og-image.png', _external=True) }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Zeus Meteo">
+<meta name="twitter:description" content="La probabilité de pluie par station, heure par heure, claire et rapide.">
+<meta name="twitter:image" content="{{ url_for('static', filename='img/og-image.png', _external=True) }}">
 <title>Zeus</title>
 {{ css|safe }}
 <style>
@@ -5686,7 +5704,16 @@ def ensure_column(table_name: str, column: str, coltype_sql: str):
     db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column} {coltype_sql}"))
     db.session.commit()
 
-    
+import os
+from flask import send_from_directory
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(
+        os.path.join(app.static_folder, "img"),
+        "favicon.ico",
+        mimetype="image/vnd.microsoft.icon",
+    )
 
 # ---------- Ingestor Infoclimat : Roissy–Charles-de-Gaulle (07157) ----------
 IC_CDG_URL = "https://www.infoclimat.fr/observations-meteo/temps-reel/roissy-charles-de-gaulle/07157.html"
