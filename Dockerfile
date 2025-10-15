@@ -9,4 +9,4 @@ COPY . .
 # Choisis la ligne CMD selon ton framework :
 # Flask (WSGI)      : mood-speculator-v2:app      → remplace par ton module/objet
 
-CMD ["gunicorn","-k","uvicorn.workers.UvicornWorker","-b","0.0.0.0:8000","mood-speculator-v2:app"]
+CMD ["gunicorn","-b","0.0.0.0:8000","wsgi:app"]
