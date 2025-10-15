@@ -25,6 +25,24 @@ const ORDER = [
   'PIEDS','TORSE','JAMBES','CEINTURE','ARME','ACCESSOIRE','FACIAL','MASQUE','LUNETTES','CHAPEAU'
 ];
 
+// --- Helpers for manifest items that can be strings or {src,label} objects ---
+function autoLabelFromPath(p){
+  const base = (p || "").split("/").pop().replace(/\.(png|jpe?g|webp|svg)$/i,"");
+  // Replace underscores/dashes with spaces, keep accents for display
+  return base.replace(/[_-]+/g," ").trim();
+}
+// Normalise an item of the manifest -> { src, label }
+function toItem(objOrString){
+  if (objOrString && typeof objOrString === "object"){
+    const src = objOrString.src || "";
+    const label = objOrString.label || autoLabelFromPath(src);
+    return { src, label };
+  }
+  const src = String(objOrString || "");
+  return { src, label: autoLabelFromPath(src) };
+}
+
+
 const CONTROLS_ORDER = ["FACIAL", "LUNETTES", "CHAPEAU", "JAMBES", "TORSE", "PIEDS", "CEINTURE", "MASQUE", "ARME", "ACCESSOIRE"];
 
 const Z_INDEX = {
