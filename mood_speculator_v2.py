@@ -1336,7 +1336,7 @@ INDEX_HTML = """
     </div>
 
     <div class="nav-right">
-      <a class="btn ppp-btn" href="/ppp" title="Paris — Pluie ou Pas Pluie">Pluie Pas Pluie</a>
+      <a class="btn ppp-btn" href="/ppp" title="Zeus">Pluie Pas Pluie</a>
       {% if current_user.is_authenticated %}
         <span><strong>{{ current_user.username }}</strong></span>
         <a href="/logout">Se déconnecter</a>
@@ -3067,7 +3067,7 @@ ADMIN_HTML = """
     </div>
 
     <div class="nav-right">
-      <a class="btn ppp-btn" href="/ppp" title="Paris — Pluie ou Pas Pluie">Pluie Pas Pluie</a>
+      <a class="btn ppp-btn" href="/ppp" title="Zeus">Pluie Pas Pluie</a>
       {% if current_user.is_authenticated %}
         <span><strong>{{ current_user.username }}</strong></span>
         <a href="/logout">Se déconnecter</a>
@@ -3162,7 +3162,7 @@ METEO_HTML = """
     </div>
 
     <div class="nav-right">
-      <a class="btn ppp-btn" href="/ppp" title="Paris — Pluie ou Pas Pluie">Pluie Pas Pluie</a>
+      <a class="btn ppp-btn" href="/ppp" title="Zeus">Pluie Pas Pluie</a>
       {% if current_user.is_authenticated %}
         <span><strong>{{ current_user.username }}</strong></span>
         <a href="/logout">Se déconnecter</a>
@@ -3996,7 +3996,7 @@ def ppp(station_id=None):
     else:
         city_label = "Paris, France"
         scope_station_id = None
-        page_title = "Paris — Pluie ou Pas Pluie"
+        page_title = "Zeus"
 
     def _ppp_url():
         return url_for('ppp', station_id=scope_station_id) if scope_station_id else url_for('ppp')    
@@ -4126,7 +4126,7 @@ def ppp(station_id=None):
         boosts_map[str(d)] = float(total or 0.0)
 
     return render_template_string(
-        PPP_HTML.replace("Paris — Pluie ou Pas Pluie", page_title),
+        PPP_HTML.replace("Zeus", page_title),
         css=BASE_CSS,
         solde_str=solde_str,
         bets_map=bets_map,
