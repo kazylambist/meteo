@@ -118,6 +118,19 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
+# --- HSTS (HTTPS strict) : active en prod uniquement ---
+if not app.debug and not app.testing:
+    @app.after_request
+    def add_hsts(resp):
+        # en environnement Fly, https est signalé via X-Forwarded-Proto
+        if resp and ( 
+            request.is_secure or 
+            request.headers.get("X-Forwarded-Proto", "http") == "https"
+        ):
+            resp.headers["Strict-Transport-Security"] = \
+                "max-age=31536000; includeSubDomains; preload"
+        return resp
+
 with app.app_context():
     try:
         db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
