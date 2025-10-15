@@ -1909,7 +1909,7 @@ PPP_HTML = """
   <div class="container topbar">
     <div class="nav-left">
       <a class="brand" href="/wet" style="color:#2160f3;">Wet</a>
-      <a class="brand active" href="/ppp">Calendrier</a>
+      <a class="brand active" href="/ppp">Prévisions</a>
     </div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
