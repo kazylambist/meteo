@@ -245,7 +245,7 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
 /* halo violet autour de l’avatar (préféré : plus net que outline) */
 .user-card.has-unread .avatar-mini{
   border-color: #5ca6f6 !important;
-  box-shadow: 0 0 0 3px rgba(139,92,246,.85), 0 0 16px rgba(139,92,246,.45);
+  box-shadow: 0 0 0 3px rgba(245,250,255,.85), 0 0 16px rgba(245,250,255,.85);
 }
 
 /* petit accent sur le nom (facultatif) */
