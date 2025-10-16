@@ -183,28 +183,57 @@
     `;
     dock.append(panel);
 
-    const log     = panel.querySelector('.log');
-    const inputEl = panel.querySelector('input');
-    const sendBtn = panel.querySelector('button.btn');
-
-    function appendMsg(text, who){
-      const div = document.createElement('div');
-      div.className = 'msg ' + (who==='me' ? 'me' : 'other');
-      div.textContent = text;
-      log.append(div);
-      log.scrollTop = log.scrollHeight;
-    }
+    const log    = panel.querySelector('.log');
+    const input  = panel.querySelector('input');
+    const btn    = panel.querySelector('button.btn');
 
     async function refresh(){
       try{
         const msgs = await fetch('/api/chat/messages?user='+encodeURIComponent(user.id), {credentials:'same-origin'}).then(r=>r.json());
         log.innerHTML='';
         msgs.forEach(m=>{
-          appendMsg(m.body, String(m.from)===String(window.TRADE_CFG?.USER_ID)?'me':'other');
+          const div=document.createElement('div');
+          div.className='msg ' + (String(m.from)===String(window.TRADE_CFG?.USER_ID)?'me':'other');
+          div.textContent=m.body;
+          log.append(div);
         });
+        log.scrollTop = log.scrollHeight;
       }catch(e){}
     }
-    const timer = setInterval(refresh, 4000);
+
+    // ---- unified send with optimistic append ----
+    async function send(){
+      const txt = (input.value || '').trim();
+      if (!txt) return;
+
+      // optimistic append
+      const div=document.createElement('div');
+      div.className='msg me';
+      div.textContent=txt;
+      log.append(div);
+      log.scrollTop = log.scrollHeight;
+      input.value = '';
+      btn.disabled = true;
+
+      try{
+        await fetch('/api/chat/messages', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          credentials:'same-origin',
+          body: JSON.stringify({to:user.id, body:txt})
+        });
+        // reconcile with server state (handles timestamps/order)
+        await refresh();
+      }catch(e){
+        // rollback UI if it failed (optional)
+        div.textContent = `(échec) ${txt}`;
+      }finally{
+        btn.disabled = false;
+        input.focus();
+      }
+    }
+
+    const timer = setInterval(refresh, 5000);
     refresh();
 
     panel.querySelector('.btn-close').addEventListener('click', ()=>{
@@ -212,44 +241,16 @@
       panel.remove();
     });
 
-    // --- Envoi message: bouton + Enter ---
-    async function sendCurrent(){
-      const txt = (inputEl.value || '').trim();
-      if (!txt) return;
-      try{
-        const res = await fetch('/api/chat/messages', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          credentials:'same-origin',
-          body: JSON.stringify({to:user.id, body:txt})
-        });
-        if (!res.ok) throw 0;
-        // rendu optimiste immédiat
-        appendMsg(txt, 'me');
-        inputEl.value = '';
-        // on peut relancer un refresh léger pour récupérer l’ID serveur si besoin
-        // (non obligatoire pour l’affichage)
-        // refresh();
-        // marquer comme lu (au cas où des “other” venaient d’arriver)
-        try { await markThreadRead(user.id); } catch(_){}
-      }catch(e){
-        alert("Échec d'envoi.");
-      }
-    }
+    // Click uses the same send()
+    btn.addEventListener('click', send);
 
-    sendBtn.addEventListener('click', sendCurrent);
-
-    // Enter => envoi, sans fermer le panneau
-    inputEl.addEventListener('keydown', (e)=>{
-      if (e.key === 'Enter' && !e.shiftKey) {
+    // Enter also uses the same send(), Shift+Enter makes une nouvelle ligne
+    input.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' && !e.shiftKey){
         e.preventDefault();
-        e.stopPropagation();
-        sendCurrent();
+        send();
       }
     });
-
-    // Quand on ouvre la fenêtre, on “mark as read”
-    markThreadRead(user.id).catch(()=>{});
   }
 
   // ---------- Listings publics ----------
