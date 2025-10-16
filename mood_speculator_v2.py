@@ -5048,6 +5048,42 @@ def chat_mark_read():
     db.session.commit()
     return jsonify({"ok": True}), 200
 
+# --- Unread summary par correspondant ---
+@app.get('/api/chat/unread-summary')
+@login_required
+def chat_unread_summary():
+    """
+    Renvoie: [{"from_user_id":"2","count":3,"last_at":"..."}...]
+    """
+    try:
+        me = str(current_user.get_id())
+
+        # Si tu as un modèle ChatMessage ORM:
+        rows = (
+            db.session.query(
+                ChatMessage.from_user_id,
+                db.func.count(ChatMessage.id),
+                db.func.max(ChatMessage.created_at)
+            )
+            .filter(ChatMessage.to_user_id == me, ChatMessage.is_read == 0)
+            .group_by(ChatMessage.from_user_id)
+            .all()
+        )
+
+        out = [
+            {
+                "from_user_id": str(r[0]),
+                "count": int(r[1]),
+                "last_at": (r[2].isoformat() if r[2] else None),
+            }
+            for r in rows
+        ]
+        return jsonify(out), 200
+
+    except Exception as e:
+        app.logger.warning(f"/api/chat/unread-summary error: {e}")
+        return jsonify([]), 200
+
 from datetime import date
 
 @app.get("/api/trade/my-bets")
@@ -5730,6 +5766,8 @@ def trade_cancel_listing(listing_id):
     db.session.commit()
     return jsonify({"ok": True}), 200
 
+from datetime import datetime, date  # en haut du fichier si pas déjà importé
+
 @app.post('/api/trade/listings/<int:listing_id>/buy')
 @login_required
 def trade_buy_listing(listing_id):
@@ -5740,13 +5778,11 @@ def trade_buy_listing(listing_id):
     if row.user_id == me:
         return jsonify({"ok": False, "error": "cannot_buy_own"}), 400
 
-    # On s’attend à avoir bet_id dans payload
-    bet_id = None
+    # payload.bet_id attendu
     try:
         bet_id = (row.payload or {}).get("bet_id")
     except Exception:
-        pass
-
+        bet_id = None
     if not bet_id:
         return jsonify({"ok": False, "error": "no_bet_to_transfer"}), 400
 
@@ -5754,62 +5790,63 @@ def trade_buy_listing(listing_id):
     if not b or b.status != 'ACTIVE':
         return jsonify({"ok": False, "error": "bet_not_active"}), 400
 
-    # (Optionnel) vérifier que l’échéance n’est pas passée
+    # Optionnel: date pas passée
     if getattr(b, "bet_date", None):
         try:
             today = today_paris_date()
         except Exception:
-            from datetime import date
             today = date.today()
         if b.bet_date < today:
             return jsonify({"ok": False, "error": "expired"}), 400
 
-    # (Optionnel) points transferts — à brancher sur tes helpers si dispo
-    # price = getattr(row, "ask_price", None) or getattr(row, "price", None) or 0.0
+    # (Optionnel) transfert de points selon row.ask_price
+    # price = float(getattr(row, "ask_price", 0.0) or 0.0)
     # debit_points(me, price); credit_points(row.user_id, price)
 
-    # ------- Transfert de propriété -------
-    seller_id = row.user_id  # on mémorise le vendeur pour la notif
+    seller_id = row.user_id
+
+    # Transfert de propriété de la mise
     b.user_id = me
-    # si tu utilisais un verrou sur la mise
     if hasattr(b, "locked_for_trade"):
         b.locked_for_trade = 0
     db.session.commit()
 
-    # On marque l’annonce vendue
+    # Marque l’annonce vendue
     row.status = 'SOLD'
     db.session.commit()
 
-    # ------- Message auto au vendeur -------
+    # ---- Message auto au vendeur ----
     try:
-        # Essaie d'utiliser un libellé "humain"
-        line_txt = None
-        try:
-            # priorités: payload.label > _jsonify_listing(row).label > fallback simple
-            line_txt = (row.payload or {}).get("label")
-            if not line_txt and '_jsonify_listing' in globals():
-                line_txt = (_jsonify_listing(row) or {}).get("label")
-            if not line_txt:
-                # fallback minimal lisible
-                city = getattr(row, "city", None) or (row.payload or {}).get("city") or ""
-                date_label = getattr(row, "date_label", None) or (row.payload or {}).get("date_label") or (row.payload or {}).get("deadline_key") or ""
-                line_txt = f"{city} — {date_label}".strip(" —")
-        except Exception:
-            pass
+        # Construire une ligne lisible
+        pl = row.payload or {}
+        line_txt = pl.get("label")
+        if not line_txt:
+            # fallback si pas de label prêt à l’emploi
+            city = getattr(row, "city", None) or pl.get("city") or ""
+            date_label = getattr(row, "date_label", None) or pl.get("date_label") or pl.get("deadline_key") or ""
+            stake = pl.get("stake") or pl.get("amount")
+            odds = pl.get("base_odds") or pl.get("odds")
+            frag = []
+            if city: frag.append(str(city))
+            if date_label: frag.append(str(date_label))
+            if stake and odds: frag.append(f"{stake} pts (x{odds})")
+            line_txt = " — ".join(frag) if frag else "ta mise"
 
-        auto_body = f"J'ai acheté : {line_txt}" if line_txt else "J'ai acheté ta mise."
+        body = f"J'ai acheté : {line_txt}"
+
+        # ORM standard
         msg = ChatMessage(
-            from_user_id=str(me),
+            from_user_id=me,
             to_user_id=str(seller_id),
-            body=auto_body,
+            body=body,
             created_at=datetime.utcnow(),
-            is_read=0,
+            is_read=0
         )
         db.session.add(msg)
         db.session.commit()
-    except Exception:
-        # On ne casse pas l’achat si la notif échoue
-        db.session.rollback()
+    except Exception as e:
+        app.logger.warning(f"auto chat after buy failed: {e}")
+        db.session.rollback()  # ne casse pas l’achat
 
     return jsonify({"ok": True}), 200
     

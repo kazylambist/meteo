@@ -141,6 +141,26 @@
     }catch(e){}
   }
 
+  async function refreshUnreadBadges(){
+    try{
+      const res = await fetch('/api/chat/unread-summary', {credentials:'same-origin'});
+      if (!res.ok) return;
+      const arr = await res.json();
+
+      // Map des non-lus par expéditeur
+      const hasUnreadFrom = new Set(arr.map(x => String(x.from_user_id)));
+  
+      // Nettoie tout le monde d’abord
+      $$('.user-card').forEach(card => card.classList.remove('has-unread'));
+
+      // Ajoute la classe pour ceux qui ont des non-lus
+      hasUnreadFrom.forEach(uid => {
+        const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
+        if (card) card.classList.add('has-unread');
+      });
+    }catch(e){}
+  }
+
   // ---------- Chat minimal ----------
   function openChat(user){
     const dock = $('#chat-dock');
@@ -504,6 +524,8 @@
     heartbeat();
     setInterval(heartbeat, 30000);            // ping serveur
     setInterval(refreshPresenceOnly, 15000);  // toggle online/offline sans toucher aux images
+    refreshUnreadBadges();
+    setInterval(refreshUnreadBadges, 5000);  // badges non-lus
   }
 
   function bindMeAvatarLink(){

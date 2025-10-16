@@ -232,3 +232,9 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
   opacity: .6;
   filter: none;
 }
+/* Bordure violette quand il y a des non-lus */
+.user-card.has-unread {
+  outline: 2px solid #8b5cf6;        /* violet */
+  outline-offset: 2px;
+  box-shadow: 0 0 10px rgba(139,92,246,.45);
+}
