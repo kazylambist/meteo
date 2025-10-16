@@ -232,9 +232,25 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
   opacity: .6;
   filter: none;
 }
-/* Bordure violette quand il y a des non-lus */
-.user-card.has-unread {
-  outline: 2px solid #8b5cf6;        /* violet */
-  outline-offset: 2px;
-  box-shadow: 0 0 10px rgba(139,92,246,.45);
+/* --- Notifications de messages non-lus --- */
+.user-card.has-unread{
+  /* annule l'effet "offline" pour que ce soit bien visible */
+  opacity: 1 !important;
+  filter: none !important;
+  /* si tu veux aussi surligner la carte entière, décommente la ligne suivante : */
+  /* box-shadow: 0 0 0 2px #8b5cf6, 0 0 16px rgba(139,92,246,.45); */
+  /* border-color: #8b5cf6; */
 }
+
+/* halo violet autour de l’avatar (préféré : plus net que outline) */
+.user-card.has-unread .avatar-mini{
+  border-color: #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139,92,246,.85), 0 0 16px rgba(139,92,246,.45);
+}
+
+/* petit accent sur le nom (facultatif) */
+.user-card.has-unread .name{
+  color:#efe9ff;
+}
+/* S'assurer que rien ne coupe le halo violet */
+.roster-list{ overflow: visible; }
