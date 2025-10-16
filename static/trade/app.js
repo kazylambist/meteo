@@ -1,6 +1,12 @@
 // static/trade/app.js
 (() => {
   // ---------- utils ----------
+
+  function sideToIcon(side, choice){
+    const raw = String(side || choice || '').toUpperCase();
+    const isRain = (raw === 'PLUIE' || raw === 'RAIN' || raw === 'RAINY');
+    return isRain ? '💧' : '☀️';
+  }
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
@@ -105,7 +111,34 @@
   }
 
   async function pollUnread(){
-    // attend un JSON du type: [{from: "USER_ID", count: 3}, ...]
+    // attend un JSON du type: [{from: "USER_ID", count: 3
+    // add/remove 💬 badge
+    document.querySelectorAll('.user-card').forEach(card => {
+      const uid = Number(card.getAttribute('data-user-id'));
+      const avatar = card.querySelector('.avatar-mini') || card;
+      if (getComputedStyle(avatar).position === 'static') avatar.style.position = 'relative';
+      let badge = avatar.querySelector('.unread-badge');
+      const should = unreadFrom.has(uid);
+      if (should) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'unread-badge';
+          badge.textContent = '💬';
+          badge.style.position = 'absolute';
+          badge.style.right = '0';
+          badge.style.top = '0';
+          badge.style.transform = 'translate(35%, -35%)';
+          badge.style.fontSize = '14px';
+          badge.style.lineHeight = '1';
+          badge.style.userSelect = 'none';
+          badge.style.filter = 'drop-shadow(0 0 4px rgba(0,0,0,.35))';
+          avatar.appendChild(badge);
+        }
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+}, ...]
     try{
       const res = await fetch('/api/chat/unread', {credentials:'same-origin'});
       if (!res.ok) return;
@@ -224,6 +257,7 @@
         });
         // reconcile with server state (handles timestamps/order)
         await refresh();
+    markThreadRead(user.id||user);
       }catch(e){
         // rollback UI if it failed (optional)
         div.textContent = `(échec) ${txt}`;
@@ -233,8 +267,8 @@
       }
     }
 
-    const timer = setInterval(async ()=>{ await refresh(); await markThreadRead(user.id); }, 5000);
-    refresh().then(()=> markThreadRead(user.id));
+    const timer = setInterval(async ()=>{ await refresh(); await markThreadRead(user.id||user); }, 5000);
+    refresh();
 
     panel.querySelector('.btn-close').addEventListener('click', ()=>{
       clearInterval(timer);
@@ -274,9 +308,7 @@
           const addTxt = addNum.toFixed(1).replace('.', ',');
           boosts = ` - ${r.boosts_count} ⚡️(x${addTxt})`;
         }
-        const sideRaw = String(r.side || r.choice || '').toUpperCase();
-        const isRain  = (sideRaw === 'PLUIE' || sideRaw === 'RAIN' || sideRaw === 'RAINY');
-        const sideIcon = isRain ? '💧' : '☀️';
+        const sideIcon = sideToIcon(r.side, r.choice);
         const totalOdds = Number(r.total_odds || (baseNum + Number(r.boosts_add||0)) || baseNum);
         const gpVal = (Number(r.stake||r.amount||0) * totalOdds);
         const gpTxt = fmtPts(gpVal);
