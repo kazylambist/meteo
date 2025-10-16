@@ -116,30 +116,31 @@
       if (!res.ok) return;
       const arr = await res.json();
 
-      // Construire l’ensemble des expéditeurs avec non-lu
+      // Construire l’ensemble des expéditeurs qui ont du non-lu
       const unreadFrom = new Set(
         (arr || [])
           .filter(x => Number(x.count || 0) > 0)
           .map(x => Number(x.from || x.from_user_id || x.user || x.id))
       );
 
-      // Réinitialiser l'état
-      document.querySelectorAll('.user-card.has-unread')
-        .forEach(el => el.classList.remove('has-unread'));
-
-      // Marquer les cartes + gérer le badge 💬
+      // Synchroniser toutes les cartes (classe + badge 💬)
       document.querySelectorAll('.user-card').forEach(card => {
-        const uid = Number(card.getAttribute('data-user-id')); // ← cohérent partout
+        const uid = Number(card.getAttribute('data-uid'));   // ← cohérent avec ton markup
         const hasUnread = unreadFrom.has(uid);
+
+        // Classe visuelle (halo violet déjà géré par ton CSS)
         card.classList.toggle('has-unread', hasUnread);
 
+        // Badge 💬 en haut à droite de l’avatar
         const avatar = card.querySelector('.avatar-mini') || card;
-        if (getComputedStyle(avatar).position === 'static') avatar.style.position = 'relative';
+        if (getComputedStyle(avatar).position === 'static') {
+          avatar.style.position = 'relative';
+        }
         let badge = avatar.querySelector('.unread-badge');
 
         if (hasUnread) {
           if (!badge) {
-            badge = document.createElement('span');    // ← typo fix
+            badge = document.createElement('span');
             badge.className = 'unread-badge';
             badge.textContent = '💬';
             badge.style.position = 'absolute';
@@ -157,7 +158,7 @@
         }
       });
     } catch(e) {
-      // console.warn('pollUnread failed', e);
+      // optionnel: console.warn('pollUnread failed', e);
     }
   }
 
@@ -220,10 +221,9 @@
     `;
     dock.append(panel);
 
-    const log    = panel.querySelector('.log');
-    const input  = panel.querySelector('input');
-    // const btn    = panel.querySelector('button.btn');
-    // nouveau (robuste : cible le bouton du footer)
+    const log   = panel.querySelector('.log');
+    const input = panel.querySelector('input');
+    // cible le bouton "Envoyer" du footer (pas le bouton Fermer)
     let btn = panel.querySelector('footer button.btn, footer .btn:not(.btn-close)');
     if (!btn) {
       const allBtns = panel.querySelectorAll('footer button, footer .btn, .btn');
@@ -265,11 +265,20 @@
           credentials:'same-origin',
           body: JSON.stringify({to:user.id, body:txt})
         });
-        // reconcile with server state (handles timestamps/order)
+        // reconcile with server state (timestamps/ordre)
         await refresh();
-    markThreadRead(user.id||user);
+        await markThreadRead(user.id);
+        // UI immédiate : enlève le halo + le badge 💬
+        {
+          const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
+          if (card) {
+            card.classList.remove('has-unread');
+            const badge = card.querySelector('.avatar-mini .unread-badge, .unread-badge');
+            if (badge) badge.remove();
+          }
+        }
       }catch(e){
-        // rollback UI if it failed (optional)
+        // rollback UI si échec (optionnel)
         div.textContent = `(échec) ${txt}`;
       }finally{
         btn.disabled = false;
@@ -277,8 +286,30 @@
       }
     }
 
-    const timer = setInterval(async ()=>{ await refresh(); await markThreadRead(user.id); }, 5000);
-    refresh().then(()=> markThreadRead(user.id));
+    const timer = setInterval(async () => {
+      await refresh();
+      await markThreadRead(user.id);
+      // UI immédiate : enlève le halo + le badge 💬
+      {
+        const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
+        if (card) {
+          card.classList.remove('has-unread');
+          const badge = card.querySelector('.avatar-mini .unread-badge, .unread-badge');
+          if (badge) badge.remove();
+        }
+      }
+    }, 5000);
+
+    // Premier passage : refresh puis marquer lu + MAJ UI
+    refresh().then(async () => {
+      await markThreadRead(user.id);
+      const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
+      if (card) {
+        card.classList.remove('has-unread');
+        const badge = card.querySelector('.avatar-mini .unread-badge, .unread-badge');
+        if (badge) badge.remove();
+      }
+    });
 
     panel.querySelector('.btn-close').addEventListener('click', ()=>{
       clearInterval(timer);
@@ -288,7 +319,7 @@
     // Click uses the same send()
     btn.addEventListener('click', send);
 
-    // Enter also uses the same send(), Shift+Enter makes une nouvelle ligne
+    // Enter also uses the same send(), Shift+Enter fait une nouvelle ligne
     input.addEventListener('keydown', (e)=>{
       if (e.key === 'Enter' && !e.shiftKey){
         e.preventDefault();
