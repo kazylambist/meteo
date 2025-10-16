@@ -233,8 +233,8 @@
       }
     }
 
-    const timer = setInterval(refresh, 5000);
-    refresh();
+    const timer = setInterval(async ()=>{ await refresh(); await markThreadRead(user.id); }, 5000);
+    refresh().then(()=> markThreadRead(user.id));
 
     panel.querySelector('.btn-close').addEventListener('click', ()=>{
       clearInterval(timer);
@@ -274,7 +274,9 @@
           const addTxt = addNum.toFixed(1).replace('.', ',');
           boosts = ` - ${r.boosts_count} ⚡️(x${addTxt})`;
         }
-        const sideIcon = (String(r.side||r.choice).toUpperCase()==='PLUIE')?'💧':'☀️';
+        const sideRaw = String(r.side || r.choice || '').toUpperCase();
+        const isRain  = (sideRaw === 'PLUIE' || sideRaw === 'RAIN' || sideRaw === 'RAINY');
+        const sideIcon = isRain ? '💧' : '☀️';
         const totalOdds = Number(r.total_odds || (baseNum + Number(r.boosts_add||0)) || baseNum);
         const gpVal = (Number(r.stake||r.amount||0) * totalOdds);
         const gpTxt = fmtPts(gpVal);

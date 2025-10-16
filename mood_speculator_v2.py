@@ -147,6 +147,11 @@ with app.app_context():
         ))
     except Exception:
         pass
+    try:
+        db.session.execute(text("ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"))
+        db.session.commit()
+    except Exception:
+        pass
     db.session.commit()   
 
 # -----------------------------------------------------------------------------
@@ -332,6 +337,7 @@ class ChatMessage(db.Model):
     to_user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     body          = db.Column(db.Text, nullable=False)
     created_at    = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    is_read      = db.Column(db.Integer, nullable=False, server_default="0", default=0, index=True)
 
     __table_args__ = (
         db.Index("ix_chat_pair_time", "from_user_id", "to_user_id", "created_at"),
@@ -5022,8 +5028,7 @@ def chat_send():
 @app.get('/api/chat/unread')
 @login_required
 def chat_unread():
-    """Retourne la liste des expéditeurs qui ont du non-lu vers current_user."""
-    me = str(current_user.get_id())
+    me = int(current_user.get_id())
     rows = db.session.execute(text("""
         SELECT from_user_id AS frm, COUNT(*) AS cnt
         FROM chat_messages
@@ -5035,54 +5040,35 @@ def chat_unread():
 @app.post('/api/chat/mark-read')
 @login_required
 def chat_mark_read():
-    """Marque comme lus tous les messages de 'user' -> moi."""
     other = request.args.get('user')
-    if not other:
-        return jsonify({"ok": False, "error": "missing ?user"}), 400
-    me = str(current_user.get_id())
+    if not other: return jsonify({"ok": False, "error": "missing ?user"}), 400
+    me = int(current_user.get_id())
+    other_id = int(other)
     db.session.execute(text("""
         UPDATE chat_messages
         SET is_read = 1
         WHERE to_user_id = :me AND from_user_id = :other
-    """), {"me": me, "other": other})
+    """), {"me": me, "other": other_id})
     db.session.commit()
     return jsonify({"ok": True}), 200
 
-# --- Unread summary par correspondant ---
 @app.get('/api/chat/unread-summary')
 @login_required
 def chat_unread_summary():
-    """
-    Renvoie: [{"from_user_id":"2","count":3,"last_at":"..."}...]
-    """
-    try:
-        me = str(current_user.get_id())
-
-        # Si tu as un modèle ChatMessage ORM:
-        rows = (
-            db.session.query(
+    me = int(current_user.get_id())
+    rows = (db.session.query(
                 ChatMessage.from_user_id,
                 db.func.count(ChatMessage.id),
                 db.func.max(ChatMessage.created_at)
             )
             .filter(ChatMessage.to_user_id == me, ChatMessage.is_read == 0)
             .group_by(ChatMessage.from_user_id)
-            .all()
-        )
-
-        out = [
-            {
-                "from_user_id": str(r[0]),
-                "count": int(r[1]),
-                "last_at": (r[2].isoformat() if r[2] else None),
-            }
-            for r in rows
-        ]
-        return jsonify(out), 200
-
-    except Exception as e:
-        app.logger.warning(f"/api/chat/unread-summary error: {e}")
-        return jsonify([]), 200
+            .all())
+    return jsonify([{
+        "from_user_id": int(r[0]),
+        "count": int(r[1]),
+        "last_at": (r[2].isoformat() if r[2] else None),
+    } for r in rows]), 200
 
 from datetime import date
 
