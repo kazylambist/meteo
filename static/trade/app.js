@@ -110,6 +110,22 @@
     }catch(e){}
   }
 
+  async function markThreadRead(userId){
+    if (!userId && userId !== 0) return;
+    try {
+      await fetch(`/api/chat/mark-read?user=${encodeURIComponent(userId)}`, {
+        method:'POST', credentials:'include'
+      });
+      // Nettoyage UI défensif (si appelé ailleurs)
+      const card = document.querySelector(`.user-card[data-uid="${userId}"]`);
+      if (card) {
+        card.classList.remove('has-unread');
+        const badge = card.querySelector('.avatar-mini .unread-badge, .unread-badge');
+        if (badge) badge.remove();
+      }
+    } catch(e) {}
+  }
+
   async function pollUnread(){
     try{
       const res = await fetch('/api/chat/unread', { credentials:'same-origin' });
