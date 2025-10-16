@@ -153,9 +153,13 @@
       clearInterval(timer);
       panel.remove();
     });
-    panel.querySelector('button.btn').addEventListener('click', async ()=>{
-      const input = panel.querySelector('input');
-      const txt = (input.value || '').trim();
+
+    // --- Envoi message: bouton + Enter ---
+    const inputEl = panel.querySelector('input');
+    const sendBtn = panel.querySelector('button.btn');
+
+    sendBtn.addEventListener('click', async ()=>{
+      const txt = (inputEl.value || '').trim();
       if (!txt) return;
       await fetch('/api/chat/messages', {
         method:'POST',
@@ -163,8 +167,16 @@
         credentials:'same-origin',
         body: JSON.stringify({to:user.id, body:txt})
       });
-      input.value = '';
+      inputEl.value = '';
       refresh();
+    });
+
+    // Envoi avec Enter (Enter seul), conserve Shift+Enter pour éventuelles futures sauts de ligne
+    inputEl.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendBtn.click();
+      }
     });
   }
 
