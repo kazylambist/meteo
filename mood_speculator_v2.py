@@ -317,9 +317,28 @@ class CabineSelection(db.Model):
     __tablename__ = "cabine_selection"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, index=True, nullable=False, unique=True)
-    data = db.Column(SQLITE_JSON, nullable=False, default={})
+    data = db.Column(SQLITE_JSON, nullable=False, default={})    
 
 # --- Trade models ------------------------------------------------------------
+
+# --- Chat ---
+
+from datetime import datetime, timezone
+
+class ChatMessage(db.Model):
+    __tablename__ = "chat_messages"
+    id            = db.Column(db.Integer, primary_key=True)
+    from_user_id  = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    to_user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    body          = db.Column(db.Text, nullable=False)
+    created_at    = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.Index("ix_chat_pair_time", "from_user_id", "to_user_id", "created_at"),
+    )
+
+# --- Bet ---
+
 class BetListing(db.Model):
     __tablename__ = "bet_listings"
 
@@ -4904,6 +4923,97 @@ def _station_label(station_id):
         if s:  # format ex: "CDG — Paris"
             return s.get("city") or s.get("name") or str(station_id)
     return "Paris"
+
+from flask import request, jsonify
+from flask_login import login_required, current_user
+
+# --- outils simples ---
+def _clip_text(s: str, max_len=2000) -> str:
+    s = (s or "").strip()
+    if len(s) > max_len:
+        s = s[:max_len]
+    return s
+
+@app.get("/api/chat/messages")
+@login_required
+def chat_list():
+    """Retourne les messages entre l'utilisateur courant et l'ID passé en query ?user=<id>.
+    Renvoie les 200 derniers messages, triés par date croissante (lecture confortable)."""
+    other_id = request.args.get("user")
+    if not other_id:
+        return jsonify([]), 200
+    try:
+        other_id = int(other_id)
+    except Exception:
+        return jsonify([]), 200
+
+    # optionnel: vérifier que l'utilisateur existe
+    other = User.query.get(other_id)
+    if not other:
+        return jsonify([]), 200
+
+    uid = int(current_user.get_id())
+    q = (ChatMessage.query
+         .filter(
+             db.or_(
+                 db.and_(ChatMessage.from_user_id==uid,    ChatMessage.to_user_id==other_id),
+                 db.and_(ChatMessage.from_user_id==other_id, ChatMessage.to_user_id==uid)
+             )
+         )
+         .order_by(ChatMessage.created_at.desc())
+         .limit(200)
+    )
+    rows = list(reversed(q.all()))  # ascendant pour l'affichage
+
+    return jsonify([
+        {
+            "id": m.id,
+            "from": m.from_user_id,
+            "to": m.to_user_id,
+            "body": m.body,
+            "created_at": (m.created_at.isoformat() if m.created_at else None)
+        } for m in rows
+    ]), 200
+
+@app.post("/api/chat/messages")
+@login_required
+def chat_send():
+    """Crée un message privé."""
+    data = request.get_json(silent=True) or {}
+    try:
+        to_id = int(data.get("to", 0))
+    except Exception:
+        to_id = 0
+    body = _clip_text(data.get("body", ""))
+
+    if not to_id or not body:
+        return jsonify({"ok": False, "error": "Message vide ou destinataire manquant."}), 400
+
+    # optionnel: empêcher d'envoyer à soi-même
+    frm_id = int(current_user.get_id())
+    if to_id == frm_id:
+        return jsonify({"ok": False, "error": "Destinataire invalide."}), 400
+
+    other = User.query.get(to_id)
+    if not other:
+        return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
+
+    msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=body)
+    try:
+        db.session.add(msg)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({
+        "ok": True,
+        "id": msg.id,
+        "from": msg.from_user_id,
+        "to": msg.to_user_id,
+        "body": msg.body,
+        "created_at": (msg.created_at.isoformat() if msg.created_at else None)
+    }), 200
 
 from datetime import date
 
