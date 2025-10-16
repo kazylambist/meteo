@@ -185,7 +185,13 @@
 
     const log    = panel.querySelector('.log');
     const input  = panel.querySelector('input');
-    const btn    = panel.querySelector('button.btn');
+    // const btn    = panel.querySelector('button.btn');
+    // nouveau (robuste : cible le bouton du footer)
+    let btn = panel.querySelector('footer button.btn, footer .btn:not(.btn-close)');
+    if (!btn) {
+      const allBtns = panel.querySelectorAll('footer button, footer .btn, .btn');
+      btn = allBtns[allBtns.length - 1];
+    }
 
     async function refresh(){
       try{
