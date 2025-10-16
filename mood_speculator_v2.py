@@ -5015,6 +5015,39 @@ def chat_send():
         "created_at": (msg.created_at.isoformat() if msg.created_at else None)
     }), 200
 
+# --- modèles supposés ---
+# ChatMessage: id, from_user_id, to_user_id, body, created_at, is_read (tinyint/bool)
+# Utilise db.session etc.
+
+@app.get('/api/chat/unread')
+@login_required
+def chat_unread():
+    """Retourne la liste des expéditeurs qui ont du non-lu vers current_user."""
+    me = str(current_user.get_id())
+    rows = db.session.execute(text("""
+        SELECT from_user_id AS frm, COUNT(*) AS cnt
+        FROM chat_messages
+        WHERE to_user_id = :me AND (is_read = 0 OR is_read IS NULL)
+        GROUP BY from_user_id
+    """), {"me": me}).mappings().all()
+    return jsonify([{"from": r["frm"], "count": int(r["cnt"])} for r in rows]), 200
+
+@app.post('/api/chat/mark-read')
+@login_required
+def chat_mark_read():
+    """Marque comme lus tous les messages de 'user' -> moi."""
+    other = request.args.get('user')
+    if not other:
+        return jsonify({"ok": False, "error": "missing ?user"}), 400
+    me = str(current_user.get_id())
+    db.session.execute(text("""
+        UPDATE chat_messages
+        SET is_read = 1
+        WHERE to_user_id = :me AND from_user_id = :other
+    """), {"me": me, "other": other})
+    db.session.commit()
+    return jsonify({"ok": True}), 200
+
 from datetime import date
 
 @app.get("/api/trade/my-bets")
@@ -5726,21 +5759,57 @@ def trade_buy_listing(listing_id):
         try:
             today = today_paris_date()
         except Exception:
+            from datetime import date
             today = date.today()
         if b.bet_date < today:
             return jsonify({"ok": False, "error": "expired"}), 400
 
     # (Optionnel) points transferts — à brancher sur tes helpers si dispo
-    # price = getattr(row, "price", None) or 0.0
+    # price = getattr(row, "ask_price", None) or getattr(row, "price", None) or 0.0
     # debit_points(me, price); credit_points(row.user_id, price)
 
-    # Transfert de propriété
+    # ------- Transfert de propriété -------
+    seller_id = row.user_id  # on mémorise le vendeur pour la notif
     b.user_id = me
+    # si tu utilisais un verrou sur la mise
+    if hasattr(b, "locked_for_trade"):
+        b.locked_for_trade = 0
     db.session.commit()
 
     # On marque l’annonce vendue
     row.status = 'SOLD'
     db.session.commit()
+
+    # ------- Message auto au vendeur -------
+    try:
+        # Essaie d'utiliser un libellé "humain"
+        line_txt = None
+        try:
+            # priorités: payload.label > _jsonify_listing(row).label > fallback simple
+            line_txt = (row.payload or {}).get("label")
+            if not line_txt and '_jsonify_listing' in globals():
+                line_txt = (_jsonify_listing(row) or {}).get("label")
+            if not line_txt:
+                # fallback minimal lisible
+                city = getattr(row, "city", None) or (row.payload or {}).get("city") or ""
+                date_label = getattr(row, "date_label", None) or (row.payload or {}).get("date_label") or (row.payload or {}).get("deadline_key") or ""
+                line_txt = f"{city} — {date_label}".strip(" —")
+        except Exception:
+            pass
+
+        auto_body = f"J'ai acheté : {line_txt}" if line_txt else "J'ai acheté ta mise."
+        msg = ChatMessage(
+            from_user_id=str(me),
+            to_user_id=str(seller_id),
+            body=auto_body,
+            created_at=datetime.utcnow(),
+            is_read=0,
+        )
+        db.session.add(msg)
+        db.session.commit()
+    except Exception:
+        # On ne casse pas l’achat si la notif échoue
+        db.session.rollback()
 
     return jsonify({"ok": True}), 200
     

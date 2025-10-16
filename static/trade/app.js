@@ -92,6 +92,38 @@
     }
   }
 
+  async function markThreadRead(otherUserId){
+    // marque tous les messages de other->me comme lus côté serveur
+    try{
+      await fetch('/api/chat/mark-read?user='+encodeURIComponent(otherUserId), {
+        method:'POST',
+        credentials:'same-origin'
+      });
+      const card = document.querySelector(`.user-card[data-uid="${otherUserId}"]`);
+      if (card) card.classList.remove('has-unread');
+    }catch(e){}
+  }
+
+  async function pollUnread(){
+    // attend un JSON du type: [{from: "USER_ID", count: 3}, ...]
+    try{
+      const res = await fetch('/api/chat/unread', {credentials:'same-origin'});
+      if (!res.ok) return;
+      const arr = await res.json();
+
+      // d’abord on enlève les états existants
+      document.querySelectorAll('.user-card.has-unread').forEach(el=>el.classList.remove('has-unread'));
+
+      // puis on marque ceux qui ont du non-lu
+      arr.forEach(item=>{
+        if ((item.count||0) > 0){
+          const card = document.querySelector(`.user-card[data-uid="${item.from}"]`);
+          if (card) card.classList.add('has-unread');
+        }
+      });
+    }catch(e){}
+  }
+
   // 2) on NE rafraîchit que l’état (online/offline), pas les images
   async function refreshPresenceOnly(){
     try{
@@ -131,22 +163,28 @@
     `;
     dock.append(panel);
 
-    const log = panel.querySelector('.log');
+    const log     = panel.querySelector('.log');
+    const inputEl = panel.querySelector('input');
+    const sendBtn = panel.querySelector('button.btn');
+
+    function appendMsg(text, who){
+      const div = document.createElement('div');
+      div.className = 'msg ' + (who==='me' ? 'me' : 'other');
+      div.textContent = text;
+      log.append(div);
+      log.scrollTop = log.scrollHeight;
+    }
 
     async function refresh(){
       try{
         const msgs = await fetch('/api/chat/messages?user='+encodeURIComponent(user.id), {credentials:'same-origin'}).then(r=>r.json());
         log.innerHTML='';
         msgs.forEach(m=>{
-          const div=document.createElement('div');
-          div.className='msg ' + (String(m.from)===String(window.TRADE_CFG?.USER_ID)?'me':'other');
-          div.textContent=m.body;
-          log.append(div);
+          appendMsg(m.body, String(m.from)===String(window.TRADE_CFG?.USER_ID)?'me':'other');
         });
-        log.scrollTop = log.scrollHeight;
       }catch(e){}
     }
-    const timer = setInterval(refresh, 5000);
+    const timer = setInterval(refresh, 4000);
     refresh();
 
     panel.querySelector('.btn-close').addEventListener('click', ()=>{
@@ -155,29 +193,43 @@
     });
 
     // --- Envoi message: bouton + Enter ---
-    const inputEl = panel.querySelector('input');
-    const sendBtn = panel.querySelector('button.btn');
-
-    sendBtn.addEventListener('click', async ()=>{
+    async function sendCurrent(){
       const txt = (inputEl.value || '').trim();
       if (!txt) return;
-      await fetch('/api/chat/messages', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
-        body: JSON.stringify({to:user.id, body:txt})
-      });
-      inputEl.value = '';
-      refresh();
-    });
+      try{
+        const res = await fetch('/api/chat/messages', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          credentials:'same-origin',
+          body: JSON.stringify({to:user.id, body:txt})
+        });
+        if (!res.ok) throw 0;
+        // rendu optimiste immédiat
+        appendMsg(txt, 'me');
+        inputEl.value = '';
+        // on peut relancer un refresh léger pour récupérer l’ID serveur si besoin
+        // (non obligatoire pour l’affichage)
+        // refresh();
+        // marquer comme lu (au cas où des “other” venaient d’arriver)
+        try { await markThreadRead(user.id); } catch(_){}
+      }catch(e){
+        alert("Échec d'envoi.");
+      }
+    }
 
-    // Envoi avec Enter (Enter seul), conserve Shift+Enter pour éventuelles futures sauts de ligne
+    sendBtn.addEventListener('click', sendCurrent);
+
+    // Enter => envoi, sans fermer le panneau
     inputEl.addEventListener('keydown', (e)=>{
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        sendBtn.click();
+        e.stopPropagation();
+        sendCurrent();
       }
     });
+
+    // Quand on ouvre la fenêtre, on “mark as read”
+    markThreadRead(user.id).catch(()=>{});
   }
 
   // ---------- Listings publics ----------
@@ -474,6 +526,8 @@
     bindMeAvatarLink();
     loadRosterOnce();        // rendu initial (avec avatars)
     startPresenceLoops();    // met à jour l’état online/offline
+    setInterval(pollUnread, 5000);
+    pollUnread();
     loadListings();
   });    
 })();
