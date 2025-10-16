@@ -239,7 +239,7 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
   filter: none !important;
   /* si tu veux aussi surligner la carte entière, décommente la ligne suivante : */
   /* box-shadow: 0 0 0 2px #8b5cf6, 0 0 16px rgba(139,92,246,.45); */
-  /* border-color: #8b5cf6; */
+  /* border-color: #5ca6f6; */
 }
 
 /* halo violet autour de l’avatar (préféré : plus net que outline) */
