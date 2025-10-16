@@ -1,6 +1,12 @@
 // static/trade/app.js
 (() => {
   // ---------- utils ----------
+
+  function sideToIcon(side, choice){
+    const raw = String(side || choice || '').toUpperCase();
+    const isRain = (raw === 'PLUIE' || raw === 'RAIN' || raw === 'RAINY');
+    return isRain ? '💧' : '☀️';
+  }
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
@@ -105,23 +111,54 @@
   }
 
   async function pollUnread(){
-    // attend un JSON du type: [{from: "USER_ID", count: 3}, ...]
     try{
-      const res = await fetch('/api/chat/unread', {credentials:'same-origin'});
+      const res = await fetch('/api/chat/unread', { credentials:'same-origin' });
       if (!res.ok) return;
       const arr = await res.json();
 
-      // d’abord on enlève les états existants
-      document.querySelectorAll('.user-card.has-unread').forEach(el=>el.classList.remove('has-unread'));
+      // Construire l’ensemble des expéditeurs avec non-lu
+      const unreadFrom = new Set(
+        (arr || [])
+          .filter(x => Number(x.count || 0) > 0)
+          .map(x => Number(x.from || x.from_user_id || x.user || x.id))
+      );
 
-      // puis on marque ceux qui ont du non-lu
-      arr.forEach(item=>{
-        if ((item.count||0) > 0){
-          const card = document.querySelector(`.user-card[data-uid="${item.from}"]`);
-          if (card) card.classList.add('has-unread');
+      // Réinitialiser l'état
+      document.querySelectorAll('.user-card.has-unread')
+        .forEach(el => el.classList.remove('has-unread'));
+
+      // Marquer les cartes + gérer le badge 💬
+      document.querySelectorAll('.user-card').forEach(card => {
+        const uid = Number(card.getAttribute('data-user-id')); // ← cohérent partout
+        const hasUnread = unreadFrom.has(uid);
+        card.classList.toggle('has-unread', hasUnread);
+
+        const avatar = card.querySelector('.avatar-mini') || card;
+        if (getComputedStyle(avatar).position === 'static') avatar.style.position = 'relative';
+        let badge = avatar.querySelector('.unread-badge');
+
+        if (hasUnread) {
+          if (!badge) {
+            badge = document.createElement('span');    // ← typo fix
+            badge.className = 'unread-badge';
+            badge.textContent = '💬';
+            badge.style.position = 'absolute';
+            badge.style.right = '0';
+            badge.style.top = '0';
+            badge.style.transform = 'translate(35%, -35%)';
+            badge.style.fontSize = '14px';
+            badge.style.lineHeight = '1';
+            badge.style.userSelect = 'none';
+            badge.style.filter = 'drop-shadow(0 0 4px rgba(0,0,0,.35))';
+            avatar.appendChild(badge);
+          }
+        } else if (badge) {
+          badge.remove();
         }
       });
-    }catch(e){}
+    } catch(e) {
+      // console.warn('pollUnread failed', e);
+    }
   }
 
   // 2) on NE rafraîchit que l’état (online/offline), pas les images
@@ -230,6 +267,7 @@
         });
         // reconcile with server state (handles timestamps/order)
         await refresh();
+    markThreadRead(user.id||user);
       }catch(e){
         // rollback UI if it failed (optional)
         div.textContent = `(échec) ${txt}`;
