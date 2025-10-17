@@ -4505,11 +4505,10 @@ def ppp_boost():
 
     # UPSERT avec prise en compte station_id dans la clé unique
     upsert_sql = text("""
-        INSERT INTO ppp_boosts (user_id, bet_date, station_id, total, value, created_at)
-        VALUES (:uid, :d, :sid, :inc, :inc, :now)
+        INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
+        VALUES (:uid, :d, :sid, :inc, :now)
         ON CONFLICT(user_id, bet_date, station_id)
         DO UPDATE SET
-            total = COALESCE(ppp_boosts.total, 0) + :inc,
             value = COALESCE(ppp_boosts.value, 0) + :inc
     """)
 
@@ -4525,7 +4524,7 @@ def ppp_boost():
 
     params = {
         "uid": current_user.id,
-        "d": bet_date.isoformat(),
+        "d": bet_date,
         "sid": station_id,
         "inc": inc,
         "now": datetime.now(UTC),
@@ -4540,6 +4539,34 @@ def ppp_boost():
 
     total = db.session.execute(sel_sql, {"uid": params["uid"], "d": params["d"], "sid": params["sid"]}).scalar() or 0.0
     return jsonify(ok=True, total=float(total)), 200
+
+@app.post('/api/ppp/bets/<int:bet_id>/boosts')
+@login_required
+def ppp_update_boosts(bet_id):
+    me = int(current_user.get_id())
+    bet = PPPBet.query.get_or_404(bet_id)
+    if int(bet.user_id) != me:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    data = request.get_json(silent=True) or {}
+    boosts_count = int(data.get('boosts_count') or 0)
+    boosts_add   = float(data.get('boosts_add') or 0.0)
+
+    # colonnes directes si elles existent
+    if hasattr(bet, 'boosts_count'): bet.boosts_count = boosts_count
+    if hasattr(bet, 'boosts_add'):   bet.boosts_add   = boosts_add
+
+    # garde aussi dans payload (tes UIs lisent souvent depuis payload)
+    pl = dict(bet.payload or {})
+    pl['boosts_count'] = boosts_count
+    pl['boosts_add']   = boosts_add
+    # recalcul optionnel
+    base_odds = float(pl.get('base_odds') or getattr(bet, 'odds', 1.0) or 1.0)
+    pl['total_odds'] = base_odds + boosts_add
+    bet.payload = pl
+
+    db.session.commit()
+    return jsonify({"ok": True})
 
 @app.get("/carte")
 @login_required
