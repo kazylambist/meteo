@@ -56,7 +56,7 @@
     if (mePts) {
       const container = mePts.closest('.solde-box') || mePts.parentElement || document;
       if (!container.querySelector('.me-online')) {
-        mePts.insertAdjacentHTML('afterend', '<div class="me-online gp">en ligne</div>');
+        mePts.insertAdjacentHTML('afterend', '<div class="me-online gp">Online</div>');
       }
     }
   }
@@ -66,7 +66,7 @@
     if (typeof u.is_online === 'boolean') return u.is_online;
     if (u.last_seen){
       const t = Date.parse(u.last_seen);
-      if (!Number.isNaN(t)) return (Date.now() - t) <= 120000; // 2 min
+      if (!Number.isNaN(t)) return (Date.now() - t) <= 300000; // 5 min
     }
     return false;
   }
@@ -151,6 +151,25 @@
           .map(x => Number(x.from || x.from_user_id || x.user || x.id))
       );
 
+      unreadFrom.forEach(uid => {
+        if (!document.querySelector(`.user-card[data-uid="${uid}"]`)) {
+          const wrap = document.querySelector('#roster');
+          if (!wrap) return;
+          const card = document.createElement('div');
+          card.className = 'user-card offline';
+          card.dataset.uid = uid;
+          card.innerHTML = `
+            <div class="avatar-mini"></div>
+            <div class="col">
+              <div class="name">Joueur #${uid}</div>
+              <div class="presence"></div>
+            </div>
+          `;
+          card.addEventListener('click', ()=> openChat({ id: uid, username: `Joueur #${uid}` }));
+          wrap.append(card);
+        }
+      });
+
       // Synchroniser toutes les cartes (classe + badge 💬)
       document.querySelectorAll('.user-card').forEach(card => {
         const uid = Number(card.getAttribute('data-uid'));   // ← cohérent avec ton markup
@@ -172,12 +191,12 @@
             badge.className = 'unread-badge';
             badge.textContent = '💬';
             badge.style.position = 'absolute';
-            badge.style.right = '0';
-            badge.style.top = '0';
-            badge.style.transform = 'translate(35%, -35%)';
+            badge.style.right = '2px';
+            badge.style.top = '2px';
             badge.style.fontSize = '14px';
             badge.style.lineHeight = '1';
             badge.style.userSelect = 'none';
+	    badge.style.zIndex = '1';
             badge.style.filter = 'drop-shadow(0 0 4px rgba(0,0,0,.35))';
             avatar.appendChild(badge);
           }
@@ -658,10 +677,10 @@
     bindSellMenu();
     bindFallbackCreate();
     bindMeAvatarLink();
-    loadRosterOnce();        // rendu initial (avec avatars)
-    startPresenceLoops();    // met à jour l’état online/offline
-    setInterval(pollUnread, 5000);
-    pollUnread();
+    await loadRosterOnce();        // rendu initial (avec avatars)
+    await pollUnread();            // applique .has-unread + 💬 juste après le rendu
+    startPresenceLoops();          // met à jour l’état online/offline
+    setInterval(pollUnread, 5000);   
     loadListings();
   });    
 })();

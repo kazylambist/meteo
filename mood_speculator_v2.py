@@ -3959,7 +3959,7 @@ def register():
     db.session.add(u); db.session.commit()
     login_user(u)
     flash("Compte créé (mode démo).")
-    return redirect(url_for('ppp'))
+    return redirect(url_for('cabine_page'))
 
 @app.route('/login', methods=['GET','POST'])
 def login():
