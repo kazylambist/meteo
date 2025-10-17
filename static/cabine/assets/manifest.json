@@ -79,7 +79,16 @@
       "assets/tronche/Cache-Cou.png"
     ],
     "FOND": [
+      "assets/fond/Aube.jpg",
+      "assets/fond/Crepuscule.jpg",
+      "assets/fond/Rouge.jpg",
+      "assets/fond/Barbe A Papa.jpg",
+      "assets/fond/Stand Up.jpg",
+      "assets/fond/Star System.jpg",
+      "assets/fond/Matrice.jpg",
+      "assets/fond/Horreur.jpg",
       "assets/fond/Mer.jpg",
+      "assets/fond/Rando.jpg",
       "assets/fond/Bois.jpg"
     ],
     "LUNETTES": [
