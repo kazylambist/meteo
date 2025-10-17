@@ -81,18 +81,8 @@
       "assets/tronche/Cache-Cou.png"
     ],
     "FOND": [
-      "assets/fond/Rouge.png",
-      "assets/fond/Hong Kong.png",
-      "assets/fond/Crepuscule.png",
-      "assets/fond/Aube.png",
-      "assets/fond/Matrice.png",
-      "assets/fond/Horreur.png",
-      "assets/fond/Barbe A Papa",
-      "assets/fond/Stand Up.png",
-      "assets/fond/Star.png",
-      "assets/fond/Bois.png",
-      "assets/fond/Mont.png",
-      "assets/fond/Mer.png"
+      "assets/fond/Mer.jpg",
+      "assets/fond/Bois.jpg"
     ],
     "LUNETTES": [
       "assets/lunettes/ShowOff.png",
