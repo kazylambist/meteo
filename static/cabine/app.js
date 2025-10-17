@@ -28,7 +28,7 @@ const ORDER = [
 const CONTROLS_ORDER = ["TRONCHE", "LUNETTES", "CHAPEAU", "JAMBES", "TORSE", "PIEDS", "CEINTURE", "ARME", "ACCESSOIRE", "FOND"];
 
 const Z_INDEX = {
-  'FOND': 10
+  'FOND': 10,
   'PIEDS': 20,
   'TORSE': 30,
   'JAMBES': 35,
