@@ -254,3 +254,15 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
 }
 /* S'assurer que rien ne coupe le halo violet */
 .roster-list{ overflow: visible; }
+.user-card .presence {
+  font-size: 12px;
+  line-height: 1.2;
+  min-height: 1em;     /* garde la ligne même hors-ligne */
+  opacity: .9;
+}
+
+.user-card .presence.on {
+  color: #16a34a;      /* vert */
+  font-weight: 600;
+}
+.me-online { font-weight:600; }

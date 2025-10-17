@@ -52,6 +52,13 @@
 
     if (meName && nameEl) meName.textContent = nameEl.textContent.trim();
     if (mePts && soldeEl) mePts.textContent  = soldeEl.textContent.trim() + ' ⛃';
+    // Ajout esthétique : "en ligne" (vert via .gp) juste sous le solde
+    if (mePts) {
+      const container = mePts.closest('.solde-box') || mePts.parentElement || document;
+      if (!container.querySelector('.me-online')) {
+        mePts.insertAdjacentHTML('afterend', '<div class="me-online gp">en ligne</div>');
+      }
+    }
   }
 
   // ---------- Roster (joueurs connectés) ----------
@@ -75,7 +82,12 @@
       if (!wrap) return;
       wrap.innerHTML = '';
 
-      roster.forEach(u => {
+      // ---- filtrer l'utilisateur courant ----
+      const ME = String(window.TRADE_CFG?.USER_ID);
+      const others = (roster || []).filter(u => String(u.id) !== ME);
+
+      // ---- rendre les autres joueurs ----
+      others.forEach(u => {
         const online = isOnlineFrom(u);
         const card = document.createElement('div');
         card.className = 'user-card' + (online ? ' online' : ' offline');
@@ -87,7 +99,7 @@
                onerror="this.onerror=null;this.src='/static/cabine/assets/avatar.png'">
           <div class="col">
             <div class="name">${u.username}</div>
-            <div class="solde">${(Math.round((Number(u.solde)||0)*100)/100).toString().replace('.', ',')} pts</div>
+            <div class="presence ${online ? 'on' : ''}">${online ? 'en ligne' : ''}</div>
           </div>
         `;
         card.addEventListener('click', ()=> openChat(u));
@@ -191,6 +203,12 @@
         const online = isOnlineFrom(u);
         card.classList.toggle('online',  online);
         card.classList.toggle('offline', !online);
+        // Mettre à jour le libellé "en ligne"
+        const label = card.querySelector('.presence');
+        if (label) {
+          label.classList.toggle('on', online);
+          label.textContent = online ? 'en ligne' : '';
+        }
       });
     }catch(e){}
   }

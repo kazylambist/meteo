@@ -5752,16 +5752,24 @@ def trade_cancel_listing(listing_id):
     db.session.commit()
     return jsonify({"ok": True}), 200
 
-from datetime import datetime, date  # en haut du fichier si pas déjà importé
+from datetime import datetime, date, timezone
+import re, html
 
 @app.post('/api/trade/listings/<int:listing_id>/buy')
 @login_required
 def trade_buy_listing(listing_id):
-    me = str(current_user.get_id())
+    # IDs en int pour éviter les mismatches ORM
+    me_id = int(current_user.get_id())
     row = BetListing.query.get(listing_id)
     if not row or row.status != 'OPEN':
         return jsonify({"ok": False, "error": "not_open"}), 400
-    if row.user_id == me:
+
+    # row.user_id peut être str → force en int pour comparaison
+    try:
+        seller_id = int(row.user_id)
+    except Exception:
+        seller_id = row.user_id  # fallback, mais on vise l'int
+    if seller_id == me_id:
         return jsonify({"ok": False, "error": "cannot_buy_own"}), 400
 
     # payload.bet_id attendu
@@ -5787,12 +5795,10 @@ def trade_buy_listing(listing_id):
 
     # (Optionnel) transfert de points selon row.ask_price
     # price = float(getattr(row, "ask_price", 0.0) or 0.0)
-    # debit_points(me, price); credit_points(row.user_id, price)
-
-    seller_id = row.user_id
+    # debit_points(me_id, price); credit_points(seller_id, price)
 
     # Transfert de propriété de la mise
-    b.user_id = me
+    b.user_id = me_id
     if hasattr(b, "locked_for_trade"):
         b.locked_for_trade = 0
     db.session.commit()
@@ -5801,32 +5807,41 @@ def trade_buy_listing(listing_id):
     row.status = 'SOLD'
     db.session.commit()
 
-    # ---- Message auto au vendeur ----
+    # ---- Message auto au vendeur (texte pur, sans HTML) ----
     try:
-        # Construire une ligne lisible
         pl = row.payload or {}
-        line_txt = pl.get("label")
+
+        # 1) tenter d'utiliser le label si présent, mais en le "dés-HTML-isant"
+        line_txt = pl.get("label") or ""
+        if line_txt:
+            # Supprimer TOUTES les balises HTML et décoder les entités (&nbsp; etc.)
+            line_txt = re.sub(r'<[^>]+>', '', line_txt)
+            line_txt = html.unescape(line_txt).strip()
+
+        # 2) fallback si pas de label exploitable
         if not line_txt:
-            # fallback si pas de label prêt à l’emploi
-            city = getattr(row, "city", None) or pl.get("city") or ""
-            date_label = getattr(row, "date_label", None) or pl.get("date_label") or pl.get("deadline_key") or ""
-            stake = pl.get("stake") or pl.get("amount")
-            odds = pl.get("base_odds") or pl.get("odds")
+            city        = getattr(row, "city", None) or pl.get("city") or ""
+            date_label  = getattr(row, "date_label", None) or pl.get("date_label") or pl.get("deadline_key") or ""
+            stake       = pl.get("stake") or pl.get("amount")
+            odds        = pl.get("base_odds") or pl.get("odds")
+            icon        = pl.get("icon") or ""  # si tu stockes déjà ☀️/💧 dans le payload
+
             frag = []
             if city: frag.append(str(city))
             if date_label: frag.append(str(date_label))
             if stake and odds: frag.append(f"{stake} pts (x{odds})")
+            if icon: frag.append(str(icon))
             line_txt = " — ".join(frag) if frag else "ta mise"
 
         body = f"J'ai acheté : {line_txt}"
 
-        # ORM standard
+        # ORM standard (UTC aware + is_read=0)
         msg = ChatMessage(
-            from_user_id=me,
-            to_user_id=str(seller_id),
-            body=body,
-            created_at=datetime.utcnow(),
-            is_read=0
+            from_user_id = me_id,
+            to_user_id   = seller_id,
+            body         = body,                          # ← TEXTE UNIQUEMENT
+            created_at   = datetime.now(timezone.utc),    # conscient du fuseau
+            is_read      = 0
         )
         db.session.add(msg)
         db.session.commit()
@@ -5880,6 +5895,32 @@ def trade_propose():
     db.session.add(prop)
     db.session.commit()
     return jsonify({"ok": True, "proposal_id": prop.id}), 200
+
+from datetime import datetime, timezone
+
+@app.post('/api/listings/<int:listing_id>/buy')
+@login_required
+def buy_listing(listing_id):
+    # ... logique d’achat / vérifs / paiement ...
+    buyer_id = int(current_user.get_id())
+
+    listing = BetListing.query.get_or_404(listing_id)
+    seller_id = int(listing.seller_id)
+
+    # Message auto : on l’envoie comme si l’acheteur écrivait au vendeur
+    body = f"{current_user.username} a acheté votre mise « {listing.title} » (#{listing.id})."
+
+    msg = ChatMessage(
+        from_user_id = buyer_id,
+        to_user_id   = seller_id,
+        body         = body,
+        created_at   = datetime.now(timezone.utc),
+        is_read      = 0,                    # ← très important pour l’état non-lu
+    )
+    db.session.add(msg)
+    db.session.commit()
+
+    return jsonify({"ok": True})
 
 # tout en haut avec les imports
 from sqlalchemy import text
