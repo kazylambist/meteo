@@ -677,10 +677,10 @@
     bindSellMenu();
     bindFallbackCreate();
     bindMeAvatarLink();
-    await loadRosterOnce();        // rendu initial (avec avatars)
-    await pollUnread();            // applique .has-unread + 💬 juste après le rendu
-    startPresenceLoops();          // met à jour l’état online/offline
-    setInterval(pollUnread, 5000);   
+    loadRosterOnce();  
+    startPresenceLoops(); 
+    setInterval(pollUnread, 5000);    
+    pollUnread();
     loadListings();
   });    
 })();
