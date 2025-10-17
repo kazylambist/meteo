@@ -134,9 +134,9 @@ async function sendAvatarSnapshot() {
   // Adapte la liste aux catégories que tu utilises réellement
   const DRAW_ORDER = [
     'avatar',      // base
-    'PIEDS','JAMBES','CEINTURE','TORSE',
+    'FOND', 'PIEDS','JAMBES','CEINTURE','TORSE',
     'ARME','ACCESSOIRE',
-    'FACIAL','MASQUE','LUNETTES','CHAPEAU'
+    'TRONCHE','LUNETTES','CHAPEAU'
   ];
 
   const layers = [];
