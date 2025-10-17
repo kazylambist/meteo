@@ -62,26 +62,37 @@
       "assets/accessoire/Butin.png"
 
     ],
-    "FACIAL": [
-      "assets/facial/Hanghover.png",
-      "assets/facial/Aviateur.png",
-      "assets/facial/Redneck.png",
-      "assets/facial/Gamer.png",
-      "assets/facial/Entrepreneur.png",
-      "assets/facial/Esthete.png"
+    "TRONCHE": [
+      "assets/tronche/Hanghover.png",
+      "assets/tronche/Aviateur.png",
+      "assets/tronche/Redneck.png",
+      "assets/tronche/Gamer.png",
+      "assets/tronche/Entrepreneur.png",
+      "assets/tronche/Esthete.png",
+      "assets/tronche/Igor.png",
+      "assets/tronche/Cat Woman.png",
+      "assets/tronche/Grant.png",
+      "assets/tronche/Stewart.png",
+      "assets/tronche/Hepburn.png",
+      "assets/tronche/Daft.png",
+      "assets/tronche/Taylor.png",
+      "assets/tronche/JDV Classic.png",
+      "assets/tronche/JDV Legend.png",
+      "assets/tronche/Cache-Cou.png"
     ],
-    "MASQUE": [
-      "assets/masque/Igor.png",
-      "assets/masque/Cat Woman.png",
-      "assets/masque/Grant.png",
-      "assets/masque/Stewart.png",
-      "assets/masque/Hepburn.png",
-      "assets/masque/Daft.png",
-      "assets/masque/Taylor.png",
-      "assets/masque/JDV Classic.png",
-      "assets/masque/JDV Legend.png",
-      "assets/masque/Kim.png",
-      "assets/masque/Cache-Cou.png"
+    "FOND": [
+      "assets/fond/Rouge.png",
+      "assets/fond/Hong Kong.png",
+      "assets/fond/Crepuscule.png",
+      "assets/fond/Aube.png",
+      "assets/fond/Matrice.png",
+      "assets/fond/Horreur.png",
+      "assets/fond/Barbe A Papa",
+      "assets/fond/Stand Up.png",
+      "assets/fond/Star.png",
+      "assets/fond/Bois.png",
+      "assets/fond/Mont.png",
+      "assets/fond/Mer.png"
     ],
     "LUNETTES": [
       "assets/lunettes/ShowOff.png",
