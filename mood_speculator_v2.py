@@ -48,7 +48,7 @@ import io
 
 # Ordre d’empilement identique à Cabine
 AVATAR_ORDER = [
-    "PIEDS","TORSE","JAMBES","CEINTURE","ARME","ACCESSOIRE","FACIAL","MASQUE","LUNETTES","CHAPEAU"
+    "FOND","PIEDS","TORSE","JAMBES","CEINTURE","ARME","ACCESSOIRE","TRONCHE","MASQUE","LUNETTES","CHAPEAU"
 ]
 
 def _fs_path_from_web(path: str) -> str:
