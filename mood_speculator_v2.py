@@ -2704,6 +2704,32 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 })();
 </script>
+<script>
+  async function refreshPPPUnread() {
+    try {
+      // adapte l’endpoint à ce que tu exposes côté serveur
+      const r = await fetch('/api/chat/unread-summary', { credentials: 'same-origin' });
+      if (!r.ok) throw 0;
+      const arr = await r.json();  // [{from_user_id: 12, count: 3}, ...]
+      const total = Array.isArray(arr) ? arr.reduce((s,x)=> s + (Number(x.count)||0), 0) : 0;
+
+      const badge = document.getElementById('trade-unread');
+      if (!badge) return;
+      badge.style.display = total > 0 ? 'inline-block' : 'none';
+      // (optionnel) texte dynamique :
+      // badge.textContent = total > 1 ? 'nouveaux messages' : 'nouveau message';
+    } catch(e) {
+      // en cas d’erreur réseau, on ne casse pas l’UI
+    }
+  }
+
+  // rafraîchir au chargement + toutes les 5 s + quand l’onglet redevient actif
+  document.addEventListener('DOMContentLoaded', refreshPPPUnread);
+  setInterval(refreshPPPUnread, 5000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshPPPUnread();
+  });
+</script>
 </body></html>
 """
 
