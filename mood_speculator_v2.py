@@ -149,6 +149,19 @@ with app.app_context():
     except Exception:
         pass
 
+    # 3) Position.user_id pour relier Position -> User
+    # (Sur SQLite on ne met pas NOT NULL ni FK ici; on backfill d'abord.)
+    try:
+        db.session.execute(text("ALTER TABLE position ADD COLUMN user_id INTEGER"))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_position_user_id ON position(user_id)"
+        ))
+    except Exception:
+        pass
+
     # 2) Chat: flag de lecture (remplit 0 pour les lignes existantes en SQLite)
     try:
         db.session.execute(text(
@@ -170,7 +183,7 @@ with app.app_context():
     # 3a) Normaliser en base (trim + lower) pour éviter l'échec de l'index
     try:
         db.session.execute(text(
-            "UPDATE users SET email = lower(trim(email)) "
+            "UPDATE user SET email = lower(trim(email)) "
             "WHERE email IS NOT NULL"
         ))
     except Exception:
@@ -180,9 +193,7 @@ with app.app_context():
     # (marche même si t’oublies de lower() côté Python)
     try:
         db.session.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_nocase "
-            "ON users(lower(email))"
-        ))
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"))
     except Exception:
         pass
 
@@ -194,7 +205,7 @@ with app.app_context():
 from sqlalchemy.orm import validates
 
 class User(UserMixin, db.Model):
-    __tablename__ = "users"
+    __tablename__ = "user"
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(40), unique=True, nullable=False)
