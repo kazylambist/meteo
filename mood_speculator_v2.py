@@ -3665,10 +3665,7 @@ CARTE_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left">
-      <a class="brand" href="/wet" style="color:#2160f3;">Wet</a>
-      <a class="brand" href="/ppp">Pluie Pas Pluie</a>
-    </div>
+    <div class="nav-left"></div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -3694,13 +3691,18 @@ CARTE_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-      <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
       <span id="boltTool" class="bolt-tool" draggable="false" title="Éclair x5" style="opacity:.7;cursor:default;">⚡</span>
-      <a class="brand-map active" href="/carte" title="Carte">🗺️</a>
+      <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
          href="{{ url_for('cabine_page') }}"></a>
       <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
          href="{{ url_for('trade_page') }}">🤝</a>
+      <span id="trade-unread" style="display:none; margin-left:.5rem; font-weight:600; color:#0a0; font-size:.9em;">
+        nouveau message
+      </span>
     </div>
   </div>
 </nav>
