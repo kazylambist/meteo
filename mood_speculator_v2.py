@@ -2046,11 +2046,7 @@ PPP_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left">
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>
-    </div>
+    <div class="nav-left"></div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -2083,6 +2079,9 @@ PPP_HTML = """
           </div>
         </div>
       {% else %}
+        <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+           <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+        </a>
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
@@ -3703,11 +3702,7 @@ CARTE_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left">
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>
-    </div>
+    <div class="nav-left"></div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -3733,6 +3728,9 @@ CARTE_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>      
       <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
          href="{{ url_for('cabine_page') }}"></a>
