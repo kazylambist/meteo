@@ -266,3 +266,10 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
   font-weight: 600;
 }
 .me-online { font-weight:600; }
+.topbar .back-logo img {
+  height: 28px;      /* ajuste 24–36px selon ton header */
+  width: auto;
+  display: block;
+}
+.topbar .back-logo { padding: 0; }
+.topbar .back-logo:hover img { opacity: .85; }

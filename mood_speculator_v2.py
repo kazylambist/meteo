@@ -1408,6 +1408,38 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 }
 button.danger{ color:#a30000; }
 button.danger:hover{ background:#fff2f2; }
+/* Les items du dropdown (liens) */
+.user-dropdown .item {
+  display:block;
+  padding:8px 12px;
+  color:#333;
+  text-decoration:none;
+  border-radius:6px;
+}
+
+/* Aspect au survol */
+.user-dropdown .item:hover {
+  background:#f5f5f5;
+}
+
+/* Le bouton "Options" hérite du même look */
+.user-dropdown .submenu-toggle {
+  background:transparent;
+  border:0;
+  width:100%;
+  text-align:left;
+  font:inherit;
+  cursor:pointer;
+}
+
+/* Facultatif: la petite flèche à droite, si tu ne l’écris pas dans le HTML */
+.user-dropdown .submenu-toggle::after {
+  content:"▸";
+  float:right;
+  opacity:.6;
+}
+.topbar-logo-link { display:inline-flex; align-items:center; }
+.topbar-logo-link:hover .topbar-logo { opacity:.85; }
 </style>
 """
 
@@ -2037,7 +2069,7 @@ PPP_HTML = """
             <a class="item"
                href="{{ url_for('cabine_page') }}">Profil</a>
             <div class="submenu">
-              <button class="submenu-toggle" id="optionsBtn">Options ▸</button>
+              <button class="item submenu-toggle" id="optionsBtn" type="button">Options ▸</button>
               <div class="submenu-panel" id="optionsMenu" hidden>
                 <form id="deleteAccountForm" action="{{ url_for('delete_account') }}" method="POST"
                       onsubmit="return confirm('Supprimer définitivement ce compte ? Cette action est irréversible.');">
@@ -2052,7 +2084,9 @@ PPP_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-      <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
       <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
