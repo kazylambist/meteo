@@ -94,9 +94,11 @@
         card.dataset.uid = u.id; // <- pour le rafraîchissement d’état
 
         card.innerHTML = `
-          <img class="avatar-mini" alt="${u.username}"
-               src="/u/${u.id}/avatar.png"
-               onerror="this.onerror=null;this.src='/static/cabine/assets/avatar.png'">
+          <div class="avatar-box">
+            <img class="avatar-mini" alt="${u.username}"
+                 src="/u/${u.id}/avatar.png"
+                 onerror="this.onerror=null;this.src='/static/cabine/assets/avatar.png'">
+          </div>
           <div class="col">
             <div class="name">${u.username}</div>
             <div class="presence ${online ? 'on' : ''}">${online ? 'en ligne' : ''}</div>
@@ -179,7 +181,7 @@
         card.classList.toggle('has-unread', hasUnread);
 
         // Badge 💬 en haut à droite de l’avatar
-        const avatar = card.querySelector('.avatar-mini') || card;
+        const avatar = card.querySelector('.avatar-box') || card;
         if (getComputedStyle(avatar).position === 'static') {
           avatar.style.position = 'relative';
         }

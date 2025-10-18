@@ -2046,7 +2046,11 @@ PPP_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left"></div>
+    <div class="nav-left">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
+    </div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -2082,9 +2086,6 @@ PPP_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
       <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
@@ -2668,6 +2669,40 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshTradeUnread();
   setInterval(refreshTradeUnread, 20000);
 });
+document.addEventListener('DOMContentLoaded', () => {
+  const badge = document.getElementById('trade-unread');
+  if (!badge) return;
+
+  // 1) One-time check now
+  checkUnread();
+
+  // 2) Optional: light polling to keep it fresh while user stays on PPP
+  const POLL_MS = 30000; // 30s; tweak if you want
+  const timer = setInterval(checkUnread, POLL_MS);
+
+  // Clean up if you have SPA-y nav; otherwise harmless
+  window.addEventListener('beforeunload', () => clearInterval(timer));
+
+  async function checkUnread() {
+    try {
+      const res = await fetch('/api/chat/unread_count', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // Expecting { unread_count: number } from your backend
+      const n = Number(data.unread_count || 0);
+
+      if (n > 0) {
+        badge.style.display = '';              // show it
+        // If you prefer an icon, you can do: badge.textContent = `💬 ${n}`;
+      } else {
+        badge.style.display = 'none';          // hide it
+      }
+    } catch (e) {
+      // swallow network errors quietly
+    }
+  }
+});
 })();
 </script>
 </body></html>
@@ -2815,7 +2850,11 @@ WET_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left"></div>
+    <div class="nav-left">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
+    </div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box"><span class="solde-label">Solde&nbsp;:</span><span class="solde-value">{{ solde_str }}</span></div>
@@ -2837,9 +2876,6 @@ WET_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
          href="{{ url_for('cabine_page') }}"></a>
     </div>
@@ -3667,7 +3703,11 @@ CARTE_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left"></div>
+    <div class="nav-left">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
+    </div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -3693,9 +3733,6 @@ CARTE_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>
       <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
          href="{{ url_for('cabine_page') }}"></a>

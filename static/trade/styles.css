@@ -273,3 +273,8 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
 }
 .topbar .back-logo { padding: 0; }
 .topbar .back-logo:hover img { opacity: .85; }
+.user-card .avatar-box { position: relative; display: inline-block; }
+.user-card .unread-badge {
+  position: absolute; top: 2px; right: 2px; font-size: 14px; line-height: 1;
+  user-select: none; filter: drop-shadow(0 0 4px rgba(0,0,0,.35));
+}
