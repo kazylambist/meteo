@@ -2074,7 +2074,7 @@ PPP_HTML = """
                 </form>
               </div>
             </div>
-            <a class="item" href="{{ url_for('wet_page') }}">Wet</a>
+            <a class="item" href="{{ url_for('wet') }}">Wet</a>
             <a class="item" href="/logout">Se déconnecter</a>
           </div>
         </div>
