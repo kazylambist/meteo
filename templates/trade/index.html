@@ -91,6 +91,13 @@
       MANIFEST_URL: "{{ url_for('static', filename='cabine/assets/manifest.json') }}",
       USER_ID: {{ (current_user.get_id() if current_user.is_authenticated else 'null') | tojson }}
     };
+  document.addEventListener('DOMContentLoaded', () => {
+    // La page Trade est affichée → on marque tous les messages reçus comme lus
+    fetch("/api/chat/mark_all_read", {
+      method: "POST",
+      credentials: "same-origin"
+    }).catch(() => {});
+  });
   </script>
   <script src="/static/trade/app.js" defer></script>
 </body>

@@ -132,6 +132,7 @@ if not app.debug and not app.testing:
         return resp
 
 with app.app_context():
+    # 1) Colonnes manquantes existantes (tes migrations "historique")
     try:
         db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
     except Exception:
@@ -147,17 +148,54 @@ with app.app_context():
         ))
     except Exception:
         pass
+
+    # 2) Chat: flag de lecture (remplit 0 pour les lignes existantes en SQLite)
     try:
-        db.session.execute(text("ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"))
-        db.session.commit()
+        db.session.execute(text(
+            "ALTER TABLE chat_messages "
+            "ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
+        ))
     except Exception:
         pass
-    db.session.commit()   
+    # (Optionnel) index pratique si tu checkes souvent les non-lus par user
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_chat_messages_user_unread "
+            "ON chat_messages(user_id, is_read)"
+        ))
+    except Exception:
+        pass
+
+    # 3) Email unique robuste
+    # 3a) Normaliser en base (trim + lower) pour éviter l'échec de l'index
+    try:
+        db.session.execute(text(
+            "UPDATE users SET email = lower(trim(email)) "
+            "WHERE email IS NOT NULL"
+        ))
+    except Exception:
+        pass
+
+    # 3b) Index unique sur LOWER(email) → unicité insensible à la casse
+    # (marche même si t’oublies de lower() côté Python)
+    try:
+        db.session.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_nocase "
+            "ON users(lower(email))"
+        ))
+    except Exception:
+        pass
+
+    db.session.commit()
 
 # -----------------------------------------------------------------------------
 # Models
 # -----------------------------------------------------------------------------
+from sqlalchemy.orm import validates
+
 class User(UserMixin, db.Model):
+    __tablename__ = "users"
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(40), unique=True, nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
@@ -175,6 +213,16 @@ class User(UserMixin, db.Model):
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
 
+    @validates("email", "username")
+    def _normalize_fields(self, key, value):
+        if value is None:
+            return value
+        if key == "email":
+            return value.strip().lower()
+        if key == "username":
+            return value.strip()
+        return value
+
     @property
     def is_admin(self) -> bool:
         return self.email.lower() == ADMIN_EMAIL if ADMIN_EMAIL else False
@@ -182,6 +230,12 @@ class User(UserMixin, db.Model):
     def get_id(self):
         return str(self.id)
 
+    # pratique pour auth
+    def set_password(self, raw: str):
+        self.pw_hash = generate_password_hash(raw)
+
+    def check_password(self, raw: str) -> bool:
+        return check_password_hash(self.pw_hash, raw)
 
 class DailyMood(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1326,6 +1380,23 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 .forecast-sun  line{ stroke:#ffd95e; stroke-width:2; stroke-linecap:round; }
 .ppp-day { pointer-events:auto; }
 .ppp-grid .ppp-day.disabled { pointer-events: auto; }
+.user-menu{ position:relative; }
+.user-dropdown{
+  position:absolute; right:0; top:100%;
+  background:#fff; border:1px solid #ddd; border-radius:8px; padding:6px; min-width:220px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+}
+.user-dropdown a, .user-dropdown button{
+  display:block; width:100%; text-align:left; padding:8px 10px; background:none; border:0; cursor:pointer;
+}
+.submenu{ position:relative; }
+.submenu-panel{
+  position:absolute; left:100%; top:0;
+  background:#fff; border:1px solid #ddd; border-radius:8px; padding:6px; min-width:220px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+}
+button.danger{ color:#a30000; }
+button.danger:hover{ background:#fff2f2; }
 </style>
 """
 
@@ -1954,6 +2025,15 @@ PPP_HTML = """
           <div class="user-dropdown" id="userDropdown" role="menu">
             <a class="item"
                href="{{ url_for('cabine_page') }}">Profil</a>
+            <div class="submenu">
+              <button class="submenu-toggle" id="optionsBtn">Options ▸</button>
+              <div class="submenu-panel" id="optionsMenu" hidden>
+                <form id="deleteAccountForm" action="{{ url_for('delete_account') }}" method="POST"
+                      onsubmit="return confirm('Supprimer définitivement ce compte ? Cette action est irréversible.');">
+                  <button type="submit" class="danger">Supprimer ce compte</button>
+                </form>
+              </div>
+            </div>
             <a class="item" href="/logout">Se déconnecter</a>
           </div>
         </div>
@@ -1968,6 +2048,9 @@ PPP_HTML = """
          href="{{ url_for('cabine_page') }}"></a>
       <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
          href="{{ url_for('trade_page') }}">🤝</a>
+      <span id="trade-unread" style="display:none; margin-left:.5rem; font-weight:600; color:#0a0; font-size:.9em;">
+        nouveau message
+      </span>
     </div>
   </div>
 </nav>
@@ -2490,6 +2573,58 @@ PPP_HTML = """
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeMenu();
   });
+  
+async function refreshTradeUnread() {
+  try {
+    const r = await fetch("/api/chat/unread_count", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const badge = document.getElementById("trade-unread");
+    if (!badge) return;
+
+    if ((data.unread|0) > 0) {
+      badge.style.display = "inline";
+    } else {
+      badge.style.display = "none";
+    }
+  } catch (e) {
+    // silencieux côté UI
+    // console.debug("unread poll failed:", e);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const userBtn = document.getElementById('userMenuBtn');
+  const userMenu = document.getElementById('userMenu');
+  const optBtn  = document.getElementById('optionsBtn');
+  const optMenu = document.getElementById('optionsMenu');
+
+  userBtn?.addEventListener('click', () => {
+    const isHidden = userMenu.hasAttribute('hidden');
+    userMenu.toggleAttribute('hidden', !isHidden);
+    // ferme le sous-menu quand on ferme le parent
+    if (!isHidden) optMenu?.setAttribute('hidden', '');
+  });
+
+  optBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isHidden = optMenu.hasAttribute('hidden');
+    optMenu.toggleAttribute('hidden', !isHidden);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!userMenu.contains(e.target) && e.target !== userBtn) {
+      userMenu.setAttribute('hidden', '');
+      optMenu?.setAttribute('hidden', '');
+    }
+  });
+});
+
+// 1er check rapide, puis poll toutes les 20s
+document.addEventListener("DOMContentLoaded", () => {
+  refreshTradeUnread();
+  setInterval(refreshTradeUnread, 20000);
+});
 })();
 </script>
 </body></html>
@@ -3932,7 +4067,7 @@ def you_bet():
 # -----------------------------------------------------------------------------
 # Auth minimal
 # -----------------------------------------------------------------------------
-@app.route('/register', methods=['GET','POST'])
+@app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'GET':
         body = """
@@ -3943,22 +4078,60 @@ def register():
           <div style='margin-top:12px;'><button class='btn primary'>Créer le compte</button></div>
         </form>"""
         return render(AUTH_HTML, css=BASE_CSS, title='Créer un compte', body=body)
-    from sqlalchemy import or_
+
+    # --- POST ---
+    from sqlalchemy import or_, func
     username = (request.form.get('username') or '').strip()
-    email = (request.form.get('email') or '').strip().lower()
+    email_raw = (request.form.get('email') or '').strip()
+    email = email_raw.lower()
     password = (request.form.get('password') or '').strip()
+
+    # Validation basique
+    if not username:
+        flash("Le pseudo est requis.")
+        return redirect(url_for('register'))
+    if not password:
+        flash("Le mot de passe est requis.")
+        return redirect(url_for('register'))
     try:
-        validate_email(email)
+        validate_email(email_raw)  # on valide la forme, même si on stocke en lower
     except EmailNotValidError:
         flash('Email invalide.')
         return redirect(url_for('register'))
-    if User.query.filter(or_(User.username==username, User.email==email)).first():
-        flash('Pseudo ou email déjà pris.')
+
+    # Unicité : email insensible à la casse + pseudo exact
+    existing = User.query.filter(
+        or_(
+            func.lower(User.email) == email,   # nocase
+            User.username == username
+        )
+    ).first()
+    if existing:
+        if existing.email and existing.email.lower() == email:
+            flash("Cette adresse email est déjà utilisée.")
+        elif existing.username == username:
+            flash("Ce pseudo est déjà pris.")
+        else:
+            flash("Impossible de créer le compte avec ces informations.")
         return redirect(url_for('register'))
-    u = User(username=username, email=email, pw_hash=generate_password_hash(password))
-    db.session.add(u); db.session.commit()
+
+    # Création
+    u = User(
+        username=username.strip(),
+        email=email,  # on stocke normalisé (lower + trim)
+        pw_hash=generate_password_hash(password)
+    )
+    db.session.add(u)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        # Si l’index unique en base déclenche malgré tout (course), on précise
+        flash("Cette adresse email est déjà utilisée.")
+        return redirect(url_for('register'))
+
     login_user(u)
-    flash("Compte créé (mode démo).")
+    flash("Compte créé.")
     return redirect(url_for('cabine_page'))
 
 @app.route('/login', methods=['GET','POST'])
@@ -3984,6 +4157,38 @@ def login():
 @login_required
 def logout():
     logout_user(); return redirect(url_for('index'))
+
+from flask_login import login_required, logout_user, current_user
+
+@app.post("/account/delete")
+@login_required
+def delete_account():
+    uid = current_user.id
+
+    # supprimer des fichiers associés (ex: avatar)
+    try:
+        avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
+        if os.path.exists(avatar_path):
+            os.remove(avatar_path)
+    except Exception:
+        pass
+
+    # Si tes relations n’ont pas de cascade, supprime d’abord les objets liés ici
+    # ex:
+    # PPPBet.query.filter_by(user_id=uid).delete()
+    # PPPBoost.query.filter_by(user_id=uid).delete()
+    # db.session.flush()
+
+    # Supprime l’utilisateur
+    user = db.session.get(User, uid)
+    if user:
+        db.session.delete(user)
+        db.session.commit()
+
+    # Déconnexion et redirection vers la page de connexion
+    logout_user()
+    flash("Votre compte a été supprimé.", "success")
+    return redirect(url_for("login"))    
 
 # -----------------------------------------------------------------------------
 # Allocation initiale + création de positions avec échéance
@@ -4182,6 +4387,25 @@ def ppp(station_id=None):
         city_label=city_label,
         station_id=scope_station_id  # pour que le JS puisse l'envoyer lors des boosts
     )
+
+@app.route("/api/chat/unread_count")
+@login_required
+def api_chat_unread_count():
+    count = ChatMessage.query.filter_by(
+        to_user_id=current_user.id,
+        is_read=0
+    ).count()
+    return jsonify({"unread": int(count)})
+
+@app.route("/api/chat/mark_all_read", methods=["POST"])
+@login_required
+def api_chat_mark_all_read():
+    ChatMessage.query.filter_by(
+        to_user_id=current_user.id,
+        is_read=0
+    ).update({"is_read": 1})
+    db.session.commit()
+    return jsonify({"ok": True})
 
 # --- WET: 48h humidity betting ----------------------------------------------
 @app.route('/wet', methods=['GET', 'POST'])
