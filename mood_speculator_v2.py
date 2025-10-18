@@ -2046,10 +2046,7 @@ PPP_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left">
-      <a class="brand" href="/wet" style="color:#2160f3;">Wet</a>
-      <a class="brand active" href="/ppp">Prévisions</a>
-    </div>
+    <div class="nav-left"></div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -2077,6 +2074,7 @@ PPP_HTML = """
                 </form>
               </div>
             </div>
+            <a class="item" href="{{ url_for('wet_page') }}">Wet</a>
             <a class="item" href="/logout">Se déconnecter</a>
           </div>
         </div>
@@ -2817,10 +2815,7 @@ WET_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left">
-      <a class="brand active" href="/wet">Wet</a>
-      <a class="brand" href="/ppp">Pluie Pas Pluie</a>
-    </div>
+    <div class="nav-left"></div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box"><span class="solde-label">Solde&nbsp;:</span><span class="solde-value">{{ solde_str }}</span></div>
