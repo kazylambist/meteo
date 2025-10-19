@@ -2046,7 +2046,12 @@ PPP_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left"></div>
+    <div class="nav-left">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
+    </div>
+
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -2055,6 +2060,7 @@ PPP_HTML = """
         </div>
       {% endif %}
     </div>
+
     <div class="nav-right">
       {% if current_user.is_authenticated %}
         <div class="user-menu">
@@ -2063,8 +2069,7 @@ PPP_HTML = """
             <span class="caret">▾</span>
           </button>
           <div class="user-dropdown" id="userDropdown" role="menu">
-            <a class="item"
-               href="{{ url_for('cabine_page') }}">Profil</a>
+            <a class="item" href="{{ url_for('cabine_page') }}">Profil</a>
             <div class="submenu">
               <button class="item submenu-toggle" id="optionsBtn" type="button">Options ▸</button>
               <div class="submenu-panel" id="optionsMenu" hidden>
@@ -2082,9 +2087,7 @@ PPP_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>
+
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
       <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
