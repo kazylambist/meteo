@@ -2121,7 +2121,6 @@ PPP_HTML = """
          href="{{ url_for('cabine_page') }}"></a>
       <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
          href="{{ url_for('trade_page') }}">🤝</a>
-      <span id="trade-unread" class="badge-unread" style="display:none;">NOUVEAU MESSAGE</span>
       <a id="trade-unread"
          class="badge-unread"
          href="{{ url_for('trade_page') }}"
