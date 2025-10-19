@@ -7,31 +7,44 @@
   <style>
     :root{
       --bg:#0a0f1a;
-      --txt:#9fd0ff;         /* bleu clair */
+      --txt:#9fd0ff;
       --halo:0 0 16px rgba(159,208,255,.55), 0 0 32px rgba(70,140,255,.35);
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);}
+
+    /* Scène plein écran, centrée */
     .stage{
-      min-height:100%;
+      position:relative;
+      min-height:100vh;
       display:grid;
       place-items:center;
-      padding:24px;
+      overflow:hidden;
     }
-    /* pas de cadre/contour : juste le texte au centre */
+
+    /* Chaque étape (texte ou image) remplit la scène et est centrée */
+    .slide{
+      position:absolute;
+      inset:0;
+      display:grid;
+      place-items:center;
+      opacity:0;
+      transition:opacity 1s ease;
+    }
+    .slide.show{ opacity:1; }
+
+    /* Bloc texte sans cadre */
     .block{
       max-width: 920px;
       text-align:center;
+      padding: 0 24px;
     }
     .line{
       font: 700 28px/1.35 var(--mono);
       letter-spacing:.3px;
       text-shadow: var(--halo);
-      opacity:0;
-      transition:opacity 1s ease;
       white-space:pre-wrap;
     }
-    .line.show{ opacity:1; }
 
     .cursor{
       display:inline-block;
@@ -41,42 +54,41 @@
     }
     @keyframes blink { 50% { opacity: 0; } }
 
-    .final{
-      opacity:0;
-      transition:opacity 1s ease;
-      display:flex;
-      justify-content:center;
-      align-items:center;
-      margin-top:24px;
-    }
-    .final.show{ opacity:1; }
-    .final img{
+    /* Image finale centrée, sans décalage vertical */
+    .splash-img{
       max-width: min(78vw, 780px);
       height:auto;
+      display:block; /* évite l'alignement baseline */
       filter: drop-shadow(0 0 24px rgba(70,140,255,.35));
     }
 
-    /* un peu plus petit si tu veux */
     @media (max-width:640px){
       .line{ font-size:22px; }
     }
-
-    /* Accessibilité : si l’utilisateur réduit les animations, on réduit la durée */
     @media (prefers-reduced-motion: reduce){
-      .line, .final{ transition:none; }
+      .slide{ transition:none; }
     }
   </style>
 </head>
 <body>
   <main class="stage">
-    <section class="block">
-      <div id="l1" class="line"></div>
-      <div id="l2" class="line" style="margin-top:18px;"></div>
-
-      <div id="final" class="final" aria-hidden="true">
-        <!-- remplace l’image si besoin -->
-        <img src="{{ url_for('static', filename='img/weather_bets_intro.png') }}" alt="Transition">
+    <!-- Étape 1 : message 1 -->
+    <section id="step1" class="slide">
+      <div class="block">
+        <div id="l1" class="line"></div>
       </div>
+    </section>
+
+    <!-- Étape 2 : message 2 -->
+    <section id="step2" class="slide">
+      <div class="block">
+        <div id="l2" class="line"></div>
+      </div>
+    </section>
+
+    <!-- Étape 3 : image -->
+    <section id="step3" class="slide" aria-hidden="true">
+      <img class="splash-img" src="{{ url_for('static', filename='img/weather_bets_intro.png') }}" alt="Transition">
     </section>
   </main>
 
@@ -86,13 +98,19 @@
     const L1 = `Bienvenue dans les cieux ${USERNAME}`;
     const L2 = `Dans un monde où tout devient prévisible, il reste…`;
 
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const step3 = document.getElementById('step3');
     const line1 = document.getElementById('l1');
     const line2 = document.getElementById('l2');
-    const final = document.getElementById('final');
 
-    const TYPE_MS = 18;          // vitesse frappe
-    const SHOW_MS = 4000;        // temps affiché plein
-    const FADE_MS = 1000;        // fondu in/out
+    const TYPE_MS = 15;    // vitesse de frappe
+    const HOLD1  = 4000;   // durée d'affichage texte 1
+    const HOLD2  = 4000;   // durée d'affichage texte 2
+    const HOLD3  = 4000;   // durée d'affichage image
+    const FADE   = 1000;   // fondu in/out (cohérent avec .slide.transition)
+
+    function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
     function typeInto(el, text){
       return new Promise(resolve=>{
@@ -103,49 +121,46 @@
         el.appendChild(cursor);
 
         let i = 0;
-        function tick(){
+        (function tick(){
           if (i < text.length){
             cursor.insertAdjacentText('beforebegin', text[i++]);
             setTimeout(tick, TYPE_MS);
           } else {
             resolve();
           }
-        }
-        tick();
+        })();
       });
     }
 
-    function fadeIn(el){ el.classList.add('show'); return new Promise(r=>setTimeout(r, FADE_MS)); }
-    function fadeOut(el){ el.classList.remove('show'); return new Promise(r=>setTimeout(r, FADE_MS)); }
+    async function fadeIn(slide){ slide.classList.add('show'); await sleep(FADE); }
+    async function fadeOut(slide){ slide.classList.remove('show'); await sleep(FADE); }
 
     async function run(){
-      // 1) Ligne 1
-      await fadeIn(line1);
+      // Étape 1
+      await fadeIn(step1);
       await typeInto(line1, L1);
-      await new Promise(r=>setTimeout(r, SHOW_MS));
-      await fadeOut(line1);
+      await sleep(HOLD1);
+      await fadeOut(step1);
 
-      // 2) Ligne 2
-      await fadeIn(line2);
+      // Étape 2
+      await fadeIn(step2);
       await typeInto(line2, L2);
-      await new Promise(r=>setTimeout(r, SHOW_MS));
-      await fadeOut(line2);
+      await sleep(HOLD2);
+      await fadeOut(step2);
 
-      // 3) Image finale
-      await fadeIn(final);
-      await new Promise(r=>setTimeout(r, 4000));
-      await fadeOut(final);
+      // Étape 3 (image)
+      await fadeIn(step3);
+      await sleep(HOLD3);
+      await fadeOut(step3);
 
-      // 4) Redirection Cabine
+      // Redirection finale
       window.location.assign('{{ url_for("cabine_page") }}');
     }
 
-    // si animations réduites, on raccourcit le scénario
     const prefersReduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced){
-      // montrer brièvement puis rediriger
+      step1.classList.add('show');
       line1.textContent = L1;
-      line1.classList.add('show');
       setTimeout(()=> window.location.assign('{{ url_for("cabine_page") }}'), 1000);
     } else {
       run();

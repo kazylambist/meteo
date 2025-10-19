@@ -2627,7 +2627,7 @@ PPP_HTML = """
   });
 })();
 
-// ---------- Menu utilisateur (topbar) ----------
+/* ---------- Menu utilisateur (topbar) ---------- */
 (function(){
   const btn = document.getElementById('userMenuBtn');
   const dd  = document.getElementById('userDropdown');
@@ -2636,20 +2636,48 @@ PPP_HTML = """
   function closeMenu(){
     dd.classList.remove('open');
     btn.setAttribute('aria-expanded','false');
+    // ferme aussi le sous-menu Options s'il est ouvert
+    const optionsMenu = document.getElementById('optionsMenu');
+    if (optionsMenu) optionsMenu.setAttribute('hidden','');
   }
+
   function toggleMenu(){
     const isOpen = dd.classList.toggle('open');
     btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (!isOpen) {
+      const optionsMenu = document.getElementById('optionsMenu');
+      if (optionsMenu) optionsMenu.setAttribute('hidden','');
+    }
   }
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleMenu();
   });
+
   document.addEventListener('click', () => closeMenu());
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeMenu();
   });
+
+  // --- Gestion du sous-menu Options ---
+  const optionsBtn  = document.getElementById('optionsBtn');
+  const optionsMenu = document.getElementById('optionsMenu');
+  if (optionsBtn && optionsMenu){
+    optionsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = optionsMenu.hasAttribute('hidden');
+      optionsMenu.toggleAttribute('hidden', !isHidden);
+    });
+
+    // clic hors du dropdown → ferme aussi le sous-menu
+    document.addEventListener('click', (e) => {
+      if (!dd.contains(e.target)) {
+        optionsMenu.setAttribute('hidden', '');
+      }
+    });
+  }
 
   // --- Badge “nouveau message” (PPP) basé sur /api/chat/unread-summary ---
   async function refreshPPPUnread() {
@@ -2661,12 +2689,9 @@ PPP_HTML = """
 
       const badge = document.getElementById('trade-unread');
       if (!badge) return;
-
       badge.style.display = total > 0 ? 'inline-block' : 'none';
-      // Optionnel :
-      // badge.textContent = total > 1 ? 'nouveaux messages' : 'nouveau message';
     } catch(e) {
-      // silencieux
+      /* silencieux */
     }
   }
 
@@ -2674,6 +2699,7 @@ PPP_HTML = """
     refreshPPPUnread();
     setInterval(refreshPPPUnread, 20000);
   });
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshPPPUnread();
   });
