@@ -2616,8 +2616,8 @@ PPP_HTML = """
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeMenu();
   });
-  
-(function(){
+
+  // --- Badge “nouveau message” (PPP) basé sur /api/chat/unread-summary ---
   async function refreshPPPUnread() {
     try {
       const r = await fetch('/api/chat/unread-summary', { credentials: 'same-origin' });
@@ -2629,7 +2629,7 @@ PPP_HTML = """
       if (!badge) return;
 
       badge.style.display = total > 0 ? 'inline-block' : 'none';
-      // Optionnel: afficher le nombre
+      // Optionnel :
       // badge.textContent = total > 1 ? 'nouveaux messages' : 'nouveau message';
     } catch(e) {
       // silencieux
@@ -2637,10 +2637,9 @@ PPP_HTML = """
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    refreshPPPUnread();                 // 1er check
-    setInterval(refreshPPPUnread, 20000); // poll léger
+    refreshPPPUnread();
+    setInterval(refreshPPPUnread, 20000);
   });
-
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshPPPUnread();
   });
