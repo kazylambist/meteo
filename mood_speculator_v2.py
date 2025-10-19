@@ -4113,6 +4113,10 @@ def meteo():
 def intro():
     return render_template_string(INTRO_HTML, css=BASE_CSS)
 
+@app.route('/initiale')
+def initiale_page():
+    return render_template('initiale.html')
+
 @app.route('/youbet')
 def you_bet():
     back = request.args.get('back') or url_for('ppp')
@@ -4186,7 +4190,7 @@ def register():
 
     login_user(u)
     flash("Compte créé.")
-    return redirect(url_for('cabine_page'))
+    return redirect(url_for('initiale_page'))
 
 @app.route('/login', methods=['GET','POST'])
 def login():
