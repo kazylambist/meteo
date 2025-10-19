@@ -4238,59 +4238,66 @@ def login():
 def logout():
     logout_user(); return redirect(url_for('index'))
 
-import os
-from sqlalchemy import text
 from flask_login import login_required, logout_user, current_user
+from sqlalchemy import or_, text
+import os
 
 @app.post("/account/delete")
 @login_required
 def delete_account():
-    uid = current_user.id
+    uid = current_user.id  # capture avant logout
 
-    # 1) Transaction DB : on supprime d'abord toutes les données liées
-    try:
-        with db.session.begin():
-            # --- CHAT : messages envoyés ou reçus
-            db.session.execute(
-                text("DELETE FROM chat_messages WHERE from_user_id = :uid OR to_user_id = :uid"),
-                {"uid": uid}
-            )
-
-            # --- PPP : mises et boosts
-            db.session.execute(text("DELETE FROM ppp_bet WHERE user_id = :uid"),   {"uid": uid})
-            db.session.execute(text("DELETE FROM ppp_boosts WHERE user_id = :uid"),{"uid": uid})
-
-            # --- TRADE : annonces (selon ta colonne de FK)
-            # Variante 1 : si ta table a user_id
-            db.session.execute(text("DELETE FROM trade_listings WHERE user_id = :uid"), {"uid": uid})
-            # Variante 2 : si ta table a seller_id
-            # db.session.execute(text("DELETE FROM trade_listings WHERE seller_id = :uid"), {"uid": uid})
-
-            # --- (optionnel) autres artefacts liés, si tu en as (ex: prefs cabine)
-            # db.session.execute(text("DELETE FROM cabine_prefs WHERE user_id = :uid"), {"uid": uid})
-
-            # --- USER lui-même
-            db.session.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": uid})
-
-        # 2) Fichier avatar : on le supprime après le commit DB réussi
-        try:
-            avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
-            if os.path.exists(avatar_path):
-                os.remove(avatar_path)
-        except Exception:
-            # on ignore les erreurs fichier (pas bloquant)
-            pass
-
-    except Exception:
-        db.session.rollback()
-        flash("Suppression impossible pour le moment.", "error")
-        return redirect(url_for("ppp"))
-
-    # 3) Déconnexion + retour login
+    # 1) Déconnecter d’abord
     try:
         logout_user()
     except Exception:
         pass
+
+    # 2) Supprimer l’avatar disque (best-effort)
+    try:
+        avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
+        if os.path.exists(avatar_path):
+            os.remove(avatar_path)
+    except Exception:
+        pass
+
+    # 3) Purge base — transaction unique
+    try:
+        with db.session.begin():
+            # --- Trade listings (si modèle connu) ---
+            try:
+                from mood_speculator_v2 import TradeListing  # adapte le module si besoin
+                TradeListing.query.filter_by(seller_id=uid).delete(synchronize_session=False)
+            except Exception:
+                # Si le modèle n’existe pas, on peut tenter une table probable :
+                try:
+                    db.session.execute(text("DELETE FROM trade_listings WHERE seller_id = :uid"), {"uid": uid})
+                except Exception:
+                    pass  # on ignore si la table n'existe pas
+
+            # --- Chat ---
+            db.session.execute(
+                text("""
+                    DELETE FROM chat_messages
+                    WHERE from_user_id = :uid OR to_user_id = :uid
+                """),
+                {"uid": uid}
+            )
+
+            # --- PPP boosts & bets ---
+            db.session.execute(text("DELETE FROM ppp_boosts WHERE user_id = :uid"), {"uid": uid})
+            db.session.execute(text("DELETE FROM ppp_bet    WHERE user_id = :uid"), {"uid": uid})
+
+            # --- Enfin, l’utilisateur ---
+            u = db.session.get(User, uid)
+            if u:
+                db.session.delete(u)
+
+        # commit implicite du with
+    except Exception as e:
+        app.logger.exception("Erreur suppression compte %s", uid)
+        flash("Suppression impossible pour le moment. Réessaie dans un instant.", "error")
+        return redirect(url_for("ppp"))
 
     flash("Votre compte a été supprimé.", "success")
     return redirect(url_for("login"))
