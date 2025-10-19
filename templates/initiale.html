@@ -2,139 +2,155 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Initiale</title>
-
-  <!-- Précharge l’image finale -->
-  <link rel="preload" href="{{ url_for('static', filename='img/intro3.png') }}" as="image">
-
   <style>
     :root{
-      --txt:#8cc9ff;         /* bleu clair */
-      --glow: rgba(140,201,255,.45);
-      --bg:#000;
-      --fade-ms: 1000;
+      --bg:#0a0f1a;
+      --txt:#9fd0ff;         /* bleu clair */
+      --halo:0 0 16px rgba(159,208,255,.55), 0 0 32px rgba(70,140,255,.35);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     }
-    html,body{
-      margin:0; height:100%; background:var(--bg); color:var(--txt);
-    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);}
     .stage{
-      position:relative; width:100%; height:100vh;
-      display:grid; place-items:center; overflow:hidden;
+      min-height:100%;
+      display:grid;
+      place-items:center;
+      padding:24px;
     }
-
-    /* Bloc qui apparaît/disparaît en fondu */
-    .fade{
-      opacity:0; transition:opacity var(--fade-ms)ms ease;
-      will-change:opacity, filter;
-      filter: drop-shadow(0 0 18px var(--glow));
+    /* pas de cadre/contour : juste le texte au centre */
+    .block{
+      max-width: 920px;
+      text-align:center;
     }
-    .fade.show{ opacity:1; }
-
-    /* Style "code" + halo */
-    .code{
-      font: 600 18px/1.5 "SFMono-Regular", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
-      max-width:min(86vw, 900px);
+    .line{
+      font: 700 28px/1.35 var(--mono);
+      letter-spacing:.3px;
+      text-shadow: var(--halo);
+      opacity:0;
+      transition:opacity 1s ease;
       white-space:pre-wrap;
-      text-align:left;
-      padding:24px 28px;
-      border-radius:14px;
-      background: radial-gradient(1200px 600px at 50% 10%, rgba(140,201,255,.06), transparent 60%);
-      text-shadow:
-        0 0 12px var(--glow),
-        0 0 28px rgba(140,201,255,.25),
-        0 0 56px rgba(140,201,255,.12);
-      letter-spacing:.2px;
-      box-shadow: inset 0 0 0 1px rgba(140,201,255,.15);
+    }
+    .line.show{ opacity:1; }
+
+    .cursor{
+      display:inline-block;
+      width:.6ch;
+      margin-left:2px;
+      animation: blink 1s steps(1,end) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .final{
+      opacity:0;
+      transition:opacity 1s ease;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      margin-top:24px;
+    }
+    .final.show{ opacity:1; }
+    .final img{
+      max-width: min(78vw, 780px);
+      height:auto;
+      filter: drop-shadow(0 0 24px rgba(70,140,255,.35));
     }
 
-    /* Curseur type terminal */
-    .caret::after{
-      content:"▌";
-      margin-left:4px;
-      animation: blink 1s steps(2, start) infinite;
-    }
-    @keyframes blink{ 50% { opacity:0; } }
-
-    /* Logo final */
-    .logo{
-      max-width:min(62vmin, 560px);
-      width:100%; height:auto; display:block;
-      filter: drop-shadow(0 0 22px var(--glow));
+    /* un peu plus petit si tu veux */
+    @media (max-width:640px){
+      .line{ font-size:22px; }
     }
 
-    /* Bouton "Passer" */
-    .skip{
-      position:fixed; right:14px; bottom:12px;
-      color:var(--txt); text-decoration:none; opacity:.65;
-      font:14px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    /* Accessibilité : si l’utilisateur réduit les animations, on réduit la durée */
+    @media (prefers-reduced-motion: reduce){
+      .line, .final{ transition:none; }
     }
-    .skip:hover{ opacity:1; text-decoration:underline; }
   </style>
 </head>
 <body>
-  <div class="stage">
-    <!-- Les 2 messages tapés -->
-    <pre id="line" class="code fade caret" aria-live="polite"></pre>
-    <!-- L’image finale -->
-    <img id="logo" class="logo fade" src="{{ url_for('static', filename='img/intro3.png') }}" alt="Intro">
-  </div>
+  <main class="stage">
+    <section class="block">
+      <div id="l1" class="line"></div>
+      <div id="l2" class="line" style="margin-top:18px;"></div>
 
-  <a class="skip" href="{{ url_for('cabine_page') }}">Passer</a>
+      <div id="final" class="final" aria-hidden="true">
+        <!-- remplace l’image si besoin -->
+        <img src="{{ url_for('static', filename='img/weather_bets_intro.png') }}" alt="Transition">
+      </div>
+    </section>
+  </main>
 
   <script>
-    // --- Config séquence ---
-    const nextURL = "{{ url_for('cabine_page') }}";
-    const USERNAME = "{{ (current_user.username if current_user.is_authenticated else 'Anonyme')|e }}";
+  (function(){
+    const USERNAME = {{ (current_user.username|tojson) if current_user.is_authenticated else "'explorateur'" }};
+    const L1 = `Bienvenue dans les cieux ${USERNAME}`;
+    const L2 = `Dans un monde où tout devient prévisible, il reste…`;
 
-    const M1 = `Bienvenue dans les cieux >${USERNAME}<`;
-    const M2 = `Dans un monde où tout devient prévisible, il reste...`;
+    const line1 = document.getElementById('l1');
+    const line2 = document.getElementById('l2');
+    const final = document.getElementById('final');
 
-    const HOLD_MS = 4000;   // durée plein écran (texte ou image)
-    const TYPE_MS = 26;     // vitesse de frappe (ms par caractère)
-    const FADE_MS = 1000;   // doit matcher --fade-ms en CSS
+    const TYPE_MS = 18;          // vitesse frappe
+    const SHOW_MS = 4000;        // temps affiché plein
+    const FADE_MS = 1000;        // fondu in/out
 
-    const $line = document.getElementById('line');
-    const $logo = document.getElementById('logo');
+    function typeInto(el, text){
+      return new Promise(resolve=>{
+        el.textContent = '';
+        const cursor = document.createElement('span');
+        cursor.className = 'cursor';
+        cursor.textContent = '▍';
+        el.appendChild(cursor);
 
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-    async function typeInto(el, text){
-      el.textContent = "";
-      for (let i = 0; i < text.length; i++){
-        el.textContent += text[i];
-        await sleep(TYPE_MS);
-      }
+        let i = 0;
+        function tick(){
+          if (i < text.length){
+            cursor.insertAdjacentText('beforebegin', text[i++]);
+            setTimeout(tick, TYPE_MS);
+          } else {
+            resolve();
+          }
+        }
+        tick();
+      });
     }
-    async function fadeIn(el){ el.classList.add('show'); await sleep(FADE_MS); }
-    async function fadeOut(el){ el.classList.remove('show'); await sleep(FADE_MS + 100); }
+
+    function fadeIn(el){ el.classList.add('show'); return new Promise(r=>setTimeout(r, FADE_MS)); }
+    function fadeOut(el){ el.classList.remove('show'); return new Promise(r=>setTimeout(r, FADE_MS)); }
 
     async function run(){
-      // Message 1
-      await fadeIn($line);
-      await typeInto($line, M1);
-      await sleep(HOLD_MS);
-      await fadeOut($line);
+      // 1) Ligne 1
+      await fadeIn(line1);
+      await typeInto(line1, L1);
+      await new Promise(r=>setTimeout(r, SHOW_MS));
+      await fadeOut(line1);
 
-      // Message 2
-      await fadeIn($line);
-      await typeInto($line, M2);
-      await sleep(HOLD_MS);
-      await fadeOut($line);
+      // 2) Ligne 2
+      await fadeIn(line2);
+      await typeInto(line2, L2);
+      await new Promise(r=>setTimeout(r, SHOW_MS));
+      await fadeOut(line2);
 
-      // Image
-      await fadeIn($logo);
-      await sleep(HOLD_MS);
-      await fadeOut($logo);
+      // 3) Image finale
+      await fadeIn(final);
+      await new Promise(r=>setTimeout(r, 4000));
+      await fadeOut(final);
 
-      // Redirection Cabine
-      window.location.assign(nextURL);
+      // 4) Redirection Cabine
+      window.location.assign('{{ url_for("cabine_page") }}');
     }
 
-    // Démarre quand la page est prête (et filet de sécu)
-    if (document.readyState === 'complete') run();
-    else window.addEventListener('load', run);
-    setTimeout(()=>{ if (document.readyState!=='complete') run(); }, 3000);
+    // si animations réduites, on raccourcit le scénario
+    const prefersReduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced){
+      // montrer brièvement puis rediriger
+      line1.textContent = L1;
+      line1.classList.add('show');
+      setTimeout(()=> window.location.assign('{{ url_for("cabine_page") }}'), 1000);
+    } else {
+      run();
+    }
+  })();
   </script>
 </body>
 </html>
