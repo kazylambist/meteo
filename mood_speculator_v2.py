@@ -602,7 +602,7 @@ def remaining_weather_points(u: User) -> float:
 
 BUDGET_INITIAL = 500.0
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 def remaining_points(user):
     """
@@ -610,6 +610,8 @@ def remaining_points(user):
     Starts at 500.0 and:
       - subtracts ACTIVE commitments (PPPBet.amount + WetBet.amount)
       - adds payouts from RESOLVED Wet bets (WetBet.payout)
+      - TRADE: subtracts ask_price for SOLD listings bought by the user
+               and adds ask_price for SOLD listings sold by the user
     """
     if not user or not getattr(user, "id", None):
         return 0.0
@@ -637,7 +639,53 @@ def remaining_points(user):
         .scalar()
     ) or 0.0
 
-    left = base - float(ppp_active) - float(wet_active) + float(wet_won)
+    # --- TRADE adjustments ----------------------------------------------------
+    # Acheteur : somme des ask_price sur les annonces SOLD achetées
+    def _sum_sql(sql, params):
+        try:
+            return float(db.session.execute(text(sql), params).scalar() or 0.0)
+        except Exception:
+            return 0.0
+
+    uid = user.id
+
+    # Table principale supposée: trade_listings ; fallback: bet_listings
+    trade_minus = _sum_sql(
+        "SELECT COALESCE(SUM(ask_price), 0) FROM trade_listings "
+        "WHERE status = 'SOLD' AND buyer_id = :uid",
+        {"uid": uid}
+    )
+    if trade_minus == 0.0:
+        trade_minus = _sum_sql(
+            "SELECT COALESCE(SUM(ask_price), 0) FROM bet_listings "
+            "WHERE status = 'SOLD' AND buyer_id = :uid",
+            {"uid": uid}
+        )
+
+    # Vendeur : somme des ask_price sur les annonces SOLD vendues
+    trade_plus = _sum_sql(
+        "SELECT COALESCE(SUM(ask_price), 0) FROM trade_listings "
+        "WHERE status = 'SOLD' AND seller_id = :uid",
+        {"uid": uid}
+    )
+    if trade_plus == 0.0:
+        trade_plus = _sum_sql(
+            "SELECT COALESCE(SUM(ask_price), 0) FROM bet_listings "
+            "WHERE status = 'SOLD' AND seller_id = :uid",
+            {"uid": uid}
+        )
+
+    # -------------------------------------------------------------------------
+
+    left = (
+        base
+        - float(ppp_active)
+        - float(wet_active)
+        + float(wet_won)
+        - float(trade_minus)    # débiter l'acheteur
+        + float(trade_plus)     # créditer le vendeur
+    )
+
     return max(0.0, round(left, 6))
 
 from zoneinfo import ZoneInfo
