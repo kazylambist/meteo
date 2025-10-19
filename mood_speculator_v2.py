@@ -4239,7 +4239,7 @@ def logout():
     logout_user(); return redirect(url_for('index'))
 
 from flask_login import login_required, logout_user, current_user
-from sqlalchemy import or_, text
+from sqlalchemy import text
 import os
 
 @app.post("/account/delete")
@@ -4247,7 +4247,7 @@ import os
 def delete_account():
     uid = current_user.id  # capture avant logout
 
-    # 1) Déconnecter d’abord
+    # 1) Déconnecter d’abord (évite d'utiliser current_user après)
     try:
         logout_user()
     except Exception:
@@ -4264,16 +4264,17 @@ def delete_account():
     # 3) Purge base — transaction unique
     try:
         with db.session.begin():
-            # --- Trade listings (si modèle connu) ---
+            # --- Trade listings ---
+            # BetListing.user_id est un STRING → comparer avec str(uid)
             try:
-                from mood_speculator_v2 import TradeListing  # adapte le module si besoin
-                TradeListing.query.filter_by(seller_id=uid).delete(synchronize_session=False)
-            except Exception:
-                # Si le modèle n’existe pas, on peut tenter une table probable :
+                BetListing.query.filter(BetListing.user_id == str(uid)).delete(synchronize_session=False)
+            except NameError:
+                # Fallback SQL si modèle indisponible
                 try:
-                    db.session.execute(text("DELETE FROM trade_listings WHERE seller_id = :uid"), {"uid": uid})
+                    db.session.execute(text("DELETE FROM bet_listings WHERE user_id = :uid"), {"uid": str(uid)})
                 except Exception:
-                    pass  # on ignore si la table n'existe pas
+                    # second fallback si le nom de table historique différait
+                    db.session.execute(text("DELETE FROM trade_listings WHERE user_id = :uid"), {"uid": str(uid)})
 
             # --- Chat ---
             db.session.execute(
@@ -4293,8 +4294,8 @@ def delete_account():
             if u:
                 db.session.delete(u)
 
-        # commit implicite du with
-    except Exception as e:
+        # commit implicite via le context manager
+    except Exception:
         app.logger.exception("Erreur suppression compte %s", uid)
         flash("Suppression impossible pour le moment. Réessaie dans un instant.", "error")
         return redirect(url_for("ppp"))
