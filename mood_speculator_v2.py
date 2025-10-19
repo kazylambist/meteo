@@ -1444,6 +1444,44 @@ button.danger:hover{ background:#fff2f2; }
 }
 .topbar-logo-link { display:inline-flex; align-items:center; }
 .topbar-logo-link:hover .topbar-logo { opacity:.85; }
+/* Badge “nouveau message” avec halo vert */
+.badge-unread {
+  font-weight: 700;
+  font-size: .9rem;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+
+  color: #0a0;                       /* texte vert */
+  background: rgba(0, 160, 0, .10);  /* léger fond vert */
+  border-radius: 999px;
+  padding: 2px 10px;
+
+  /* halo */
+  box-shadow:
+    0 0 0 2px rgba(0, 160, 0, .15),
+    0 0 12px rgba(0, 160, 0, .35);
+
+  /* optionnel: petite pulsation du halo */
+  animation: haloPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes haloPulse {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(0, 160, 0, .15),
+      0 0 8px rgba(0, 160, 0, .25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(0, 160, 0, .20),
+      0 0 14px rgba(0, 160, 0, .45);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(0, 160, 0, .15),
+      0 0 8px rgba(0, 160, 0, .25);
+  }
+}
 </style>
 """
 
@@ -2098,9 +2136,7 @@ PPP_HTML = """
          href="{{ url_for('cabine_page') }}"></a>
       <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
          href="{{ url_for('trade_page') }}">🤝</a>
-      <span id="trade-unread" style="display:none; margin-left:.5rem; font-weight:600; color:#0a0; font-size:.9em;">
-        NOUVEAU MESSAGE
-      </span>
+      <span id="trade-unread" class="badge-unread" style="display:none;">NOUVEAU MESSAGE</span>
     </div>
   </div>
 </nav>
@@ -3650,7 +3686,11 @@ CARTE_HTML = """
 
 <nav>
   <div class="container topbar">
-    <div class="nav-left"></div>
+    <div class="nav-left">
+      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
+        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
+      </a>
+    </div>
     <div class="nav-center">
       {% if current_user.is_authenticated and solde_str %}
         <div class="solde-box">
@@ -3675,10 +3715,7 @@ CARTE_HTML = """
       {% else %}
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
-      {% endif %}
-      <a href="/ppp" class="topbar-logo-link" aria-label="Rafraîchir la page PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="Meteo God" class="topbar-logo">
-      </a>      
+      {% endif %}      
       <a class="brand-map" href="/carte">🗺️</a>
       <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
          href="{{ url_for('cabine_page') }}"></a>
