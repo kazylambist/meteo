@@ -57,7 +57,6 @@
       "assets/accessoire/Bouledogue Francais.png",
       "assets/accessoire/Blue Pill.png",
       "assets/accessoire/Parapluie Jaune.png",
-      "assets/accessoire/Et Coucou.png",
       "assets/accessoire/Butin.png"
     ],
     "TRONCHE": [
@@ -86,7 +85,6 @@
       "assets/fond/Star System.jpg",
       "assets/fond/Matrice.jpg",
       "assets/fond/Trefonds.jpg",
-      "assets/fond/Rando.jpg",
       "assets/fond/Bois.jpg",
       "assets/fond/Mer.jpg"
     ],
@@ -98,7 +96,7 @@
       "assets/lunettes/68ard.png"
     ],
     "CHAPEAU": [
-      "assets/chapeau/Champêtre.png",
+      "assets/chapeau/Champetre.png",
       "assets/chapeau/Marilyn.png",
       "assets/chapeau/Cowboy.png",
       "assets/chapeau/UFO.png",

@@ -4156,21 +4156,22 @@ def register():
     if request.method == 'GET':
         body = """
         <form method=post>
-          <label>Pseudo</label><input name=username maxlength=40 required>
-          <label>Email</label><input type=email name=email required>
-          <label>Mot de passe</label><input type=password name=password required>
+          <label>Pseudo</label>
+          <input name="username" maxlength="40" required
+                 pattern="[A-ZÀ-ÖØ-Ý].*"
+                 title="Le pseudo doit commencer par une lettre majuscule.">
+          <label>Email</label><input type="email" name="email" required>
+          <label>Mot de passe</label><input type="password" name="password" required>
           <div style='margin-top:12px;'><button class='btn primary'>Créer le compte</button></div>
         </form>"""
         return render(AUTH_HTML, css=BASE_CSS, title='Créer un compte', body=body)
 
-    # --- POST ---
     from sqlalchemy import or_, func
     username = (request.form.get('username') or '').strip()
     email_raw = (request.form.get('email') or '').strip()
     email = email_raw.lower()
     password = (request.form.get('password') or '').strip()
 
-    # Validation basique
     if not username:
         flash("Le pseudo est requis.")
         return redirect(url_for('register'))
@@ -4178,17 +4179,20 @@ def register():
         flash("Le mot de passe est requis.")
         return redirect(url_for('register'))
     try:
-        validate_email(email_raw)  # on valide la forme, même si on stocke en lower
+        validate_email(email_raw)
     except EmailNotValidError:
         flash('Email invalide.')
         return redirect(url_for('register'))
 
-    # Unicité : email insensible à la casse + pseudo exact
+    # --- AUTO-CORRECTION : 1re lettre → majuscule si c'est une lettre minuscule (Unicode) ---
+    if username:
+        first = username[0]
+        if first.isalpha() and first == first.lower():
+            username = first.upper() + username[1:]
+
+    # Unicité
     existing = User.query.filter(
-        or_(
-            func.lower(User.email) == email,   # nocase
-            User.username == username
-        )
+        or_(func.lower(User.email) == email, User.username == username)
     ).first()
     if existing:
         if existing.email and existing.email.lower() == email:
@@ -4199,18 +4203,12 @@ def register():
             flash("Impossible de créer le compte avec ces informations.")
         return redirect(url_for('register'))
 
-    # Création
-    u = User(
-        username=username.strip(),
-        email=email,  # on stocke normalisé (lower + trim)
-        pw_hash=generate_password_hash(password)
-    )
+    u = User(username=username, email=email, pw_hash=generate_password_hash(password))
     db.session.add(u)
     try:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        # Si l’index unique en base déclenche malgré tout (course), on précise
         flash("Cette adresse email est déjà utilisée.")
         return redirect(url_for('register'))
 
