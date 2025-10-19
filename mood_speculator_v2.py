@@ -1192,6 +1192,10 @@ nav a{color:var(--text);opacity:.9;text-decoration:none}
 nav a:hover{color:var(--brand)}
 .spacer{flex:1}
 
+/* Navbar logo nav left(Wet & PPP) */
+.topbar .nav-left { display:flex; align-items:center; gap:10px; }
+.topbar .nav-left .topbar-logo { height:22px; width:auto; display:block; opacity:.95; }
+
 /* Navbar logo (Wet & PPP) */
 .topbar .nav-right { display:flex; align-items:center; gap:10px; }
 .topbar .nav-right .topbar-logo { height:22px; width:auto; display:block; opacity:.95; }
