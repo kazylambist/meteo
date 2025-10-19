@@ -4157,9 +4157,7 @@ def register():
         body = """
         <form method=post>
           <label>Pseudo</label>
-          <input name="username" maxlength="40" required
-                 pattern="[A-ZÀ-ÖØ-Ý].*"
-                 title="Le pseudo doit commencer par une lettre majuscule.">
+          <input name="username" maxlength="40" required>
           <label>Email</label><input type="email" name="email" required>
           <label>Mot de passe</label><input type="password" name="password" required>
           <div style='margin-top:12px;'><button class='btn primary'>Créer le compte</button></div>
@@ -4167,17 +4165,20 @@ def register():
         return render(AUTH_HTML, css=BASE_CSS, title='Créer un compte', body=body)
 
     from sqlalchemy import or_, func
+
+    # --- Entrées ---
     username = (request.form.get('username') or '').strip()
-    # Force la première lettre en majuscule si c'est une lettre (sans bloquer)
-    if username:
-        first = username[0]
-        if first.isalpha():
-            username = first.upper() + username[1:]
-            
     email_raw = (request.form.get('email') or '').strip()
     email = email_raw.lower()
     password = (request.form.get('password') or '').strip()
 
+    # --- Normalisation du pseudo : 1re lettre -> majuscule si c'est une lettre ---
+    if username:
+        first = username[0]
+        if first.isalpha():
+            username = first.upper() + username[1:]
+
+    # --- Validations basiques ---
     if not username:
         flash("Le pseudo est requis.")
         return redirect(url_for('register'))
@@ -4190,13 +4191,7 @@ def register():
         flash('Email invalide.')
         return redirect(url_for('register'))
 
-    # --- AUTO-CORRECTION : 1re lettre → majuscule si c'est une lettre minuscule (Unicode) ---
-    if username:
-        first = username[0]
-        if first.isalpha() and first == first.lower():
-            username = first.upper() + username[1:]
-
-    # Unicité
+    # --- Unicité (email insensible à la casse + pseudo exact normalisé) ---
     existing = User.query.filter(
         or_(func.lower(User.email) == email, User.username == username)
     ).first()
@@ -4209,6 +4204,7 @@ def register():
             flash("Impossible de créer le compte avec ces informations.")
         return redirect(url_for('register'))
 
+    # --- Création ---
     u = User(username=username, email=email, pw_hash=generate_password_hash(password))
     db.session.add(u)
     try:
@@ -4220,7 +4216,7 @@ def register():
 
     login_user(u)
     flash("Compte créé.")
-    return redirect(url_for('initiale_page'))
+    return redirect(url_for('initiale_page', fresh=1))
 
 @app.route('/login', methods=['GET','POST'])
 def login():
