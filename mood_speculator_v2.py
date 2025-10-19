@@ -4168,6 +4168,12 @@ def register():
 
     from sqlalchemy import or_, func
     username = (request.form.get('username') or '').strip()
+    # Force la première lettre en majuscule si c'est une lettre (sans bloquer)
+    if username:
+        first = username[0]
+        if first.isalpha():
+            username = first.upper() + username[1:]
+            
     email_raw = (request.form.get('email') or '').strip()
     email = email_raw.lower()
     password = (request.form.get('password') or '').strip()

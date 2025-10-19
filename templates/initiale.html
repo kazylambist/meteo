@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Initiale</title>
+  <link rel="preload" as="image" href="{{ url_for('static', filename='img/weather_bets_intro.png') }}">
   <style>
     :root{
       --bg:#0a0f1a;
@@ -154,14 +155,14 @@
       await fadeOut(step3);
 
       // Redirection finale
-      window.location.assign('{{ url_for("cabine_page") }}');
+      window.location.assign('{{ url_for("cabine_page") }}?fresh=1');
     }
 
     const prefersReduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced){
       step1.classList.add('show');
       line1.textContent = L1;
-      setTimeout(()=> window.location.assign('{{ url_for("cabine_page") }}'), 1000);
+      setTimeout(()=> window.location.assign('{{ url_for("cabine_page") }}?fresh=1'), 1000);
     } else {
       run();
     }

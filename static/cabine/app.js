@@ -268,11 +268,17 @@ function initActions(){
   // 1) Config (PPP_URL + USER_ID) pour déterminer la clé localStorage
   await fetchUIConfig().catch(()=>{});
 
+  // Si on arrive avec ?fresh=1 → vider toute sélection locale et ne pas préremplir
+  const params = new URLSearchParams(window.location.search);
+  const isFresh = params.get('fresh') === '1';
+  if (isFresh) {
+    try { localStorage.removeItem(storageKey); } catch(_){}
+  }
   // 2) Manifest (liste des images/catégories)
   const manifest = await loadManifest();
 
   // 3) Si connecté : tenter de charger les prefs serveur → seed localStorage
-  if (USER_ID){
+  if (USER_ID && !isFresh){
     try{
       const resp = await fetch('/api/cabine', { credentials:'same-origin' });
       if (resp.ok){
