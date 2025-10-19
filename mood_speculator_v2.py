@@ -2617,118 +2617,34 @@ PPP_HTML = """
     if (e.key === 'Escape') closeMenu();
   });
   
-async function refreshTradeUnread() {
-  try {
-    const r = await fetch("/api/chat/unread_count", { credentials: "same-origin" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const data = await r.json();
-    const badge = document.getElementById("trade-unread");
-    if (!badge) return;
-
-    if ((data.unread|0) > 0) {
-      badge.style.display = "inline";
-    } else {
-      badge.style.display = "none";
-    }
-  } catch (e) {
-    // silencieux côté UI
-    // console.debug("unread poll failed:", e);
-  }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  const userBtn = document.getElementById('userMenuBtn');
-  const userMenu = document.getElementById('userMenu');
-  const optBtn  = document.getElementById('optionsBtn');
-  const optMenu = document.getElementById('optionsMenu');
-
-  userBtn?.addEventListener('click', () => {
-    const isHidden = userMenu.hasAttribute('hidden');
-    userMenu.toggleAttribute('hidden', !isHidden);
-    // ferme le sous-menu quand on ferme le parent
-    if (!isHidden) optMenu?.setAttribute('hidden', '');
-  });
-
-  optBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const isHidden = optMenu.hasAttribute('hidden');
-    optMenu.toggleAttribute('hidden', !isHidden);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!userMenu.contains(e.target) && e.target !== userBtn) {
-      userMenu.setAttribute('hidden', '');
-      optMenu?.setAttribute('hidden', '');
-    }
-  });
-});
-
-// 1er check rapide, puis poll toutes les 20s
-document.addEventListener("DOMContentLoaded", () => {
-  refreshTradeUnread();
-  setInterval(refreshTradeUnread, 20000);
-});
-document.addEventListener('DOMContentLoaded', () => {
-  const badge = document.getElementById('trade-unread');
-  if (!badge) return;
-
-  // 1) One-time check now
-  checkUnread();
-
-  // 2) Optional: light polling to keep it fresh while user stays on PPP
-  const POLL_MS = 30000; // 30s; tweak if you want
-  const timer = setInterval(checkUnread, POLL_MS);
-
-  // Clean up if you have SPA-y nav; otherwise harmless
-  window.addEventListener('beforeunload', () => clearInterval(timer));
-
-  async function checkUnread() {
-    try {
-      const res = await fetch('/api/chat/unread_count', { credentials: 'same-origin' });
-      if (!res.ok) return;
-      const data = await res.json();
-
-      // Expecting { unread_count: number } from your backend
-      const n = Number(data.unread_count || 0);
-
-      if (n > 0) {
-        badge.style.display = '';              // show it
-        // If you prefer an icon, you can do: badge.textContent = `💬 ${n}`;
-      } else {
-        badge.style.display = 'none';          // hide it
-      }
-    } catch (e) {
-      // swallow network errors quietly
-    }
-  }
-});
-})();
-</script>
-<script>
+(function(){
   async function refreshPPPUnread() {
     try {
-      // adapte l’endpoint à ce que tu exposes côté serveur
       const r = await fetch('/api/chat/unread-summary', { credentials: 'same-origin' });
       if (!r.ok) throw 0;
-      const arr = await r.json();  // [{from_user_id: 12, count: 3}, ...]
+      const arr = await r.json();  // ex: [{from_user_id: 12, count: 3}, ...]
       const total = Array.isArray(arr) ? arr.reduce((s,x)=> s + (Number(x.count)||0), 0) : 0;
 
       const badge = document.getElementById('trade-unread');
       if (!badge) return;
+
       badge.style.display = total > 0 ? 'inline-block' : 'none';
-      // (optionnel) texte dynamique :
+      // Optionnel: afficher le nombre
       // badge.textContent = total > 1 ? 'nouveaux messages' : 'nouveau message';
     } catch(e) {
-      // en cas d’erreur réseau, on ne casse pas l’UI
+      // silencieux
     }
   }
 
-  // rafraîchir au chargement + toutes les 5 s + quand l’onglet redevient actif
-  document.addEventListener('DOMContentLoaded', refreshPPPUnread);
-  setInterval(refreshPPPUnread, 5000);
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshPPPUnread();                 // 1er check
+    setInterval(refreshPPPUnread, 20000); // poll léger
+  });
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshPPPUnread();
   });
+})();
 </script>
 </body></html>
 """
