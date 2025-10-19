@@ -206,22 +206,18 @@ from sqlalchemy.orm import validates
 
 class User(UserMixin, db.Model):
     __tablename__ = "user"
+    __table_args__ = {'sqlite_autoincrement': True}  # <-- empêche la réutilisation d’IDs (SQLite)
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(40), unique=True, nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     pw_hash = db.Column(db.String(255), nullable=False)
     email_confirmed_at = db.Column(db.DateTime, nullable=True)
-
-    # Allocation initiale
     allocation_pierre = db.Column(db.Float, nullable=True)
     allocation_marie = db.Column(db.Float, nullable=True)
     allocation_locked = db.Column(db.Boolean, default=False)
-
-    # Soldes libres (points disponibles pour remiser)
     bal_pierre = db.Column(db.Float, default=0.0)
     bal_marie  = db.Column(db.Float, default=0.0)
-
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
 
     @validates("email", "username")
@@ -4242,6 +4238,8 @@ def login():
 def logout():
     logout_user(); return redirect(url_for('index'))
 
+import os
+from sqlalchemy import text
 from flask_login import login_required, logout_user, current_user
 
 @app.post("/account/delete")
@@ -4249,30 +4247,53 @@ from flask_login import login_required, logout_user, current_user
 def delete_account():
     uid = current_user.id
 
-    # supprimer des fichiers associés (ex: avatar)
+    # 1) Transaction DB : on supprime d'abord toutes les données liées
     try:
-        avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
-        if os.path.exists(avatar_path):
-            os.remove(avatar_path)
+        with db.session.begin():
+            # --- CHAT : messages envoyés ou reçus
+            db.session.execute(
+                text("DELETE FROM chat_messages WHERE from_user_id = :uid OR to_user_id = :uid"),
+                {"uid": uid}
+            )
+
+            # --- PPP : mises et boosts
+            db.session.execute(text("DELETE FROM ppp_bet WHERE user_id = :uid"),   {"uid": uid})
+            db.session.execute(text("DELETE FROM ppp_boosts WHERE user_id = :uid"),{"uid": uid})
+
+            # --- TRADE : annonces (selon ta colonne de FK)
+            # Variante 1 : si ta table a user_id
+            db.session.execute(text("DELETE FROM trade_listings WHERE user_id = :uid"), {"uid": uid})
+            # Variante 2 : si ta table a seller_id
+            # db.session.execute(text("DELETE FROM trade_listings WHERE seller_id = :uid"), {"uid": uid})
+
+            # --- (optionnel) autres artefacts liés, si tu en as (ex: prefs cabine)
+            # db.session.execute(text("DELETE FROM cabine_prefs WHERE user_id = :uid"), {"uid": uid})
+
+            # --- USER lui-même
+            db.session.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": uid})
+
+        # 2) Fichier avatar : on le supprime après le commit DB réussi
+        try:
+            avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
+            if os.path.exists(avatar_path):
+                os.remove(avatar_path)
+        except Exception:
+            # on ignore les erreurs fichier (pas bloquant)
+            pass
+
+    except Exception:
+        db.session.rollback()
+        flash("Suppression impossible pour le moment.", "error")
+        return redirect(url_for("ppp"))
+
+    # 3) Déconnexion + retour login
+    try:
+        logout_user()
     except Exception:
         pass
 
-    # Si tes relations n’ont pas de cascade, supprime d’abord les objets liés ici
-    # ex:
-    # PPPBet.query.filter_by(user_id=uid).delete()
-    # PPPBoost.query.filter_by(user_id=uid).delete()
-    # db.session.flush()
-
-    # Supprime l’utilisateur
-    user = db.session.get(User, uid)
-    if user:
-        db.session.delete(user)
-        db.session.commit()
-
-    # Déconnexion et redirection vers la page de connexion
-    logout_user()
     flash("Votre compte a été supprimé.", "success")
-    return redirect(url_for("login"))    
+    return redirect(url_for("login"))
 
 # -----------------------------------------------------------------------------
 # Allocation initiale + création de positions avec échéance
