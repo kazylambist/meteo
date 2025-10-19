@@ -1446,41 +1446,26 @@ button.danger:hover{ background:#fff2f2; }
 .topbar-logo-link:hover .topbar-logo { opacity:.85; }
 /* Badge “nouveau message” avec halo vert */
 .badge-unread {
+  display: inline-block;
   font-weight: 700;
-  font-size: .9rem;
-  text-transform: uppercase;
-  letter-spacing: .02em;
-
-  color: #0a0;                       /* texte vert */
-  background: rgba(0, 160, 0, .10);  /* léger fond vert */
+  font-size: .78rem;
+  letter-spacing: .015em;
+  padding: 1px 8px;
   border-radius: 999px;
-  padding: 2px 10px;
-
-  /* halo */
+  color: #0a0;
+  background: rgba(0,160,0,.10);
   box-shadow:
-    0 0 0 2px rgba(0, 160, 0, .15),
-    0 0 12px rgba(0, 160, 0, .35);
-
-  /* optionnel: petite pulsation du halo */
+    0 0 0 2px rgba(0,160,0,.14),
+    0 0 10px rgba(0,160,0,.30);
   animation: haloPulse 1.6s ease-in-out infinite;
+  text-decoration: none;     /* remove underline on <a> */
+  cursor: pointer;
 }
+.badge-unread:hover { filter: brightness(1.05); }
 
 @keyframes haloPulse {
-  0% {
-    box-shadow:
-      0 0 0 2px rgba(0, 160, 0, .15),
-      0 0 8px rgba(0, 160, 0, .25);
-  }
-  50% {
-    box-shadow:
-      0 0 0 3px rgba(0, 160, 0, .20),
-      0 0 14px rgba(0, 160, 0, .45);
-  }
-  100% {
-    box-shadow:
-      0 0 0 2px rgba(0, 160, 0, .15),
-      0 0 8px rgba(0, 160, 0, .25);
-  }
+  0%,100% { box-shadow: 0 0 0 2px rgba(0,160,0,.12), 0 0 6px rgba(0,160,0,.22); }
+  50%     { box-shadow: 0 0 0 2px rgba(0,160,0,.16), 0 0 10px rgba(0,160,0,.36); }
 }
 </style>
 """
@@ -2137,6 +2122,13 @@ PPP_HTML = """
       <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
          href="{{ url_for('trade_page') }}">🤝</a>
       <span id="trade-unread" class="badge-unread" style="display:none;">NOUVEAU MESSAGE</span>
+      <a id="trade-unread"
+         class="badge-unread"
+         href="{{ url_for('trade_page') }}"
+         aria-label="Aller au marché (Trade)"
+         style="display:none; margin-left:.5rem;">
+        NOUVEAU MESSAGE
+      </a>
     </div>
   </div>
 </nav>
