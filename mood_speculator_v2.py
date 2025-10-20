@@ -4505,7 +4505,7 @@ def ppp(station_id=None):
             amount=amount,
             odds=float(odds),         # cote initiale (sans boost) renvoyée par ton helper
             status='ACTIVE',
-            station_id=scope_station_id
+            station_id=scope_station_id,
             funded_from_balance=1
         ))
         db.session.commit()
