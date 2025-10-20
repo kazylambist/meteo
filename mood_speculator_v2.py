@@ -114,6 +114,18 @@ except Exception:
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
     )
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    try:
+        cur = dbapi_connection.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+    except Exception:
+        pass
+
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
@@ -132,7 +144,7 @@ if not app.debug and not app.testing:
         return resp
 
 with app.app_context():
-    # 1) Colonnes manquantes existantes (tes migrations "historique")
+    # Colonnes manquantes existantes (tes migrations "historique")
     try:
         db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
     except Exception:
@@ -148,11 +160,13 @@ with app.app_context():
         ))
     except Exception:
         pass
-
-    # 3) Position.user_id pour relier Position -> User
+    # Position.user_id pour relier Position -> User
     # (Sur SQLite on ne met pas NOT NULL ni FK ici; on backfill d'abord.)
     try:
-        db.session.execute(text("ALTER TABLE position ADD COLUMN user_id INTEGER"))
+        db.session.execute(text("PRAGMA foreign_keys=ON"))  # SQLite : activer les FK
+        db.session.execute(text(
+            "ALTER TABLE position ADD COLUMN user_id INTEGER REFERENCES user(id)"
+        ))
     except Exception:
         pass
     try:
@@ -162,38 +176,55 @@ with app.app_context():
     except Exception:
         pass
 
-    # 2) Chat: flag de lecture (remplit 0 pour les lignes existantes en SQLite)
+    # Chat: flag de lecture
     try:
         db.session.execute(text(
-            "ALTER TABLE chat_messages "
-            "ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
+            "ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
         ))
     except Exception:
         pass
-    # (Optionnel) index pratique si tu checkes souvent les non-lus par user
+    # Index utiles (corrigés)
     try:
         db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_chat_messages_user_unread "
-            "ON chat_messages(user_id, is_read)"
+            "CREATE INDEX IF NOT EXISTS ix_chat_unread_to ON chat_messages(to_user_id, is_read)"
         ))
     except Exception:
         pass
-
-    # 3) Email unique robuste
-    # 3a) Normaliser en base (trim + lower) pour éviter l'échec de l'index
     try:
         db.session.execute(text(
-            "UPDATE user SET email = lower(trim(email)) "
-            "WHERE email IS NOT NULL"
+            "CREATE INDEX IF NOT EXISTS ix_chat_from_to ON chat_messages(from_user_id, to_user_id)"
         ))
     except Exception:
         pass
 
-    # 3b) Index unique sur LOWER(email) → unicité insensible à la casse
-    # (marche même si t’oublies de lower() côté Python)
+    # Email unique robuste
     try:
         db.session.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"))
+            "UPDATE user SET email = lower(trim(email)) WHERE email IS NOT NULL"
+        ))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"
+        ))
+    except Exception:
+        pass
+
+    # (Optionnel mais recommandé) PPP: funded_from_balance pour bien séparer stake vs. achat
+    try:
+        db.session.execute(text(
+            "ALTER TABLE ppp_bet ADD COLUMN funded_from_balance INTEGER NOT NULL DEFAULT 1"
+        ))
+    except Exception:
+        pass
+
+    # (Optionnel) index PPP pour accélérer la page
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pppbet_user_status_station_date "
+            "ON ppp_bet(user_id, status, station_id, bet_date)"
+        ))
     except Exception:
         pass
 
@@ -282,6 +313,7 @@ class Position(db.Model):
     settled_points = db.Column(db.Float, nullable=True)
     settled_at = db.Column(db.DateTime, nullable=True)
 
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     user = db.relationship('User', backref='positions')
 
 class WeatherSnapshot(db.Model):
@@ -621,7 +653,9 @@ def remaining_points(user):
     # ACTIVE PPP stakes
     ppp_active = (
         db.session.query(db.func.coalesce(db.func.sum(PPPBet.amount), 0.0))
-        .filter(PPPBet.user_id == user.id, PPPBet.status == 'ACTIVE')
+        .filter(PPPBet.user_id == user.id, PPPBet.status == 'ACTIVE',
+        getattr(PPPBet, 'funded_from_balance', 1) == 1  # ← clé de voûte
+        )
         .scalar()
     ) or 0.0
 
@@ -6188,6 +6222,15 @@ def trade_buy_listing(listing_id):
     if seller_id == me_id:
         return jsonify({"ok": False, "error": "cannot_buy_own"}), 400
 
+    # Prix demandé par le vendeur (doit exister et être > 0)
+    price = float(getattr(row, "ask_price", 0.0) or 0.0)
+    if price <= 0:
+        return jsonify({"ok": False, "error": "bad_price"}), 400
+
+    # Contrôle de budget sur le PRIX (pas sur la mise d’origine)
+    if remaining_points(current_user) + 1e-9 < price:
+        return jsonify({"ok": False, "error": "insufficient_budget"}), 400
+
     # payload.bet_id attendu
     try:
         bet_id = (row.payload or {}).get("bet_id")
@@ -6209,19 +6252,37 @@ def trade_buy_listing(listing_id):
         if b.bet_date < today:
             return jsonify({"ok": False, "error": "expired"}), 400
 
-    # (Optionnel) transfert de points selon row.ask_price
-    # price = float(getattr(row, "ask_price", 0.0) or 0.0)
-    # debit_points(me_id, price); credit_points(seller_id, price)
+    # --------- TRANSFERT atomique : un seul commit ----------
+    try:
+        # 1) transférer la mise au buyer
+        b.user_id = me_id
+        if hasattr(b, "locked_for_trade"):
+            b.locked_for_trade = 0  # elle n'est plus en vente
+        # clé : NE PAS compter cette mise comme une nouvelle dépense du buyer
+        if hasattr(b, "funded_from_balance"):
+            b.funded_from_balance = 0
 
-    # Transfert de propriété de la mise
-    b.user_id = me_id
-    if hasattr(b, "locked_for_trade"):
-        b.locked_for_trade = 0
-    db.session.commit()
+        # 2) clôturer l’annonce (et tracer le prix si les champs existent)
+        row.status   = 'SOLD'
+        if hasattr(row, "buyer_id"):
+            row.buyer_id = me_id
+        if hasattr(row, "sold_at"):
+            # utilise APP_TZ si tu l’as, sinon UTC
+            try:
+                row.sold_at = datetime.now(APP_TZ)  # type: ignore
+            except Exception:
+                row.sold_at = datetime.now(timezone.utc)
 
-    # Marque l’annonce vendue
-    row.status = 'SOLD'
-    db.session.commit()
+        # Si tu as ces champs comptables, ils aident remaining_points()
+        if hasattr(row, "buyer_spend"):
+            row.buyer_spend = price
+        if hasattr(row, "seller_income"):
+            row.seller_income = price
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": "buy_failed"}), 500
 
     # ---- Message auto au vendeur (texte pur, sans HTML) ----
     try:
@@ -6249,9 +6310,8 @@ def trade_buy_listing(listing_id):
             if icon: frag.append(str(icon))
             line_txt = " — ".join(frag) if frag else "ta mise"
 
-        body = f"J'ai acheté : {line_txt}"
+        body = f"J'ai acheté : {line_txt} — Prix: {price:.2f} pts"
 
-        # ORM standard (UTC aware + is_read=0)
         msg = ChatMessage(
             from_user_id = me_id,
             to_user_id   = seller_id,
