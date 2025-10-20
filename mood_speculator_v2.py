@@ -6157,17 +6157,13 @@ def trade_create_listing():
         stake       = _as_float(payload.get('stake') or payload.get('amount'), None)
         base_odds   = _as_float(payload.get('base_odds') or payload.get('odds'), None)
         ask_price   = _as_float(payload.get('ask_price'), None)
-        price       = _as_float(payload.get('price'), None)  # optionnel, on garde si tu l’utilises
+        price       = _as_float(payload.get('price'), None)  # optionnel
         boosts_cnt  = _as_int(payload.get('boosts_count'), None)
         boosts_add  = _as_float(payload.get('boosts_add'), None)
         total_odds  = _as_float(payload.get('total_odds'), None)
         potential   = _as_float(payload.get('potential_gain'), None)
 
-        # -- Règle: le prix demandé ne peut pas être < mise (stake) --
-        if stake is not None and ask_price is not None and ask_price < stake:
-            return jsonify({"ok": False, "error": "ask_price_lt_stake"}), 400
-
-        # Récupérer la mise si bet_id présent (source d'autorité pour stake/choice/date/station)
+        # Récupérer la mise si bet_id présent (source d'autorité)
         bet_id = payload.get("bet_id")
         bet = None
         if bet_id:
@@ -6200,7 +6196,7 @@ def trade_create_listing():
         if (not date_label) and deadline_key:
             date_label = _fmt_date_fr_daykey(deadline_key)
 
-        # Estimation de l'expiration (ex: 23:59 Europe/Paris converti en UTC)
+        # Estimation expiration (23:59 Europe/Paris → UTC)
         expires_at = _guess_expires(deadline_key) if deadline_key else None
 
         # Potentiel si manquant
@@ -6210,9 +6206,23 @@ def trade_create_listing():
             if total_odds is not None:
                 potential = round(stake * total_odds, 2)
 
-        # Créer l'annonce + verrouiller la mise dans la même transaction
+        # --- Garde-fou: éviter 2 annonces OPEN pour la même mise ---
+        if bet_id:
+            dup = BetListing.query.filter(
+                BetListing.status == 'OPEN',
+                (BetListing.payload["bet_id"].as_integer() == int(bet_id))  # JSON path (SQLite)
+            ).first()
+            if dup:
+                return jsonify(ok=False, error="already_listed", listing_id=dup.id), 400
+
+        # --- Synchroniser le payload côté serveur ---
+        if bet_id:
+            payload["bet_id"] = int(bet_id)
+        payload["ask_price"] = float(ask_price)
+
+        # Créer l'annonce
         row = BetListing(
-            user_id=int(current_user.get_id()),  # on force int pour cohérence
+            user_id=int(current_user.get_id()),  # si ta colonne est TEXT, str(current_user.id) marche aussi
             kind=kind,
             payload=payload,
             expires_at=expires_at,
@@ -6241,7 +6251,6 @@ def trade_create_listing():
             bet.locked_for_trade = 1
 
         db.session.commit()
-
         return jsonify({"id": row.id, "ok": True}), 200
 
     except Exception:
