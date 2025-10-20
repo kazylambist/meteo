@@ -519,6 +519,11 @@ class BetListing(db.Model):
     boosts_add    = db.Column(db.Float, nullable=True)
     total_odds    = db.Column(db.Float, nullable=True)
     potential_gain= db.Column(db.Float, nullable=True)
+    ask_price     = db.Column(db.Float)
+    buyer_id      = db.Column(db.Integer)
+    sale_price    = db.Column(db.Float)
+    sold_at       = db.Column(db.DateTime)
+    
 
 class TradeProposal(db.Model):
     __tablename__ = "trade_proposals"
@@ -710,6 +715,7 @@ def remaining_points(user):
             .scalar()
         ) or 0.0
     except Exception:
+        # fallback si la colonne funded_from_balance n'existe pas
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
             .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
@@ -728,7 +734,7 @@ def remaining_points(user):
         .scalar()
     ) or 0.0
 
-    # --- Helpers SQL pour choisir la bonne table et sommer le bon prix ---
+    # --- Détection table Trade (bet_listing prioritaire, sinon trade_listings) ---
     def _table_exists(name: str) -> bool:
         try:
             row = db.session.execute(
@@ -739,17 +745,16 @@ def remaining_points(user):
         except Exception:
             return False
 
-    # préfère la table actuelle
     tbl = "bet_listing" if _table_exists("bet_listing") else (
           "trade_listings" if _table_exists("trade_listings") else None)
 
-    def _sum_trade(where_sql: str, params: dict) -> float:
-        if not tbl:
-            return 0.0
-        # 1) somme sale_price si présent
+    # --- Sommes Trade (sale_price prioritaire, sinon payload.ask_price) ---
+    def _sum_price_generic(table: str, where_sql: str, params: dict) -> float:
+        # 1) colonne sale_price si présente/remplie
         try:
             v = db.session.execute(text(f"""
-                SELECT COALESCE(SUM(sale_price), 0.0) FROM {tbl}
+                SELECT COALESCE(SUM(sale_price), 0.0)
+                FROM {table}
                 WHERE {where_sql}
             """), params).scalar()
             v = float(v or 0.0)
@@ -757,21 +762,49 @@ def remaining_points(user):
             v = 0.0
         if v > 0:
             return v
-        # 2) fallback: somme ask_price depuis le payload JSON
+        # 2) fallback JSON: payload.ask_price
         try:
             v2 = db.session.execute(text(f"""
                 SELECT COALESCE(SUM(
                     COALESCE(json_extract(payload, '$.ask_price'), 0.0)
                 ), 0.0)
-                FROM {tbl}
+                FROM {table}
                 WHERE {where_sql}
             """), params).scalar()
             return float(v2 or 0.0)
         except Exception:
             return 0.0
 
-    trade_spent  = _sum_trade("status = 'SOLD' AND buyer_id = :uid", {"uid": uid})
-    trade_earned = _sum_trade("status = 'SOLD' AND user_id  = :uid", {"uid": uid})
+    def _sum_trade_spent(uid_int: int) -> float:
+        if not tbl:
+            return 0.0
+        # condition avec cast pour tolérer des colonnes TEXT
+        where = "status = 'SOLD' AND CAST(buyer_id AS INTEGER) = :uid"
+        try:
+            return _sum_price_generic(tbl, where, {"uid": uid_int})
+        except Exception:
+            return 0.0
+
+    def _sum_trade_earned(uid_int: int) -> float:
+        if not tbl:
+            return 0.0
+        # d’abord user_id (schéma actuel)
+        where_user = "status = 'SOLD' AND CAST(user_id AS INTEGER) = :uid"
+        try:
+            val = _sum_price_generic(tbl, where_user, {"uid": uid_int})
+            if val > 0:
+                return val
+        except Exception:
+            pass
+        # fallback ancien schéma: seller_id
+        where_seller = "status = 'SOLD' AND CAST(seller_id AS INTEGER) = :uid"
+        try:
+            return _sum_price_generic(tbl, where_seller, {"uid": uid_int})
+        except Exception:
+            return 0.0
+
+    trade_spent  = _sum_trade_spent(uid)
+    trade_earned = _sum_trade_earned(uid)
 
     left = (
         base
@@ -6363,33 +6396,30 @@ def trade_buy_listing(listing_id):
 
     # --------- TRANSFERT + clôture (un seul commit) ----------
     try:
-        # 1) Transférer la mise à l’acheteur
+        # 1) Transférer la mise à l’acheteur (ORM)
         b.user_id = me_id
         if hasattr(b, "locked_for_trade"):
-            b.locked_for_trade = 0  # elle n'est plus en vente
-        # Ne pas compter cette mise comme nouvelle dépense de l’acheteur
+            b.locked_for_trade = 0  # plus en vente
         if hasattr(b, "funded_from_balance"):
-            b.funded_from_balance = 0
+            b.funded_from_balance = 0  # achetée (pas financée du solde)
 
-        # 2) Marquer l’annonce vendue + tracer le prix
-        row.status = 'SOLD'
-        if hasattr(row, "buyer_id"):
-            row.buyer_id = int(me_id)
-        if hasattr(row, "sale_price"):
-            row.sale_price = float(price)
-        if hasattr(row, "sold_at"):
-            try:
-                row.sold_at = datetime.now(APP_TZ)
-            except Exception:
-                row.sold_at = datetime.now(timezone.utc)
-
-        # Renseigner tous les champs prix possibles pour la trésorerie
-        if hasattr(row, "buyer_spend"):
-            row.buyer_spend = price
-        if hasattr(row, "seller_income"):
-            row.seller_income = price
-        if hasattr(row, "sale_price"):
-            row.sale_price = float(price)
+        # 2) Clôturer l’annonce + tracer PRIX et ACHETEUR (SQL direct, garanti)
+        db.session.execute(
+            text("""
+                UPDATE bet_listing
+                SET status = 'SOLD',
+                    buyer_id = :buyer_id,
+                    sale_price = :sale_price,
+                    sold_at = :sold_at
+                WHERE id = :id AND status = 'OPEN'
+            """),
+            {
+                "buyer_id": int(me_id),
+                "sale_price": float(price),
+                "sold_at": datetime.now(APP_TZ) if 'APP_TZ' in globals() else datetime.utcnow(),
+                "id": int(listing_id),
+            }
+        )
 
         db.session.commit()
     except Exception:
