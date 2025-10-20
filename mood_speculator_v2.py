@@ -3410,7 +3410,7 @@ YOUBET_HTML = """
   // ----- Config -----
   const MIN_SHOW_MS = 2000;   // minimum time to show this page
   const MAX_WAIT_MS = 5000;   // hard timeout: go back even if no sound
-  const AUDIO_SRC  = "{{ url_for('static', filename='audio/mise.mp3') }}";
+  const AUDIO_SRC  = "{{ url_for('static', filename='audio/yoga.wav') }}";
 
   // read ?back=/ppp or ?next=/ppp (accept both)
   const sp = new URLSearchParams(location.search);
