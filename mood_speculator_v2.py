@@ -732,9 +732,7 @@ def remaining_points(user):
         - float(wet_active) \
         + float(wet_won) \
         - float(trade_spent)
-        # + float(trade_earned)  # <- si tu veux que le budget "disponible" augmente avec les ventes.
-                                 # Généralement, on laisse le budget = points non engagés,
-                                 # et on crédite ailleurs (ex: soldes libres). À toi de décider.
+        + float(trade_earned)  # <- le budget "disponible" augmente avec les ventes.
 
     return max(0.0, round(left, 6))
 
