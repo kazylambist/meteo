@@ -690,28 +690,15 @@ def remaining_weather_points(u: User) -> float:
 
 BUDGET_INITIAL = 500.0
 
-from sqlalchemy import func, text
+from sqlalchemy import text, func
 
 def remaining_points(user):
-    """
-    Trésorerie globale :
-      base = 500
-      - PPP actifs financés (funded_from_balance=1)
-      - Wet actifs
-      + Wet payés (payout des résolues)
-      - total des achats Trade (prix des SOLD où buyer = moi)
-      + total des ventes Trade (prix des SOLD où seller = moi)
-    Les montants Trade s’appuient sur sale_price si présent,
-    sinon sur payload.sale_price puis payload.ask_price (fallback).
-    L’identifiant buyer s’appuie sur buyer_id si présent,
-    sinon sur payload.buyer_id (fallback).
-    """
     if not user or not getattr(user, "id", None):
         return 0.0
     uid = int(user.id)
     base = 500.0
 
-    # PPP actifs financés depuis le solde (pas ceux reçus via Trade)
+    # --- PPP actifs financés depuis le solde ---
     try:
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
@@ -723,14 +710,13 @@ def remaining_points(user):
             .scalar()
         ) or 0.0
     except Exception:
-        # fallback si la colonne funded_from_balance n'existe pas
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
             .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
             .scalar()
         ) or 0.0
 
-    # Wet actifs / payés
+    # --- Wet actifs et payés ---
     wet_active = (
         db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
         .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
@@ -742,52 +728,58 @@ def remaining_points(user):
         .scalar()
     ) or 0.0
 
-    # --- Trade: achats (débit) & ventes (crédit) ---
-    def _sum_trade(where_sql, params):
-        """
-        Additionne le prix via :
-          sale_price
-          fallback -> payload.sale_price
-          fallback -> payload.ask_price
-          fallback -> ask_price (colonne)
-        Si la table bet_listings n'existe pas, retourne 0.
-        """
+    # --- Helpers SQL pour choisir la bonne table et sommer le bon prix ---
+    def _table_exists(name: str) -> bool:
         try:
-            sql = f"""
+            row = db.session.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name=:n"),
+                {"n": name}
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    # préfère la table actuelle
+    tbl = "bet_listing" if _table_exists("bet_listing") else (
+          "trade_listings" if _table_exists("trade_listings") else None)
+
+    def _sum_trade(where_sql: str, params: dict) -> float:
+        if not tbl:
+            return 0.0
+        # 1) somme sale_price si présent
+        try:
+            v = db.session.execute(text(f"""
+                SELECT COALESCE(SUM(sale_price), 0.0) FROM {tbl}
+                WHERE {where_sql}
+            """), params).scalar()
+            v = float(v or 0.0)
+        except Exception:
+            v = 0.0
+        if v > 0:
+            return v
+        # 2) fallback: somme ask_price depuis le payload JSON
+        try:
+            v2 = db.session.execute(text(f"""
                 SELECT COALESCE(SUM(
-                    COALESCE(
-                        sale_price,
-                        json_extract(payload, '$.sale_price'),
-                        json_extract(payload, '$.ask_price'),
-                        ask_price,
-                        0.0
-                    )
+                    COALESCE(json_extract(payload, '$.ask_price'), 0.0)
                 ), 0.0)
-                FROM bet_listings
-                WHERE status = 'SOLD' AND ({where_sql})
-            """
-            return float(db.session.execute(text(sql), params).scalar() or 0.0)
+                FROM {tbl}
+                WHERE {where_sql}
+            """), params).scalar()
+            return float(v2 or 0.0)
         except Exception:
             return 0.0
 
-    # ACHATS : buyer = moi (colonne buyer_id si présente, sinon payload.buyer_id)
-    trade_spent = _sum_trade(
-        "COALESCE(buyer_id, json_extract(payload, '$.buyer_id')) = :uid",
-        {"uid": uid}
-    )
-    # VENTES : seller = moi (colonne user_id)
-    trade_earned = _sum_trade(
-        "user_id = :uid",
-        {"uid": uid}
-    )
+    trade_spent  = _sum_trade("status = 'SOLD' AND buyer_id = :uid", {"uid": uid})
+    trade_earned = _sum_trade("status = 'SOLD' AND user_id  = :uid", {"uid": uid})
 
     left = (
         base
         - float(ppp_active_funded)
         - float(wet_active)
         + float(wet_won)
-        - float(trade_spent)     # prix payés pour les achats
-        + float(trade_earned)    # prix encaissés sur les ventes
+        - float(trade_spent)    # prix payés pour les achats
+        + float(trade_earned)   # prix encaissés sur les ventes
     )
     return max(0.0, round(left, 6))
 
@@ -4196,6 +4188,10 @@ CARTE_HTML = """
 # -----------------------------------------------------------------------------
 # Routes publiques API/UI
 # -----------------------------------------------------------------------------
+@app.get("/health")
+def health():
+    return "ok", 200
+
 @app.route('/')
 def index():
     return redirect(url_for('intro'))
@@ -6167,6 +6163,10 @@ def trade_create_listing():
         total_odds  = _as_float(payload.get('total_odds'), None)
         potential   = _as_float(payload.get('potential_gain'), None)
 
+        # -- Règle: le prix demandé ne peut pas être < mise (stake) --
+        if stake is not None and ask_price is not None and ask_price < stake:
+            return jsonify({"ok": False, "error": "ask_price_lt_stake"}), 400
+
         # Récupérer la mise si bet_id présent (source d'autorité pour stake/choice/date/station)
         bet_id = payload.get("bet_id")
         bet = None
@@ -6366,9 +6366,11 @@ def trade_buy_listing(listing_id):
         row.status = 'SOLD'
         if hasattr(row, "buyer_id"):
             row.buyer_id = int(me_id)
+        if hasattr(row, "sale_price"):
+            row.sale_price = float(price)
         if hasattr(row, "sold_at"):
             try:
-                row.sold_at = datetime.now(APP_TZ)  # si tu as APP_TZ
+                row.sold_at = datetime.now(APP_TZ)
             except Exception:
                 row.sold_at = datetime.now(timezone.utc)
 

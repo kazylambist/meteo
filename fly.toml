@@ -15,6 +15,15 @@ primary_region = 'cdg'
   auto_start_machines = true
   min_machines_running = 0
 
+# Health check HTTP simple
+[[http_service.checks]]
+  grace_period = "20s"   # laisse démarrer gunicorn tranquillement
+  interval     = "5s"
+  timeout      = "2s"
+  method       = "GET"
+  path         = "/health"
+  protocol     = "http"
+
 [[mounts]]
   source = "data"
   destination = "/data"
