@@ -235,32 +235,32 @@ with app.app_context():
     # 0) Table minimale si absente (évite "no such table: bet_listing")
     try:
         db.session.execute(text(
-            "CREATE TABLE IF NOT EXISTS bet_listing (id INTEGER PRIMARY KEY)"
+            "CREATE TABLE IF NOT EXISTS bet_listings (id INTEGER PRIMARY KEY)"
         ))
     except Exception:
         pass
 
     # 1) Colonnes de base (certaines existent peut-être déjà)
     for ddl in [
-        "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
-        "ALTER TABLE bet_listing ADD COLUMN status TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN payload TEXT",
+        "ALTER TABLE bet_listings ADD COLUMN user_id INTEGER",
+        "ALTER TABLE bet_listings ADD COLUMN status TEXT",
+        "ALTER TABLE bet_listings ADD COLUMN payload TEXT",
         # champs fréquemment utilisés par ton code (optionnels mais utiles)
-        "ALTER TABLE bet_listing ADD COLUMN city TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN stake REAL",
-        "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
-        "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
-        "ALTER TABLE bet_listing ADD COLUMN boosts_add REAL",
-        "ALTER TABLE bet_listing ADD COLUMN total_odds REAL",
-        "ALTER TABLE bet_listing ADD COLUMN potential_gain REAL",
+        "ALTER TABLE bet_listings ADD COLUMN city TEXT",
+        "ALTER TABLE bet_listings ADD COLUMN date_label TEXT",
+        "ALTER TABLE bet_listings ADD COLUMN deadline_key TEXT",
+        "ALTER TABLE bet_listings ADD COLUMN choice TEXT",
+        "ALTER TABLE bet_listings ADD COLUMN stake REAL",
+        "ALTER TABLE bet_listings ADD COLUMN base_odds REAL",
+        "ALTER TABLE bet_listings ADD COLUMN boosts_count INTEGER",
+        "ALTER TABLE bet_listings ADD COLUMN boosts_add REAL",
+        "ALTER TABLE bet_listings ADD COLUMN total_odds REAL",
+        "ALTER TABLE bet_listings ADD COLUMN potential_gain REAL",
         # prix demandé (création) et prix réellement payé (vente)
-        "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
-        "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
-        "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
-        "ALTER TABLE bet_listing ADD COLUMN sold_at TEXT"
+        "ALTER TABLE bet_listings ADD COLUMN ask_price REAL",
+        "ALTER TABLE bet_listings ADD COLUMN buyer_id INTEGER",
+        "ALTER TABLE bet_listings ADD COLUMN sale_price REAL",
+        "ALTER TABLE bet_listings ADD COLUMN sold_at TEXT"
     ]:
         try:
             db.session.execute(text(ddl))
@@ -271,14 +271,14 @@ with app.app_context():
     try:
         db.session.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status "
-            "ON bet_listing(buyer_id, status)"
+            "ON bet_listings(buyer_id, status)"
         ))
     except Exception:
         pass
     try:
         db.session.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status "
-            "ON bet_listing(user_id, status)"
+            "ON bet_listings(user_id, status)"
         ))
     except Exception:
         pass
@@ -750,7 +750,7 @@ def remaining_points(user):
           fallback -> payload.sale_price
           fallback -> payload.ask_price
           fallback -> ask_price (colonne)
-        Si la table bet_listing n'existe pas, retourne 0.
+        Si la table bet_listings n'existe pas, retourne 0.
         """
         try:
             sql = f"""
@@ -763,7 +763,7 @@ def remaining_points(user):
                         0.0
                     )
                 ), 0.0)
-                FROM bet_listing
+                FROM bet_listings
                 WHERE status = 'SOLD' AND ({where_sql})
             """
             return float(db.session.execute(text(sql), params).scalar() or 0.0)
