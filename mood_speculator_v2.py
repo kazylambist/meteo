@@ -6365,7 +6365,7 @@ def trade_buy_listing(listing_id):
         # 2) Marquer l’annonce vendue + tracer le prix
         row.status = 'SOLD'
         if hasattr(row, "buyer_id"):
-            row.buyer_id = me_id
+            row.buyer_id = int(me_id)
         if hasattr(row, "sold_at"):
             try:
                 row.sold_at = datetime.now(APP_TZ)  # si tu as APP_TZ
@@ -6378,7 +6378,7 @@ def trade_buy_listing(listing_id):
         if hasattr(row, "seller_income"):
             row.seller_income = price
         if hasattr(row, "sale_price"):
-            row.sale_price = price
+            row.sale_price = float(price)
 
         db.session.commit()
     except Exception:
