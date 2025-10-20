@@ -641,73 +641,100 @@ from sqlalchemy import func
 
 def remaining_points(user):
     """
-    Budget global restant pour l'utilisateur.
-    Base: 500 pts
-      - soustrait les mises ACTIVES (PPPBet.amount + WetBet.amount)
-        *PPP*: uniquement celles financées depuis le solde (funded_from_balance = 1)
-      - ajoute les gains Wet résolus
-      - soustrait la somme des PRIX payés pour les achats Trade (BetListing.ask_price pour listings SOLD où buyer_id = user.id)
-      - ajoute la somme des PRIX reçus pour les ventes Trade (BetListing.ask_price pour listings SOLD où user_id = user.id)
+    Budget global restant.
+    Base = 500.
+      - soustrait les mises PPP actives financées par le solde (funded_from_balance=1)
+      - soustrait les mises Wet actives
+      - ajoute les payouts Wet résolus
+      - intègre Trade si les colonnes existent (buyer_spend/seller_income ou ask_price)
     """
     if not user or not getattr(user, "id", None):
         return 0.0
 
     base = 500.0
+    uid = int(user.id)
 
-    # PPP ACTIVES, mais uniquement celles financées depuis le solde
-    # (pas celles transférées via Trade : funded_from_balance=0)
-    ppp_active = (
-        db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
-        .filter(
-            PPPBet.user_id == user.id,
-            PPPBet.status == 'ACTIVE',
-            getattr(PPPBet, 'funded_from_balance', 1) == 1
-        )
-        .scalar()
-    ) or 0.0
+    # --- PPP actifs financés par le solde ---
+    try:
+        q_ppp = db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))\
+            .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
+        # si la colonne funded_from_balance existe, on la filtre à 1
+        if 'funded_from_balance' in PPPBet.__table__.columns:
+            q_ppp = q_ppp.filter(PPPBet.funded_from_balance == 1)
+        ppp_active = float(q_ppp.scalar() or 0.0)
+    except Exception:
+        ppp_active = 0.0
 
-    # Wet ACTIVES
-    wet_active = (
-        db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
-        .filter(WetBet.user_id == user.id, WetBet.status == 'ACTIVE')
-        .scalar()
-    ) or 0.0
+    # --- Wet actifs & gains Wet résolus ---
+    try:
+        wet_active = float((
+            db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
+            .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
+            .scalar()
+        ) or 0.0)
+    except Exception:
+        wet_active = 0.0
 
-    # Wet résolues (payout crédité)
-    wet_won = (
-        db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
-        .filter(WetBet.user_id == user.id, WetBet.status == 'RESOLVED')
-        .scalar()
-    ) or 0.0
+    try:
+        wet_won = float((
+            db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
+            .filter(WetBet.user_id == uid, WetBet.status == 'RESOLVED')
+            .scalar()
+        ) or 0.0)
+    except Exception:
+        wet_won = 0.0
 
-    # ---- TRADE : débit côté acheteur = somme des PRIX payés ----
-    trade_buy_spent = (
-        db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
-        .filter(
-            BetListing.status == 'SOLD',
-            BetListing.buyer_id == user.id
-        )
-        .scalar()
-    ) or 0.0
+    # --- Trade (optionnel, selon colonnes présentes) ---
+    trade_spent = 0.0   # ce que l’acheteur a payé (réduit le budget)
+    trade_earned = 0.0  # ce que le vendeur a gagné (augmente le budget si tu veux comptabiliser, sinon laisse à 0)
 
-    # ---- TRADE : crédit côté vendeur = somme des PRIX encaissés ----
-    trade_sell_earned = (
-        db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
-        .filter(
-            BetListing.status == 'SOLD',
-            BetListing.user_id == user.id
-        )
-        .scalar()
-    ) or 0.0
+    try:
+        # Vérifie d'abord que le modèle existe
+        if 'BetListing' in globals():
+            cols = set(BetListing.__table__.columns.keys())
 
-    left = (
-        base
-        - float(ppp_active)
-        - float(wet_active)
-        + float(wet_won)
-        - float(trade_buy_spent)
-        + float(trade_sell_earned)
-    )
+            # Cas 1 : colonnes buyer_spend / seller_income (recommandé)
+            if {'buyer_spend', 'seller_income', 'status', 'buyer_id', 'user_id'} <= cols:
+                trade_spent = float((
+                    db.session.query(func.coalesce(func.sum(BetListing.buyer_spend), 0.0))
+                    .filter(BetListing.buyer_id == uid, BetListing.status == 'SOLD')
+                    .scalar()
+                ) or 0.0)
+                trade_earned = float((
+                    db.session.query(func.coalesce(func.sum(BetListing.seller_income), 0.0))
+                    .filter(BetListing.user_id == uid, BetListing.status == 'SOLD')
+                    .scalar()
+                ) or 0.0)
+
+            # Cas 2 : pas de buyer_spend/seller_income mais il y a ask_price
+            elif {'ask_price', 'status', 'buyer_id', 'user_id'} <= cols:
+                trade_spent = float((
+                    db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
+                    .filter(BetListing.buyer_id == uid, BetListing.status == 'SOLD')
+                    .scalar()
+                ) or 0.0)
+                trade_earned = float((
+                    db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
+                    .filter(BetListing.user_id == uid, BetListing.status == 'SOLD')
+                    .scalar()
+                ) or 0.0)
+            else:
+                # Sinon, on ne touche pas au budget avec Trade (pas de colonnes fiables)
+                pass
+    except Exception:
+        # En cas de souci, on ignore Trade plutôt que de planter
+        trade_spent = 0.0
+        trade_earned = 0.0
+
+    # Assemblage
+    left = base \
+        - float(ppp_active) \
+        - float(wet_active) \
+        + float(wet_won) \
+        - float(trade_spent)
+        # + float(trade_earned)  # <- si tu veux que le budget "disponible" augmente avec les ventes.
+                                 # Généralement, on laisse le budget = points non engagés,
+                                 # et on crédite ailleurs (ex: soldes libres). À toi de décider.
 
     return max(0.0, round(left, 6))
 
