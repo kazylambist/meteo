@@ -641,100 +641,108 @@ from sqlalchemy import func
 
 def remaining_points(user):
     """
-    Budget global restant.
-    Base = 500.
-      - soustrait les mises PPP actives financées par le solde (funded_from_balance=1)
-      - soustrait les mises Wet actives
-      - ajoute les payouts Wet résolus
-      - intègre Trade si les colonnes existent (buyer_spend/seller_income ou ask_price)
+    Trésorerie globale disponible pour l'utilisateur.
+
+    Base 500.0
+      - PPP actifs financés (funded_from_balance=1 si colonne présente, sinon toutes les PPP actives)
+      - Wet actifs
+      + Wet payouts (RESOLVED)
+      - Total payé pour achats Trade (annonces SOLD où buyer_id = user.id)  ← prix de vente (pas la mise)
+      + Total encaissé sur ventes Trade (annonces SOLD où seller_id/user_id = user.id) ← prix de vente
     """
     if not user or not getattr(user, "id", None):
         return 0.0
 
-    base = 500.0
     uid = int(user.id)
+    base = 500.0
 
-    # --- PPP actifs financés par le solde ---
+    # --- PPP actifs financés depuis le budget ---
     try:
-        q_ppp = db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))\
-            .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
-        # si la colonne funded_from_balance existe, on la filtre à 1
-        if 'funded_from_balance' in PPPBet.__table__.columns:
+        q_ppp = db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0)) \
+                          .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
+        if hasattr(PPPBet, "funded_from_balance"):
             q_ppp = q_ppp.filter(PPPBet.funded_from_balance == 1)
-        ppp_active = float(q_ppp.scalar() or 0.0)
+        ppp_active_funded = float(q_ppp.scalar() or 0.0)
     except Exception:
-        ppp_active = 0.0
+        ppp_active_funded = 0.0
 
-    # --- Wet actifs & gains Wet résolus ---
+    # --- Wet actifs ---
     try:
-        wet_active = float((
+        wet_active = float(
             db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
             .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
-            .scalar()
-        ) or 0.0)
+            .scalar() or 0.0
+        )
     except Exception:
         wet_active = 0.0
 
+    # --- Wet payouts (résolus) ---
     try:
-        wet_won = float((
+        wet_won = float(
             db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
             .filter(WetBet.user_id == uid, WetBet.status == 'RESOLVED')
-            .scalar()
-        ) or 0.0)
+            .scalar() or 0.0
+        )
     except Exception:
         wet_won = 0.0
 
-    # --- Trade (optionnel, selon colonnes présentes) ---
-    trade_spent = 0.0   # ce que l’acheteur a payé (réduit le budget)
-    trade_earned = 0.0  # ce que le vendeur a gagné (augmente le budget si tu veux comptabiliser, sinon laisse à 0)
+    # --- Trade: prix payés (achats) & prix encaissés (ventes) ---
+    trade_spent = 0.0
+    trade_earned = 0.0
 
     try:
-        # Vérifie d'abord que le modèle existe
-        if 'BetListing' in globals():
-            cols = set(BetListing.__table__.columns.keys())
+        # Champs possibles selon ton modèle
+        seller_col = getattr(BetListing, "seller_id", None) or getattr(BetListing, "user_id", None)
+        buyer_col  = getattr(BetListing, "buyer_id", None)
 
-            # Cas 1 : colonnes buyer_spend / seller_income (recommandé)
-            if {'buyer_spend', 'seller_income', 'status', 'buyer_id', 'user_id'} <= cols:
-                trade_spent = float((
-                    db.session.query(func.coalesce(func.sum(BetListing.buyer_spend), 0.0))
-                    .filter(BetListing.buyer_id == uid, BetListing.status == 'SOLD')
-                    .scalar()
-                ) or 0.0)
-                trade_earned = float((
-                    db.session.query(func.coalesce(func.sum(BetListing.seller_income), 0.0))
-                    .filter(BetListing.user_id == uid, BetListing.status == 'SOLD')
-                    .scalar()
-                ) or 0.0)
-
-            # Cas 2 : pas de buyer_spend/seller_income mais il y a ask_price
-            elif {'ask_price', 'status', 'buyer_id', 'user_id'} <= cols:
-                trade_spent = float((
-                    db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
-                    .filter(BetListing.buyer_id == uid, BetListing.status == 'SOLD')
-                    .scalar()
-                ) or 0.0)
-                trade_earned = float((
-                    db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
-                    .filter(BetListing.user_id == uid, BetListing.status == 'SOLD')
-                    .scalar()
-                ) or 0.0)
-            else:
-                # Sinon, on ne touche pas au budget avec Trade (pas de colonnes fiables)
+        # Helper pour extraire le prix (support "row.ask_price" ou payload JSON)
+        def _price_of(row):
+            # 1) colonne directe
+            v = getattr(row, "ask_price", None)
+            if v is not None:
+                try:
+                    return float(v)
+                except Exception:
+                    pass
+            # 2) payload JSON/dict
+            try:
+                pl = row.payload or {}
+                for k in ("ask_price", "price", "ask", "askPrice"):
+                    if k in pl and pl[k] is not None:
+                        return float(pl[k])
+            except Exception:
                 pass
+            return 0.0
+
+        # Achats par moi (si buyer_id existe)
+        if buyer_col is not None:
+            rows = (db.session.query(BetListing)
+                    .filter(buyer_col == uid, BetListing.status == 'SOLD')
+                    .all())
+            trade_spent = sum((_price_of(r) or 0.0) for r in rows)
+
+        # Ventes par moi (seller_id ou user_id)
+        if seller_col is not None:
+            rows = (db.session.query(BetListing)
+                    .filter(seller_col == uid, BetListing.status == 'SOLD')
+                    .all())
+            trade_earned = sum((_price_of(r) or 0.0) for r in rows)
     except Exception:
-        # En cas de souci, on ignore Trade plutôt que de planter
-        trade_spent = 0.0
-        trade_earned = 0.0
+        # si la table/modèle n'existe pas encore, on laisse 0.0
+        pass
 
-    # Assemblage
-    left = base \
-        - float(ppp_active) \
-        - float(wet_active) \
-        + float(wet_won) \
+    # --- Trésorerie globale ---
+    left = (
+        base
+        - float(ppp_active_funded)
+        - float(wet_active)
+        + float(wet_won)
         - float(trade_spent)
-        + float(trade_earned)  # <- le budget "disponible" augmente avec les ventes.
+        + float(trade_earned)
+    )
 
-    return max(0.0, round(left, 6))
+    # En “trésorerie globale”, on NE borne PAS à 0 : un user peut dépasser 500 après ventes/payouts.
+    return round(float(left), 6)
 
 from zoneinfo import ZoneInfo
 from datetime import timezone
@@ -6096,55 +6104,68 @@ def trade_create_listing():
         payload = request.get_json(silent=True) or {}
         kind = payload.get('kind') or 'PPP'
 
-        # champs courants
+        # Champs courants
         city         = payload.get('city')
         date_label   = payload.get('date_label')
         deadline_key = payload.get('deadline_key')  # 'YYYY-MM-DD'
         choice       = payload.get('choice')
-        price        = _as_float(payload.get('price'), None)  # <— NOUVEAU
 
+        # Valeurs numériques (helpers supposés existants)
         stake       = _as_float(payload.get('stake') or payload.get('amount'), None)
         base_odds   = _as_float(payload.get('base_odds') or payload.get('odds'), None)
         ask_price   = _as_float(payload.get('ask_price'), None)
+        price       = _as_float(payload.get('price'), None)  # optionnel, on garde si tu l’utilises
         boosts_cnt  = _as_int(payload.get('boosts_count'), None)
         boosts_add  = _as_float(payload.get('boosts_add'), None)
         total_odds  = _as_float(payload.get('total_odds'), None)
         potential   = _as_float(payload.get('potential_gain'), None)
 
+        # Récupérer la mise si bet_id présent (source d'autorité pour stake/choice/date/station)
+        bet_id = payload.get("bet_id")
+        bet = None
+        if bet_id:
+            bet = PPPBet.query.get(int(bet_id))
+            if not bet or bet.user_id != current_user.id or bet.status != 'ACTIVE':
+                return jsonify(error="bet_not_sellable"), 400
+
+            # Compléter les informations manquantes depuis la mise
+            if not city:
+                city = _derive_city_from_station(getattr(bet, "station_id", None))
+            if not deadline_key and getattr(bet, "bet_date", None):
+                deadline_key = bet.bet_date.isoformat()
+            if not choice:
+                choice = getattr(bet, "choice", None)
+            if stake is None:
+                stake = _as_float(getattr(bet, "amount", None), None)
+            if base_odds is None:
+                base_odds = _as_float(getattr(bet, "odds", None), None)
+
+        if stake is None or stake <= 0:
+            return jsonify(error="invalid_stake"), 400
+
+        # Prix demandé : par défaut = stake ; et plancher = stake
+        if ask_price is None:
+            ask_price = float(stake)
+        if ask_price < float(stake) - 1e-9:
+            return jsonify(error="price_too_low", min_price=float(stake)), 400
+
+        # Label date si nécessaire
+        if (not date_label) and deadline_key:
+            date_label = _fmt_date_fr_daykey(deadline_key)
+
+        # Estimation de l'expiration (ex: 23:59 Europe/Paris converti en UTC)
+        expires_at = _guess_expires(deadline_key) if deadline_key else None
+
+        # Potentiel si manquant
         if not potential and stake is not None:
             if total_odds is None and (base_odds is not None):
                 total_odds = (base_odds or 0.0) + (boosts_add or 0.0)
             if total_odds is not None:
                 potential = round(stake * total_odds, 2)
 
-        # s’il y a un bet_id, on complète
-        bet_id = payload.get("bet_id")
-        if not city and bet_id:
-            b = PPPBet.query.get(int(bet_id))
-            if b:
-                if not city:
-                    city = _derive_city_from_station(getattr(b, "station_id", None))
-                if not deadline_key and getattr(b, "bet_date", None):
-                    deadline_key = b.bet_date.isoformat()
-                if not choice:
-                    choice = getattr(b, "choice", None)
-                if stake is None:
-                    stake = _as_float(getattr(b, "amount", None), stake)
-                if base_odds is None:
-                    base_odds = _as_float(getattr(b, "odds", None), base_odds)
-
-        if not city:
-            city = "Paris"
-        if (not date_label) and deadline_key:
-            date_label = _fmt_date_fr_daykey(deadline_key)
-
-        expires_at = None
-        if deadline_key:
-            expires_at = _guess_expires(deadline_key)  # 23:59 Paris → UTC
-
-        # IMPORTANT : rien de "lock" ici
+        # Créer l'annonce + verrouiller la mise dans la même transaction
         row = BetListing(
-            user_id=str(current_user.get_id()),
+            user_id=int(current_user.get_id()),  # on force int pour cohérence
             kind=kind,
             payload=payload,
             expires_at=expires_at,
@@ -6162,21 +6183,24 @@ def trade_create_listing():
             boosts_add=boosts_add,
             total_odds=total_odds,
             potential_gain=potential,
-            price=price,
-            ask_price=ask_price,
+            price=price,            # conservé si tu l’exploites ailleurs
+            ask_price=ask_price,    # **prix faisant foi pour la vente**
         )
+
         db.session.add(row)
+
+        # Verrouiller la mise tant qu'elle est en vente
+        if bet and hasattr(bet, 'locked_for_trade'):
+            bet.locked_for_trade = 1
+
         db.session.commit()
 
-        return jsonify({
-            "id": row.id,
-            "ok": True
-        }), 200
+        return jsonify({"id": row.id, "ok": True}), 200
 
-    except Exception as e:
+    except Exception:
         app.logger.exception("trade_create_listing failed")
         db.session.rollback()
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "server_error"}), 500
 
 from datetime import datetime, timezone
 

@@ -486,14 +486,25 @@
     const box = $('#selectedListing');
     if (!box) return;
 
+    const stake = Number(item.amount ?? item.stake ?? 0); // mise d’origine (plancher)
     const labelHtml = wrapGP(item.label || 'Mise sélectionnée');
     box.hidden = false;
 
+    // On pré-remplit la valeur avec la mise, et on impose min=stake
     box.innerHTML = `
       <div class="selected-line" id="selectedListingLabel">${labelHtml}</div>
       <div class="selected-price">
-        <label for="sellPriceInput">Prix de vente (points)</label>
-        <input id="sellPriceInput" type="number" step="0.1" min="0" inputmode="decimal" placeholder="1,0">
+        <label for="sellPriceInput">
+          Prix de vente (points)
+          <small style="opacity:.8;">— minimum&nbsp;: ${fmtPts(stake)} pts</small>
+        </label>
+        <input id="sellPriceInput"
+               type="number"
+               step="0.1"
+               min="${stake}"
+               inputmode="decimal"
+               placeholder="1,0"
+               value="${(isFinite(stake) ? stake : 0).toFixed(1)}">
         <button id="sellConfirmBtn" class="btn primary" type="button">OK</button>
       </div>
     `;
@@ -503,8 +514,13 @@
     btnOk.addEventListener('click', async ()=>{
       const priceRaw = $('#sellPriceInput')?.value ?? '';
       const ask = Number(String(priceRaw).replace(',', '.'));
+
       if (!isFinite(ask) || ask <= 0){
         alert("Indique un prix de vente valide (ex: 3.5)");
+        return;
+      }
+      if (ask + 1e-9 < stake){
+        alert(`Le prix doit être au moins ${fmtPts(stake)} pts.`);
         return;
       }
 
@@ -515,7 +531,9 @@
         date_label: item.date_label,
         deadline_key: item.deadline_key,
         choice: item.choice,
-        amount: item.amount,
+        // on envoie les deux pour compatibilité backend
+        stake: stake,
+        amount: item.amount ?? item.stake,
         odds: item.odds,
         boosts_count: item.boosts_count,
         boosts_add: item.boosts_add,
@@ -532,12 +550,24 @@
           credentials: 'same-origin',
           body: JSON.stringify(payload)
         });
+
         if (!resp.ok) {
           let msg = 'Impossible de créer l’annonce.';
-          try { const j = await resp.json(); if (j && j.error) msg += '\n' + j.error; } catch {}
+          try {
+            const j = await resp.json();
+            if (j && j.error) {
+              if (j.error === 'price_too_low') {
+                const minTxt = j.min_price != null ? fmtPts(j.min_price) : fmtPts(stake);
+                msg = `Le prix est trop bas.\nMinimum autorisé : ${minTxt} pts.`;
+              } else {
+                msg += '\n' + j.error;
+              }
+            }
+          } catch {} // no-op
           alert(msg);
           return;
         }
+
         await resp.json();
         box.hidden = true;
         box.innerHTML = '';
@@ -546,7 +576,7 @@
         alert('Impossible de créer l’annonce.');
       }
     });
-  }
+  }    
 
   // ---------- Menu “Mettre en vente” ----------
   async function openSellMenu(){
