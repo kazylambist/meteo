@@ -240,16 +240,19 @@ with app.app_context():
     except Exception:
         pass
 
-    # 1) Colonnes de base (certaines existent peut-être déjà)
+    # 1) Colonnes de base (ajouts idempotents)
     for ddl in [
         "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
         "ALTER TABLE bet_listing ADD COLUMN status TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN payload TEXT",
-        # champs fréquemment utilisés par ton code (optionnels mais utiles)
+        "ALTER TABLE bet_listing ADD COLUMN payload TEXT",            # JSON en TEXT (SQLite)
+        "ALTER TABLE bet_listing ADD COLUMN kind TEXT DEFAULT 'PPP'", # <— manquante dans tes logs
+        "ALTER TABLE bet_listing ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE bet_listing ADD COLUMN expires_at TIMESTAMP",
         "ALTER TABLE bet_listing ADD COLUMN city TEXT",
         "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
         "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
         "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN side TEXT",               # <— utilisé par certains SELECT
         "ALTER TABLE bet_listing ADD COLUMN stake REAL",
         "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
         "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
@@ -260,7 +263,7 @@ with app.app_context():
         "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
         "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
         "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
-        "ALTER TABLE bet_listing ADD COLUMN sold_at TEXT"
+        "ALTER TABLE bet_listing ADD COLUMN sold_at TIMESTAMP"
     ]:
         try:
             db.session.execute(text(ddl))
@@ -279,6 +282,13 @@ with app.app_context():
         db.session.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status "
             "ON bet_listing(user_id, status)"
+        ))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_betlisting_status_expires "
+            "ON bet_listing(status, expires_at)"
         ))
     except Exception:
         pass
