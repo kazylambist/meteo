@@ -231,31 +231,54 @@ with app.app_context():
     except Exception:
         pass
 
-    # ---- TRADE : colonnes & index nécessaires pour la trésorerie globale ----
-    # Colonne de prix demandé (si absente sur ton schéma actuel)
-    try:
-        db.session.execute(text("ALTER TABLE bet_listing ADD COLUMN ask_price REAL"))
-    except Exception:
-        pass
-    # Acheteur et prix réellement payé au moment de la vente
-    try:
-        db.session.execute(text("ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER"))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text("ALTER TABLE bet_listing ADD COLUMN sale_price REAL"))
-    except Exception:
-        pass
-    # Index utiles pour remaining_points() et l’historique
+    # ---- TRADE : schéma et index nécessaires ----
+    # 0) Table minimale si absente (évite "no such table: bet_listing")
     try:
         db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status ON bet_listing(buyer_id, status)"
+            "CREATE TABLE IF NOT EXISTS bet_listing (id INTEGER PRIMARY KEY)"
+        ))
+    except Exception:
+        pass
+
+    # 1) Colonnes de base (certaines existent peut-être déjà)
+    for ddl in [
+        "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
+        "ALTER TABLE bet_listing ADD COLUMN status TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN payload TEXT",
+        # champs fréquemment utilisés par ton code (optionnels mais utiles)
+        "ALTER TABLE bet_listing ADD COLUMN city TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN stake REAL",
+        "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
+        "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
+        "ALTER TABLE bet_listing ADD COLUMN boosts_add REAL",
+        "ALTER TABLE bet_listing ADD COLUMN total_odds REAL",
+        "ALTER TABLE bet_listing ADD COLUMN potential_gain REAL",
+        # prix demandé (création) et prix réellement payé (vente)
+        "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
+        "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
+        "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
+        "ALTER TABLE bet_listing ADD COLUMN sold_at TEXT"
+    ]:
+        try:
+            db.session.execute(text(ddl))
+        except Exception:
+            pass
+
+    # 2) Index utiles pour remaining_points() et les consultations
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status "
+            "ON bet_listing(buyer_id, status)"
         ))
     except Exception:
         pass
     try:
         db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status ON bet_listing(user_id, status)"
+            "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status "
+            "ON bet_listing(user_id, status)"
         ))
     except Exception:
         pass
