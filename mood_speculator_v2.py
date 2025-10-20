@@ -235,32 +235,32 @@ with app.app_context():
     # 0) Table minimale si absente (évite "no such table: bet_listing")
     try:
         db.session.execute(text(
-            "CREATE TABLE IF NOT EXISTS bet_listings (id INTEGER PRIMARY KEY)"
+            "CREATE TABLE IF NOT EXISTS bet_listing (id INTEGER PRIMARY KEY)"
         ))
     except Exception:
         pass
 
     # 1) Colonnes de base (certaines existent peut-être déjà)
     for ddl in [
-        "ALTER TABLE bet_listings ADD COLUMN user_id INTEGER",
-        "ALTER TABLE bet_listings ADD COLUMN status TEXT",
-        "ALTER TABLE bet_listings ADD COLUMN payload TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
+        "ALTER TABLE bet_listing ADD COLUMN status TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN payload TEXT",
         # champs fréquemment utilisés par ton code (optionnels mais utiles)
-        "ALTER TABLE bet_listings ADD COLUMN city TEXT",
-        "ALTER TABLE bet_listings ADD COLUMN date_label TEXT",
-        "ALTER TABLE bet_listings ADD COLUMN deadline_key TEXT",
-        "ALTER TABLE bet_listings ADD COLUMN choice TEXT",
-        "ALTER TABLE bet_listings ADD COLUMN stake REAL",
-        "ALTER TABLE bet_listings ADD COLUMN base_odds REAL",
-        "ALTER TABLE bet_listings ADD COLUMN boosts_count INTEGER",
-        "ALTER TABLE bet_listings ADD COLUMN boosts_add REAL",
-        "ALTER TABLE bet_listings ADD COLUMN total_odds REAL",
-        "ALTER TABLE bet_listings ADD COLUMN potential_gain REAL",
+        "ALTER TABLE bet_listing ADD COLUMN city TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
+        "ALTER TABLE bet_listing ADD COLUMN stake REAL",
+        "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
+        "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
+        "ALTER TABLE bet_listing ADD COLUMN boosts_add REAL",
+        "ALTER TABLE bet_listing ADD COLUMN total_odds REAL",
+        "ALTER TABLE bet_listing ADD COLUMN potential_gain REAL",
         # prix demandé (création) et prix réellement payé (vente)
-        "ALTER TABLE bet_listings ADD COLUMN ask_price REAL",
-        "ALTER TABLE bet_listings ADD COLUMN buyer_id INTEGER",
-        "ALTER TABLE bet_listings ADD COLUMN sale_price REAL",
-        "ALTER TABLE bet_listings ADD COLUMN sold_at TEXT"
+        "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
+        "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
+        "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
+        "ALTER TABLE bet_listing ADD COLUMN sold_at TEXT"
     ]:
         try:
             db.session.execute(text(ddl))
@@ -271,14 +271,14 @@ with app.app_context():
     try:
         db.session.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status "
-            "ON bet_listings(buyer_id, status)"
+            "ON bet_listing(buyer_id, status)"
         ))
     except Exception:
         pass
     try:
         db.session.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status "
-            "ON bet_listings(user_id, status)"
+            "ON bet_listing(user_id, status)"
         ))
     except Exception:
         pass
@@ -495,7 +495,7 @@ class ChatMessage(db.Model):
 # --- Bet ---
 
 class BetListing(db.Model):
-    __tablename__ = "bet_listings"
+    __tablename__ = "bet_listing"
 
     id            = db.Column(db.Integer, primary_key=True)
     user_id       = db.Column(db.String, nullable=False)
@@ -528,7 +528,7 @@ class BetListing(db.Model):
 class TradeProposal(db.Model):
     __tablename__ = "trade_proposals"
     id = db.Column(db.Integer, primary_key=True)
-    listing_id = db.Column(db.Integer, db.ForeignKey("bet_listings.id"), nullable=False, index=True)
+    listing_id = db.Column(db.Integer, db.ForeignKey("bet_listing.id"), nullable=False, index=True)
     from_user_id = db.Column(db.String(64), nullable=False, index=True)
     kind = db.Column(db.String(12), nullable=False)     # "POINTS" | "SWAP"
     data = db.Column(db.JSON, default=dict)             # e.g. {"points": 12.0} or {"listing_id": 42}
@@ -4456,10 +4456,10 @@ def delete_account():
         except NameError:
             # Fallback SQL si le modèle n'est pas importé dans ce scope
             try:
-                db.session.execute(text("DELETE FROM bet_listings WHERE user_id = :uid"), {"uid": str(uid)})
+                db.session.execute(text("DELETE FROM bet_listing WHERE user_id = :uid"), {"uid": str(uid)})
             except Exception:
                 # ancien nom éventuel
-                db.session.execute(text("DELETE FROM trade_listings WHERE user_id = :uid"), {"uid": str(uid)})
+                db.session.execute(text("DELETE FROM trade_listing WHERE user_id = :uid"), {"uid": str(uid)})
 
         # --- Chat ---
         db.session.execute(
@@ -5360,30 +5360,30 @@ with app.app_context():
     with app.app_context():
         db.create_all()
 
-# --- tiny self-heal for bet_listings schema on SQLite ---
-def ensure_bet_listings_columns():
+# --- tiny self-heal for bet_listing schema on SQLite ---
+def ensure_bet_listing_columns():
     from sqlalchemy import text
     with db.engine.begin() as conn:
         cols = set()
-        for row in conn.execute(text("PRAGMA table_info(bet_listings)")):
+        for row in conn.execute(text("PRAGMA table_info(bet_listing)")):
             cols.add(row[1])  # name
 
         # add missing columns (SQLite syntax)
         if "kind" not in cols:
-            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN kind VARCHAR(16)"))
-            conn.execute(text("UPDATE bet_listings SET kind = 'PPP' WHERE kind IS NULL"))
+            conn.execute(text("ALTER TABLE bet_listing ADD COLUMN kind VARCHAR(16)"))
+            conn.execute(text("UPDATE bet_listing SET kind = 'PPP' WHERE kind IS NULL"))
 
         if "status" not in cols:
-            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN status VARCHAR(16)"))
-            conn.execute(text("UPDATE bet_listings SET status = 'OPEN' WHERE status IS NULL"))
+            conn.execute(text("ALTER TABLE bet_listing ADD COLUMN status VARCHAR(16)"))
+            conn.execute(text("UPDATE bet_listing SET status = 'OPEN' WHERE status IS NULL"))
 
         if "expires_at" not in cols:
-            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN expires_at DATETIME"))
+            conn.execute(text("ALTER TABLE bet_listing ADD COLUMN expires_at DATETIME"))
 
         if "payload" not in cols:
             # JSON sera stocké en TEXT sur SQLite
-            conn.execute(text("ALTER TABLE bet_listings ADD COLUMN payload JSON"))
-            conn.execute(text("UPDATE bet_listings SET payload = '{}' WHERE payload IS NULL"))        
+            conn.execute(text("ALTER TABLE bet_listing ADD COLUMN payload JSON"))
+            conn.execute(text("UPDATE bet_listing SET payload = '{}' WHERE payload IS NULL"))        
 
 # === Page Trade (front) ======================================================
 from flask import render_template, url_for
@@ -6336,23 +6336,23 @@ import re, html
 @app.post('/api/trade/listings/<int:listing_id>/buy')
 @login_required
 def trade_buy_listing(listing_id):
-    # IDs en int pour éviter les mismatches ORM
     me_id = int(current_user.get_id())
+
     row = BetListing.query.get(listing_id)
     if not row or row.status != 'OPEN':
         return jsonify({"ok": False, "error": "not_open"}), 400
 
-    # row.user_id peut être str → force en int pour comparaison
+    # Vendeur (peut être TEXT sur des vieux rows)
     try:
         seller_id = int(row.user_id)
     except Exception:
-        seller_id = row.user_id  # fallback
+        seller_id = row.user_id
     if seller_id == me_id:
         return jsonify({"ok": False, "error": "cannot_buy_own"}), 400
 
-    # --- Prix demandé par le vendeur (colonne > payload, accepte "3,5") ---
-    def _parse_price(*candidates):
-        for v in candidates:
+    # Prix (colonne > payload), accepte "3,5"
+    def _parse_price(*cands):
+        for v in cands:
             if v is None:
                 continue
             if isinstance(v, str):
@@ -6362,22 +6362,19 @@ def trade_buy_listing(listing_id):
                 if f > 0:
                     return f
             except Exception:
-                continue
+                pass
         return None
 
     price = _parse_price(getattr(row, "ask_price", None), (row.payload or {}).get("ask_price"))
     if price is None:
         return jsonify({"ok": False, "error": "bad_price"}), 400
 
-    # Contrôle de budget sur le PRIX (pas sur la mise d’origine)
+    # Budget sur le PRIX, pas la mise orig.
     if remaining_points(current_user) + 1e-9 < price:
         return jsonify({"ok": False, "error": "insufficient_budget"}), 400
 
-    # payload.bet_id attendu
-    try:
-        bet_id = (row.payload or {}).get("bet_id")
-    except Exception:
-        bet_id = None
+    # La mise à transférer
+    bet_id = (row.payload or {}).get("bet_id")
     if not bet_id:
         return jsonify({"ok": False, "error": "no_bet_to_transfer"}), 400
 
@@ -6394,72 +6391,65 @@ def trade_buy_listing(listing_id):
         if b.bet_date < today:
             return jsonify({"ok": False, "error": "expired"}), 400
 
-    # --------- TRANSFERT + clôture (un seul commit) ----------
+    # ----- Transaction atomique -----
     try:
-        # 1) Transférer la mise à l’acheteur (ORM)
+        # 1) Transférer la mise
         b.user_id = me_id
         if hasattr(b, "locked_for_trade"):
-            b.locked_for_trade = 0  # plus en vente
+            b.locked_for_trade = 0
         if hasattr(b, "funded_from_balance"):
-            b.funded_from_balance = 0  # achetée (pas financée du solde)
+            # très important: une mise achetée ne consomme PAS de budget PPP
+            b.funded_from_balance = 0
 
-        # 2) Clôturer l’annonce + tracer PRIX et ACHETEUR (SQL direct, garanti)
-        db.session.execute(
-            text("""
-                UPDATE bet_listing
-                SET status = 'SOLD',
-                    buyer_id = :buyer_id,
-                    sale_price = :sale_price,
-                    sold_at = :sold_at
-                WHERE id = :id AND status = 'OPEN'
-            """),
-            {
-                "buyer_id": int(me_id),
-                "sale_price": float(price),
-                "sold_at": datetime.now(APP_TZ) if 'APP_TZ' in globals() else datetime.utcnow(),
-                "id": int(listing_id),
-            }
-        )
+        # 2) Sceller l’annonce (ceci permet:
+        #    - disparition côté Trade
+        #    - débit/crédit via remaining_points)
+        row.status = 'SOLD'
+        # champs essentiels pour la trésorerie:
+        if hasattr(row, "buyer_id"):
+            row.buyer_id = me_id
+        if hasattr(row, "sale_price"):
+            row.sale_price = price  # <- pierre angulaire du débit/crédit
+        if hasattr(row, "sold_at"):
+            try:
+                row.sold_at = datetime.now(APP_TZ)
+            except Exception:
+                row.sold_at = datetime.now(timezone.utc)
 
         db.session.commit()
     except Exception:
         db.session.rollback()
         return jsonify({"ok": False, "error": "buy_failed"}), 500
 
-    # ---- Message auto au vendeur (texte pur) ----
+    # Message au vendeur (optionnel)
     try:
         pl = row.payload or {}
-        line_txt = pl.get("label") or ""
-        if line_txt:
-            line_txt = re.sub(r'<[^>]+>', '', line_txt)
-            line_txt = html.unescape(line_txt).strip()
-        if not line_txt:
-            city       = getattr(row, "city", None) or pl.get("city") or ""
+        line = pl.get("label") or ""
+        if line:
+            line = html.unescape(re.sub(r'<[^>]+>', '', line)).strip()
+        if not line:
+            parts = []
+            city = getattr(row, "city", None) or pl.get("city") or ""
             date_label = getattr(row, "date_label", None) or pl.get("date_label") or pl.get("deadline_key") or ""
-            stake      = pl.get("stake") or pl.get("amount")
-            odds       = pl.get("base_odds") or pl.get("odds")
-            icon       = pl.get("icon") or ""
-            frag = []
-            if city: frag.append(str(city))
-            if date_label: frag.append(str(date_label))
-            if stake and odds: frag.append(f"{stake} pts (x{odds})")
-            if icon: frag.append(str(icon))
-            line_txt = " — ".join(frag) if frag else "ta mise"
-
-        body = f"J'ai acheté : {line_txt} — Prix: {price:.2f} pts"
+            if city: parts.append(str(city))
+            if date_label: parts.append(str(date_label))
+            stake = pl.get("stake") or pl.get("amount")
+            odds  = pl.get("base_odds") or pl.get("odds")
+            if stake and odds: parts.append(f"{stake} pts (x{odds})")
+            line = " — ".join(parts) if parts else "ta mise"
 
         msg = ChatMessage(
-            from_user_id = me_id,
-            to_user_id   = seller_id,
-            body         = body,
-            created_at   = datetime.now(timezone.utc),
-            is_read      = 0
+            from_user_id=me_id,
+            to_user_id=seller_id,
+            body=f"J'ai acheté : {line} — Prix: {price:.2f} pts",
+            created_at=datetime.now(timezone.utc),
+            is_read=0
         )
         db.session.add(msg)
         db.session.commit()
     except Exception as e:
         app.logger.warning(f"auto chat after buy failed: {e}")
-        db.session.rollback()  # ne casse pas l’achat
+        db.session.rollback()
 
     return jsonify({"ok": True}), 200
     
@@ -6667,7 +6657,7 @@ if __name__ == "__main__":
             # ensure_column(tbl, "payload", "TEXT")
             # NB: expires_at est déjà NOT NULL dans ton schéma → on ne le modifie pas ici.
         except Exception as e:
-            app.logger.warning(f"[migrate] bet_listings extra cols: {e}")
+            app.logger.warning(f"[migrate] bet_listing extra cols: {e}")
 
         # PPPBet : verrouillage trade
         try:
@@ -6677,7 +6667,7 @@ if __name__ == "__main__":
         try:
             ensure_column(BetListing.__table__.name, "price", "REAL")
         except Exception as e:
-            app.logger.warning(f"[migrate] bet_listings.price: {e}")
+            app.logger.warning(f"[migrate] bet_listing.price: {e}")
         try:
             ensure_column(User.__table__.name, "last_seen", "TIMESTAMP")  # en UTC
         except Exception as e:
