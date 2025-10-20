@@ -162,6 +162,7 @@ with app.app_context():
         ))
     except Exception:
         pass
+
     # Position.user_id pour relier Position -> User
     # (Sur SQLite on ne met pas NOT NULL ni FK ici; on backfill d'abord.)
     try:
@@ -213,7 +214,7 @@ with app.app_context():
     except Exception:
         pass
 
-    # (Optionnel mais recommandé) PPP: funded_from_balance pour bien séparer stake vs. achat
+    # PPP: funded_from_balance pour bien séparer stake vs. achat
     try:
         db.session.execute(text(
             "ALTER TABLE ppp_bet ADD COLUMN funded_from_balance INTEGER NOT NULL DEFAULT 1"
@@ -221,11 +222,40 @@ with app.app_context():
     except Exception:
         pass
 
-    # (Optionnel) index PPP pour accélérer la page
+    # Index PPP pour accélérer la page
     try:
         db.session.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_pppbet_user_status_station_date "
             "ON ppp_bet(user_id, status, station_id, bet_date)"
+        ))
+    except Exception:
+        pass
+
+    # ---- TRADE : colonnes & index nécessaires pour la trésorerie globale ----
+    # Colonne de prix demandé (si absente sur ton schéma actuel)
+    try:
+        db.session.execute(text("ALTER TABLE bet_listing ADD COLUMN ask_price REAL"))
+    except Exception:
+        pass
+    # Acheteur et prix réellement payé au moment de la vente
+    try:
+        db.session.execute(text("ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER"))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text("ALTER TABLE bet_listing ADD COLUMN sale_price REAL"))
+    except Exception:
+        pass
+    # Index utiles pour remaining_points() et l’historique
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status ON bet_listing(buyer_id, status)"
+        ))
+    except Exception:
+        pass
+    try:
+        db.session.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status ON bet_listing(user_id, status)"
         ))
     except Exception:
         pass
@@ -637,112 +667,90 @@ def remaining_weather_points(u: User) -> float:
 
 BUDGET_INITIAL = 500.0
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 def remaining_points(user):
     """
-    Trésorerie globale disponible pour l'utilisateur.
-
-    Base 500.0
-      - PPP actifs financés (funded_from_balance=1 si colonne présente, sinon toutes les PPP actives)
+    Trésorerie globale :
+      base = 500
+      - PPP actifs financés (funded_from_balance=1)
       - Wet actifs
-      + Wet payouts (RESOLVED)
-      - Total payé pour achats Trade (annonces SOLD où buyer_id = user.id)  ← prix de vente (pas la mise)
-      + Total encaissé sur ventes Trade (annonces SOLD où seller_id/user_id = user.id) ← prix de vente
+      + Wet payés (payout des résolues)
+      - total des achats Trade (sale_price où buyer_id = moi et SOLD)
+      + total des ventes Trade (sale_price où user_id  = moi et SOLD)
     """
     if not user or not getattr(user, "id", None):
         return 0.0
-
     uid = int(user.id)
     base = 500.0
 
-    # --- PPP actifs financés depuis le budget ---
+    # PPP actifs financés depuis le solde (pas ceux reçus via Trade)
     try:
-        q_ppp = db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0)) \
-                          .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
-        if hasattr(PPPBet, "funded_from_balance"):
-            q_ppp = q_ppp.filter(PPPBet.funded_from_balance == 1)
-        ppp_active_funded = float(q_ppp.scalar() or 0.0)
+        ppp_active_funded = (
+            db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
+            .filter(
+                PPPBet.user_id == uid,
+                PPPBet.status == 'ACTIVE',
+                func.coalesce(PPPBet.funded_from_balance, 1) == 1  # default 1 si colonne manquante
+            )
+            .scalar()
+        ) or 0.0
     except Exception:
-        ppp_active_funded = 0.0
+        # fallback si colonne absente
+        ppp_active_funded = (
+            db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
+            .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
+            .scalar()
+        ) or 0.0
 
-    # --- Wet actifs ---
-    try:
-        wet_active = float(
-            db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
-            .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
-            .scalar() or 0.0
-        )
-    except Exception:
-        wet_active = 0.0
+    # Wet actifs / payés
+    wet_active = (
+        db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
+        .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
+        .scalar()
+    ) or 0.0
+    wet_won = (
+        db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
+        .filter(WetBet.user_id == uid, WetBet.status == 'RESOLVED')
+        .scalar()
+    ) or 0.0
 
-    # --- Wet payouts (résolus) ---
-    try:
-        wet_won = float(
-            db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
-            .filter(WetBet.user_id == uid, WetBet.status == 'RESOLVED')
-            .scalar() or 0.0
-        )
-    except Exception:
-        wet_won = 0.0
+    # Trade : achats (débit) et ventes (crédit)
+    # Utilise sale_price (nouvelle colonne). Si elle est NULL, on fallback JSON payload.ask_price.
+    def _sum_sale_price(where_sql, params):
+        # essaye d'abord sale_price
+        val = db.session.execute(text(f"""
+            SELECT COALESCE(SUM(sale_price), 0.0)
+            FROM bet_listing
+            WHERE {where_sql}
+        """), params).scalar()
+        if val is not None and float(val) > 0:
+            return float(val)
+        # fallback JSON si sale_price absent / non renseigné (compat vieux rows)
+        val2 = db.session.execute(text(f"""
+            SELECT COALESCE(SUM(
+                COALESCE(
+                  json_extract(payload, '$.ask_price'),
+                  0.0
+                )
+            ), 0.0)
+            FROM bet_listing
+            WHERE {where_sql}
+        """), params).scalar()
+        return float(val2 or 0.0)
 
-    # --- Trade: prix payés (achats) & prix encaissés (ventes) ---
-    trade_spent = 0.0
-    trade_earned = 0.0
+    trade_spent  = _sum_sale_price("buyer_id = :uid AND status = 'SOLD'", {"uid": uid})
+    trade_earned = _sum_sale_price("user_id  = :uid AND status = 'SOLD'", {"uid": uid})
 
-    try:
-        # Champs possibles selon ton modèle
-        seller_col = getattr(BetListing, "seller_id", None) or getattr(BetListing, "user_id", None)
-        buyer_col  = getattr(BetListing, "buyer_id", None)
-
-        # Helper pour extraire le prix (support "row.ask_price" ou payload JSON)
-        def _price_of(row):
-            # 1) colonne directe
-            v = getattr(row, "ask_price", None)
-            if v is not None:
-                try:
-                    return float(v)
-                except Exception:
-                    pass
-            # 2) payload JSON/dict
-            try:
-                pl = row.payload or {}
-                for k in ("ask_price", "price", "ask", "askPrice"):
-                    if k in pl and pl[k] is not None:
-                        return float(pl[k])
-            except Exception:
-                pass
-            return 0.0
-
-        # Achats par moi (si buyer_id existe)
-        if buyer_col is not None:
-            rows = (db.session.query(BetListing)
-                    .filter(buyer_col == uid, BetListing.status == 'SOLD')
-                    .all())
-            trade_spent = sum((_price_of(r) or 0.0) for r in rows)
-
-        # Ventes par moi (seller_id ou user_id)
-        if seller_col is not None:
-            rows = (db.session.query(BetListing)
-                    .filter(seller_col == uid, BetListing.status == 'SOLD')
-                    .all())
-            trade_earned = sum((_price_of(r) or 0.0) for r in rows)
-    except Exception:
-        # si la table/modèle n'existe pas encore, on laisse 0.0
-        pass
-
-    # --- Trésorerie globale ---
     left = (
         base
         - float(ppp_active_funded)
         - float(wet_active)
         + float(wet_won)
         - float(trade_spent)
-        + float(trade_earned)
+        + float(trade_earned)     # trésorerie globale = ventes créditées
     )
-
-    # En “trésorerie globale”, on NE borne PAS à 0 : un user peut dépasser 500 après ventes/payouts.
-    return round(float(left), 6)
+    return max(0.0, round(left, 6))
 
 from zoneinfo import ZoneInfo
 from datetime import timezone
@@ -6315,7 +6323,7 @@ def trade_buy_listing(listing_id):
         if hasattr(b, "funded_from_balance"):
             b.funded_from_balance = 0
 
-        # 2) Marquer l’annonce vendue + tracer le prix si champs présents
+        # 2) Marquer l’annonce vendue + tracer le prix
         row.status = 'SOLD'
         if hasattr(row, "buyer_id"):
             row.buyer_id = me_id
@@ -6325,10 +6333,13 @@ def trade_buy_listing(listing_id):
             except Exception:
                 row.sold_at = datetime.now(timezone.utc)
 
+        # Renseigner tous les champs prix possibles pour la trésorerie
         if hasattr(row, "buyer_spend"):
             row.buyer_spend = price
         if hasattr(row, "seller_income"):
             row.seller_income = price
+        if hasattr(row, "sale_price"):
+            row.sale_price = price
 
         db.session.commit()
     except Exception:
