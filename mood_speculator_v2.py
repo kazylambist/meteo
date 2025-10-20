@@ -361,6 +361,7 @@ class PPPBet(db.Model):
     result = db.Column(db.String(12))                           # 'WIN'/'LOSE' (when settled)
     station_id = db.Column(db.String(64), index=True, nullable=True)
     locked_for_trade = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    funded_from_balance = db.Column(db.Integer, nullable=False, default=1, server_default='1')
 
 
 class WetBet(db.Model):
@@ -636,90 +637,76 @@ def remaining_weather_points(u: User) -> float:
 
 BUDGET_INITIAL = 500.0
 
-from sqlalchemy import func, text
+from sqlalchemy import func
 
 def remaining_points(user):
     """
-    Global budget left for the user.
-    Starts at 500.0 and:
-      - subtracts ACTIVE commitments (PPPBet.amount + WetBet.amount)
-      - adds payouts from RESOLVED Wet bets (WetBet.payout)
-      - TRADE: subtracts ask_price for SOLD listings bought by the user
-               and adds ask_price for SOLD listings sold by the user
+    Budget global restant pour l'utilisateur.
+    Base: 500 pts
+      - soustrait les mises ACTIVES (PPPBet.amount + WetBet.amount)
+        *PPP*: uniquement celles financées depuis le solde (funded_from_balance = 1)
+      - ajoute les gains Wet résolus
+      - soustrait la somme des PRIX payés pour les achats Trade (BetListing.ask_price pour listings SOLD où buyer_id = user.id)
+      - ajoute la somme des PRIX reçus pour les ventes Trade (BetListing.ask_price pour listings SOLD où user_id = user.id)
     """
     if not user or not getattr(user, "id", None):
         return 0.0
 
     base = 500.0
 
-    # ACTIVE PPP stakes
+    # PPP ACTIVES, mais uniquement celles financées depuis le solde
+    # (pas celles transférées via Trade : funded_from_balance=0)
     ppp_active = (
-        db.session.query(db.func.coalesce(db.func.sum(PPPBet.amount), 0.0))
-        .filter(PPPBet.user_id == user.id, PPPBet.status == 'ACTIVE',
-        getattr(PPPBet, 'funded_from_balance', 1) == 1  # ← clé de voûte
+        db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
+        .filter(
+            PPPBet.user_id == user.id,
+            PPPBet.status == 'ACTIVE',
+            getattr(PPPBet, 'funded_from_balance', 1) == 1
         )
         .scalar()
     ) or 0.0
 
-    # ACTIVE Wet stakes
+    # Wet ACTIVES
     wet_active = (
-        db.session.query(db.func.coalesce(db.func.sum(WetBet.amount), 0.0))
+        db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
         .filter(WetBet.user_id == user.id, WetBet.status == 'ACTIVE')
         .scalar()
     ) or 0.0
 
-    # Wet payouts from RESOLVED bets
+    # Wet résolues (payout crédité)
     wet_won = (
-        db.session.query(db.func.coalesce(db.func.sum(WetBet.payout), 0.0))
+        db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
         .filter(WetBet.user_id == user.id, WetBet.status == 'RESOLVED')
         .scalar()
     ) or 0.0
 
-    # --- TRADE adjustments ----------------------------------------------------
-    # Acheteur : somme des ask_price sur les annonces SOLD achetées
-    def _sum_sql(sql, params):
-        try:
-            return float(db.session.execute(text(sql), params).scalar() or 0.0)
-        except Exception:
-            return 0.0
-
-    uid = user.id
-
-    # Table principale supposée: trade_listings ; fallback: bet_listings
-    trade_minus = _sum_sql(
-        "SELECT COALESCE(SUM(ask_price), 0) FROM trade_listings "
-        "WHERE status = 'SOLD' AND buyer_id = :uid",
-        {"uid": uid}
-    )
-    if trade_minus == 0.0:
-        trade_minus = _sum_sql(
-            "SELECT COALESCE(SUM(ask_price), 0) FROM bet_listings "
-            "WHERE status = 'SOLD' AND buyer_id = :uid",
-            {"uid": uid}
+    # ---- TRADE : débit côté acheteur = somme des PRIX payés ----
+    trade_buy_spent = (
+        db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
+        .filter(
+            BetListing.status == 'SOLD',
+            BetListing.buyer_id == user.id
         )
+        .scalar()
+    ) or 0.0
 
-    # Vendeur : somme des ask_price sur les annonces SOLD vendues
-    trade_plus = _sum_sql(
-        "SELECT COALESCE(SUM(ask_price), 0) FROM trade_listings "
-        "WHERE status = 'SOLD' AND seller_id = :uid",
-        {"uid": uid}
-    )
-    if trade_plus == 0.0:
-        trade_plus = _sum_sql(
-            "SELECT COALESCE(SUM(ask_price), 0) FROM bet_listings "
-            "WHERE status = 'SOLD' AND seller_id = :uid",
-            {"uid": uid}
+    # ---- TRADE : crédit côté vendeur = somme des PRIX encaissés ----
+    trade_sell_earned = (
+        db.session.query(func.coalesce(func.sum(BetListing.ask_price), 0.0))
+        .filter(
+            BetListing.status == 'SOLD',
+            BetListing.user_id == user.id
         )
-
-    # -------------------------------------------------------------------------
+        .scalar()
+    ) or 0.0
 
     left = (
         base
         - float(ppp_active)
         - float(wet_active)
         + float(wet_won)
-        - float(trade_minus)    # débiter l'acheteur
-        + float(trade_plus)     # créditer le vendeur
+        - float(trade_buy_spent)
+        + float(trade_sell_earned)
     )
 
     return max(0.0, round(left, 6))
@@ -4519,6 +4506,7 @@ def ppp(station_id=None):
             odds=float(odds),         # cote initiale (sans boost) renvoyée par ton helper
             status='ACTIVE',
             station_id=scope_station_id
+            funded_from_balance=1
         ))
         db.session.commit()
 
