@@ -676,95 +676,95 @@ def remaining_points(user):
       - PPP actifs financés (funded_from_balance=1)
       - Wet actifs
       + Wet payés (payout des résolues)
-      - total des achats Trade (prix payés)
-      + total des ventes Trade (prix encaissés)
+      - total des achats Trade (prix des SOLD où buyer = moi)
+      + total des ventes Trade (prix des SOLD où seller = moi)
+    Les montants Trade s’appuient sur sale_price si présent,
+    sinon sur payload.sale_price puis payload.ask_price (fallback).
+    L’identifiant buyer s’appuie sur buyer_id si présent,
+    sinon sur payload.buyer_id (fallback).
     """
     if not user or not getattr(user, "id", None):
         return 0.0
     uid = int(user.id)
     base = 500.0
 
-    # --- PPP actifs financés depuis le solde (pas ceux reçus via Trade) ---
+    # PPP actifs financés depuis le solde (pas ceux reçus via Trade)
     try:
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
             .filter(
                 PPPBet.user_id == uid,
                 PPPBet.status == 'ACTIVE',
-                func.coalesce(PPPBet.funded_from_balance, 1) == 1  # default 1 si colonne manquante
+                func.coalesce(PPPBet.funded_from_balance, 1) == 1
             )
             .scalar()
         ) or 0.0
     except Exception:
-        # fallback si colonne absente
+        # fallback si la colonne funded_from_balance n'existe pas
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
             .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
             .scalar()
         ) or 0.0
 
-    # --- Wet actifs / payés ---
+    # Wet actifs / payés
     wet_active = (
         db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
         .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
         .scalar()
     ) or 0.0
-
     wet_won = (
         db.session.query(func.coalesce(func.sum(WetBet.payout), 0.0))
         .filter(WetBet.user_id == uid, WetBet.status == 'RESOLVED')
         .scalar()
     ) or 0.0
 
-    # ---------- Trade : achats (débit) et ventes (crédit) ----------
-    # Utilitaires ORM → évite les soucis de nom de table.
-    def _sum_listing(colname, *filters):
-        """Somme une colonne de BetListing si elle existe, sinon 0.0"""
+    # --- Trade: achats (débit) & ventes (crédit) ---
+    def _sum_trade(where_sql, params):
+        """
+        Additionne le prix via :
+          sale_price
+          fallback -> payload.sale_price
+          fallback -> payload.ask_price
+          fallback -> ask_price (colonne)
+        Si la table bet_listing n'existe pas, retourne 0.
+        """
         try:
-            col = getattr(BetListing, colname)
-        except AttributeError:
-            return 0.0
-        total = (
-            db.session.query(func.coalesce(func.sum(col), 0.0))
-            .filter(*filters)
-            .scalar()
-        )
-        return float(total or 0.0)
-
-    # Fallback JSON (si pas de colonne prix renseignée) → utilise le vrai nom de table du modèle
-    def _sum_payload_ask_price(where_sql, params):
-        try:
-            tbl = BetListing.__table__.name  # ex: "trade_listings"
-            val = db.session.execute(text(f"""
-                SELECT COALESCE(SUM(COALESCE(json_extract(payload, '$.ask_price'), 0.0)), 0.0)
-                FROM {tbl}
-                WHERE {where_sql}
-            """), params).scalar()
-            return float(val or 0.0)
+            sql = f"""
+                SELECT COALESCE(SUM(
+                    COALESCE(
+                        sale_price,
+                        json_extract(payload, '$.sale_price'),
+                        json_extract(payload, '$.ask_price'),
+                        ask_price,
+                        0.0
+                    )
+                ), 0.0)
+                FROM bet_listing
+                WHERE status = 'SOLD' AND ({where_sql})
+            """
+            return float(db.session.execute(text(sql), params).scalar() or 0.0)
         except Exception:
             return 0.0
 
-    # Total payé par l’acheteur (débit)
-    trade_spent = _sum_listing('sale_price', BetListing.buyer_id == uid, BetListing.status == 'SOLD')
-    if trade_spent == 0.0:
-        trade_spent = _sum_listing('buyer_spend', BetListing.buyer_id == uid, BetListing.status == 'SOLD')
-    if trade_spent == 0.0:
-        trade_spent = _sum_payload_ask_price("buyer_id = :uid AND status = 'SOLD'", {"uid": uid})
-
-    # Total encaissé par le vendeur (crédit)
-    trade_earned = _sum_listing('seller_income', BetListing.user_id == uid, BetListing.status == 'SOLD')
-    if trade_earned == 0.0:
-        trade_earned = _sum_listing('sale_price', BetListing.user_id == uid, BetListing.status == 'SOLD')
-    if trade_earned == 0.0:
-        trade_earned = _sum_payload_ask_price("user_id = :uid AND status = 'SOLD'", {"uid": uid})
+    # ACHATS : buyer = moi (colonne buyer_id si présente, sinon payload.buyer_id)
+    trade_spent = _sum_trade(
+        "COALESCE(buyer_id, json_extract(payload, '$.buyer_id')) = :uid",
+        {"uid": uid}
+    )
+    # VENTES : seller = moi (colonne user_id)
+    trade_earned = _sum_trade(
+        "user_id = :uid",
+        {"uid": uid}
+    )
 
     left = (
         base
         - float(ppp_active_funded)
         - float(wet_active)
         + float(wet_won)
-        - float(trade_spent)    # prix payés pour les achats
-        + float(trade_earned)   # prix encaissés sur les ventes
+        - float(trade_spent)     # prix payés pour les achats
+        + float(trade_earned)    # prix encaissés sur les ventes
     )
     return max(0.0, round(left, 6))
 
