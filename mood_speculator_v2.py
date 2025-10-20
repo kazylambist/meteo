@@ -143,6 +143,8 @@ if not app.debug and not app.testing:
                 "max-age=31536000; includeSubDomains; preload"
         return resp
 
+from sqlalchemy import text    
+
 with app.app_context():
     # Colonnes manquantes existantes (tes migrations "historique")
     try:
@@ -6218,13 +6220,27 @@ def trade_buy_listing(listing_id):
     try:
         seller_id = int(row.user_id)
     except Exception:
-        seller_id = row.user_id  # fallback, mais on vise l'int
+        seller_id = row.user_id  # fallback
     if seller_id == me_id:
         return jsonify({"ok": False, "error": "cannot_buy_own"}), 400
 
-    # Prix demandé par le vendeur (doit exister et être > 0)
-    price = float(getattr(row, "ask_price", 0.0) or 0.0)
-    if price <= 0:
+    # --- Prix demandé par le vendeur (colonne > payload, accepte "3,5") ---
+    def _parse_price(*candidates):
+        for v in candidates:
+            if v is None:
+                continue
+            if isinstance(v, str):
+                v = v.replace(',', '.').strip()
+            try:
+                f = float(v)
+                if f > 0:
+                    return f
+            except Exception:
+                continue
+        return None
+
+    price = _parse_price(getattr(row, "ask_price", None), (row.payload or {}).get("ask_price"))
+    if price is None:
         return jsonify({"ok": False, "error": "bad_price"}), 400
 
     # Contrôle de budget sur le PRIX (pas sur la mise d’origine)
@@ -6252,57 +6268,49 @@ def trade_buy_listing(listing_id):
         if b.bet_date < today:
             return jsonify({"ok": False, "error": "expired"}), 400
 
-    # --------- TRANSFERT atomique : un seul commit ----------
+    # --------- TRANSFERT + clôture (un seul commit) ----------
     try:
-        # 1) transférer la mise au buyer
+        # 1) Transférer la mise à l’acheteur
         b.user_id = me_id
         if hasattr(b, "locked_for_trade"):
             b.locked_for_trade = 0  # elle n'est plus en vente
-        # clé : NE PAS compter cette mise comme une nouvelle dépense du buyer
+        # Ne pas compter cette mise comme nouvelle dépense de l’acheteur
         if hasattr(b, "funded_from_balance"):
             b.funded_from_balance = 0
 
-        # 2) clôturer l’annonce (et tracer le prix si les champs existent)
-        row.status   = 'SOLD'
+        # 2) Marquer l’annonce vendue + tracer le prix si champs présents
+        row.status = 'SOLD'
         if hasattr(row, "buyer_id"):
             row.buyer_id = me_id
         if hasattr(row, "sold_at"):
-            # utilise APP_TZ si tu l’as, sinon UTC
             try:
-                row.sold_at = datetime.now(APP_TZ)  # type: ignore
+                row.sold_at = datetime.now(APP_TZ)  # si tu as APP_TZ
             except Exception:
                 row.sold_at = datetime.now(timezone.utc)
 
-        # Si tu as ces champs comptables, ils aident remaining_points()
         if hasattr(row, "buyer_spend"):
             row.buyer_spend = price
         if hasattr(row, "seller_income"):
             row.seller_income = price
 
         db.session.commit()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         return jsonify({"ok": False, "error": "buy_failed"}), 500
 
-    # ---- Message auto au vendeur (texte pur, sans HTML) ----
+    # ---- Message auto au vendeur (texte pur) ----
     try:
         pl = row.payload or {}
-
-        # 1) tenter d'utiliser le label si présent, mais en le "dés-HTML-isant"
         line_txt = pl.get("label") or ""
         if line_txt:
-            # Supprimer TOUTES les balises HTML et décoder les entités (&nbsp; etc.)
             line_txt = re.sub(r'<[^>]+>', '', line_txt)
             line_txt = html.unescape(line_txt).strip()
-
-        # 2) fallback si pas de label exploitable
         if not line_txt:
-            city        = getattr(row, "city", None) or pl.get("city") or ""
-            date_label  = getattr(row, "date_label", None) or pl.get("date_label") or pl.get("deadline_key") or ""
-            stake       = pl.get("stake") or pl.get("amount")
-            odds        = pl.get("base_odds") or pl.get("odds")
-            icon        = pl.get("icon") or ""  # si tu stockes déjà ☀️/💧 dans le payload
-
+            city       = getattr(row, "city", None) or pl.get("city") or ""
+            date_label = getattr(row, "date_label", None) or pl.get("date_label") or pl.get("deadline_key") or ""
+            stake      = pl.get("stake") or pl.get("amount")
+            odds       = pl.get("base_odds") or pl.get("odds")
+            icon       = pl.get("icon") or ""
             frag = []
             if city: frag.append(str(city))
             if date_label: frag.append(str(date_label))
@@ -6315,8 +6323,8 @@ def trade_buy_listing(listing_id):
         msg = ChatMessage(
             from_user_id = me_id,
             to_user_id   = seller_id,
-            body         = body,                          # ← TEXTE UNIQUEMENT
-            created_at   = datetime.now(timezone.utc),    # conscient du fuseau
+            body         = body,
+            created_at   = datetime.now(timezone.utc),
             is_read      = 0
         )
         db.session.add(msg)
