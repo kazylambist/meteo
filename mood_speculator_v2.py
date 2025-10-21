@@ -101,31 +101,27 @@ DB_PATH = os.environ.get("DATABASE_URL", "sqlite:///moodspec.db")
 # -----------------------------------------------------------------------------
 # App
 # -----------------------------------------------------------------------------
-from pathlib import Path
-import os
-
 app = Flask(__name__)
 
-# --- HEALTHCHECK : simple, idempotent, sans DB ni auth ---
+# --- HEALTHCHECK minimal, sans DB ni auth, sans réponse anticipée ---
 from flask import Response, request
 
 HEALTH_PATHS = ("/health", "/healthz", "/ready", "/live")
 
+# Laisse simplement passer les requêtes santé (ne PAS répondre ici)
 @app.before_request
-def _fast_healthchecks():
-    # Répond immédiatement et évite tout autre filtre (auth, CSRF, etc.)
-    if request.path in HEALTH_PATHS and request.method in ("GET", "HEAD"):
-        return Response("ok", status=200, mimetype="text/plain")
+def _bypass_filters_for_health():
+    if request.path in HEALTH_PATHS:
+        return None  # ne bloque pas
 
-def _health_response():
+def _health_ok():
     return Response("ok", status=200, mimetype="text/plain")
 
-# Enregistrement explicite des routes (une seule fois, endpoints uniques)
+# Enregistre 1 seule fois des endpoints uniques
 for p in HEALTH_PATHS:
-    endpoint = f"health_{p.strip('/').replace('-', '_')}"
-    if endpoint not in app.view_functions:
-        app.add_url_rule(p, endpoint=endpoint,
-                         view_func=_health_response, methods=["GET", "HEAD"])
+    ep = f"health_{p.strip('/').replace('-', '_') or 'root'}"
+    if ep not in app.view_functions:
+        app.add_url_rule(p, endpoint=ep, view_func=_health_ok, methods=["GET", "HEAD"])
 
 try:
     app.config.from_object("config")
