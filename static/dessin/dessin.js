@@ -122,7 +122,7 @@ async function handleComment(){
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ imageDataUrl: dataUrl })
     });
-    if(!res.ok) throw new Error(\`Erreur serveur: \${res.status}\`);
+    if (!res.ok) throw new Error(`Erreur serveur: ${res.status}`);
     const data=await res.json();
     const comment=(data.comment||"").toString().trim();
     result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
