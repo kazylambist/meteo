@@ -5457,21 +5457,19 @@ import time  # <-- nécessaire
 # (assure-toi aussi d'avoir: from datetime import datetime, timezone si besoin ailleurs)
 
 # --- DESSIN (statique) ---
-import os
+import pathlib, os
 from flask import send_from_directory
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DESSIN_DIR = os.path.join(APP_DIR, "static", "dessin")
+APP_DIR = pathlib.Path(__file__).parent
+DESSIN_DIR = APP_DIR / "static" / "dessin"
 
 @app.route("/dessin/")
 def dessin_page():
-    # sert le HTML principal
-    return send_from_directory(DESSIN_DIR, "dessin.html")
+    return send_from_directory(os.fspath(DESSIN_DIR), "dessin.html")
 
 @app.route("/dessin/<path:path>")
 def dessin_assets(path):
-    # sert JS / assets complémentaires
-    return send_from_directory(DESSIN_DIR, path)
+    return send_from_directory(os.fspath(DESSIN_DIR), path)
 
 from time import time
 
