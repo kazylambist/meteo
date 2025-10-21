@@ -151,9 +151,9 @@ def _bypass_filters_for_health():
     if request.path in HEALTH_PATHS:
         return None  # ne bloque pas
 
-@app.route("/health", methods=["GET", "HEAD"])
-def health():
-    return Response("ok", mimetype="text/plain")
+@app.get("/health")
+def _health():
+    return Response("ok", status=200, mimetype="text/plain")
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
