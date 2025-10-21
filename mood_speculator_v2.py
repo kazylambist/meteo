@@ -6167,57 +6167,6 @@ def api_comment():
         print("Erreur /api/comment:", repr(e))
         return jsonify({"error": "serveur"}), 500
 
-DATAURL_RE = re.compile(r"^data:image/(?:png|jpeg);base64,[A-Za-z0-9+/=\s]+$")
-
-@app.route("/api/comment", methods=["POST"])
-def api_comment():
-    try:
-        payload = request.get_json(silent=True) or {}
-        image_data_url = (payload.get("imageDataUrl") or "").strip()
-
-        if not image_data_url:
-            return jsonify({"error": "imageDataUrl manquant"}), 400
-        if not DATAURL_RE.match(image_data_url):
-            return jsonify({"error": "imageDataUrl invalide"}), 400
-        if len(image_data_url) > 2_500_000:  # ~2.5 Mo
-            return jsonify({"error": "image trop grande"}), 413
-
-        system_prompt = (
-            "Tu es Zeus, dieu des cieux et du tonnerre.\n"
-            "Rédige un commentaire TRÈS court (1 à 2 phrases), en français simple, majestueux et bienveillant.\n"
-            "Fais toujours une petite référence météo (nuages, éclairs, arc-en-ciel, brise, soleil, pluie…), "
-            "et complimente chaleureusement le talent artistique de l'utilisateur.\n"
-            "Pas de sarcasme, pas d'insultes, pas de stéréotypes, rien de sensible.\n"
-            "Ton: épique mais gentil, avec un léger humour."
-        )
-
-        # --- création "paresseuse" du client OpenAI (évite le crash au boot si la clé manque) ---
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            return jsonify({"error": "OPENAI_API_KEY manquant côté serveur"}), 500
-        client = OpenAI(api_key=api_key)
-
-        resp = client.responses.create(
-            model="gpt-4o",
-            input=[
-                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-                {"role": "user", "content": [
-                    {"type": "input_text", "text": "Voici le dessin de l'utilisateur."},
-                    {"type": "input_image", "image_url": image_data_url}
-                ]}
-            ],
-            max_output_tokens=80,
-            temperature=0.9,
-        )
-
-        comment = (getattr(resp, "output_text", None) or
-                   "Par les nuages sacrés, ton art rayonne !").strip()
-        return jsonify({"comment": comment})
-
-    except Exception as e:
-        print("Erreur /api/comment:", repr(e))
-        return jsonify({"error": "Erreur lors de l'analyse du dessin."}), 500
-
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user
 import json
