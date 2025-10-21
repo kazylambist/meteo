@@ -104,6 +104,29 @@ import os
 
 app = Flask(__name__)
 
+# --- Healthcheck: simple, sans DB ni auth, idempotent ---
+from flask import Response, request
+
+HEALTH_PATHS = frozenset(("/health", "/healthz", "/ready", "/live"))
+
+@app.before_request
+def _bypass_filters_for_health():
+    # Laisse passer les URL de santé sans login/CSRF/redirect/etc.
+    if request.path in HEALTH_PATHS:
+        return None  # ne bloque pas
+
+def _health_handler():
+    return Response("ok", status=200, mimetype="text/plain")
+
+# Enregistre une seule fois avec un nom d'endpoint qui n'entre pas en collision
+if "healthcheck" not in app.view_functions:
+    app.add_url_rule("/health", endpoint="healthcheck",
+                     view_func=_health_handler, methods=["GET"])
+    # alias utiles
+    for p in ("/healthz", "/ready", "/live"):
+        app.add_url_rule(p, endpoint=f"healthcheck_{p.strip('/').replace('-', '_')}",
+                         view_func=_health_handler, methods=["GET"])
+
 try:
     app.config.from_object("config")
 except Exception:
@@ -139,24 +162,6 @@ try:
     app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
 except Exception:
     pass
-
-# --- Healthcheck: simple, sans DB ni auth, doit passer avant tout filtre ---
-from flask import Response, request
-
-HEALTH_PATHS = {"/health", "/healthz", "/ready", "/live"}
-
-@app.before_request
-def _bypass_filters_for_health():
-    # Laisse passer les URL de santé sans login/CSRF/redirect/etc.
-    if request.path in HEALTH_PATHS:
-        return None  # ne bloque pas
-
-@app.get("/health")
-def _health():
-    return Response("ok", status=200, mimetype="text/plain")
-
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
 
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
