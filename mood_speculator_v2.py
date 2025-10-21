@@ -163,6 +163,9 @@ try:
 except Exception:
     pass
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
     try:
