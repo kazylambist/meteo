@@ -2,3 +2,7 @@
 **/.DS_Store
 .DS_Store
 static/.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
