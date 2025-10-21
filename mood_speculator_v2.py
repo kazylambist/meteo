@@ -6075,13 +6075,7 @@ def users_ping():
     return users_heartbeat()
 
 import os, re
-from flask import Flask, request, jsonify, send_from_directory
 from openai import OpenAI
-
-app = Flask(__name__)
-
-from openai import OpenAI
-import os
 
 def get_openai_client():
     key = os.environ.get("OPENAI_API_KEY")
