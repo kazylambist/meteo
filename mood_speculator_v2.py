@@ -6167,6 +6167,16 @@ def api_comment():
         print("Erreur /api/comment:", repr(e))
         return jsonify({"error": "serveur"}), 500
 
+@app.post("/api/comment/ping")
+def comment_ping():
+    return {"ok": True}, 200
+
+@app.post("/api/comment/echo")
+def comment_echo():
+    payload = request.get_json(silent=True) or {}
+    data = (payload.get("imageDataUrl") or "")
+    return {"len": len(data), "head": data[:32]}, 200    
+
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user
 import json
