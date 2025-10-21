@@ -6147,9 +6147,6 @@ def api_comment():
     except Exception as e:
         print("Erreur /api/comment:", repr(e))
         return jsonify({"error": "Erreur lors de l'analyse du dessin."}), 500
-   
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
 
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user
@@ -6832,4 +6829,5 @@ if __name__ == "__main__":
         except Exception as e:
             app.logger.warning(f"[migrate] users.last_seen: {e}")    
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port, debug=True)
