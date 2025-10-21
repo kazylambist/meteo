@@ -6072,15 +6072,104 @@ def users_heartbeat():
 def users_ping():
     return users_heartbeat()
 
-import os, re
+# --- /api/comment : accepte JSON {imageDataUrl} ou multipart file= ---
+import re, base64, io
+from flask import request, jsonify
+from PIL import Image
 from openai import OpenAI
 
-def get_openai_client():
+DATAURL_RE = re.compile(r"^data:image/(?:png|jpeg);base64,([A-Za-z0-9+/=\s]+)$")
+
+def _get_openai():
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
-        # Ne plante pas le boot : lève une erreur claire *uniquement* si on appelle l’API
         raise RuntimeError("OPENAI_API_KEY manquant côté serveur")
     return OpenAI(api_key=key)
+
+def _ensure_jpeg_b64(b64_bytes: bytes) -> str:
+    """Reçoit des octets (png ou jpeg), ré-encode en JPEG <= ~1.6Mo en base64."""
+    img = Image.open(io.BytesIO(b64_bytes)).convert("RGB")
+    # Redimensionne gentiment si trop gros
+    max_side = 1280
+    w, h = img.size
+    if max(w, h) > max_side:
+        if w >= h:
+            nh = int(h * max_side / w)
+            img = img.resize((max_side, nh))
+        else:
+            nw = int(w * max_side / h)
+            img = img.resize((nw, max_side))
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=82, optimize=True)
+    out.seek(0)
+    return "data:image/jpeg;base64," + base64.b64encode(out.read()).decode("ascii")
+
+@app.post("/api/comment")
+def api_comment():
+    try:
+        image_data_url = None
+
+        # 1) JSON { imageDataUrl }
+        if request.is_json:
+            payload = request.get_json(silent=True) or {}
+            image_data_url = (payload.get("imageDataUrl") or "").strip()
+
+        # 2) multipart (file upload)
+        if not image_data_url and "file" in request.files:
+            raw = request.files["file"].read()
+            image_data_url = _ensure_jpeg_b64(raw)
+
+        if not image_data_url:
+            return jsonify({"error": "image manquante"}), 400
+
+        m = DATAURL_RE.match(image_data_url)
+        if not m:
+            # Si ça ne matche pas strictement (png/jpeg), on tente de réparer
+            if image_data_url.startswith("data:image/"):
+                head, b64 = image_data_url.split(",", 1)
+                fixed = _ensure_jpeg_b64(base64.b64decode(b64))
+                image_data_url = fixed
+                m = DATAURL_RE.match(image_data_url)
+            if not m:
+                return jsonify({"error": "imageDataUrl invalide"}), 400
+
+        # Limite douce côté serveur (~2.5 Mo de DataURL)
+        if len(image_data_url) > 2_500_000:
+            return jsonify({"error": "image trop grande"}), 413
+
+        client = _get_openai()
+
+        system_prompt = (
+            "Tu es Zeus, dieu des cieux et du tonnerre.\n"
+            "Rédige UN commentaire TRÈS court (1 à 2 phrases), en français simple, majestueux et bienveillant.\n"
+            "Fais une petite référence météo (nuages, éclairs, arc-en-ciel, brise, soleil, pluie…)\n"
+            "et complimente chaleureusement le talent artistique de l'utilisateur.\n"
+            "Pas de sarcasme, pas d'insultes, pas de stéréotypes.\n"
+        )
+
+        resp = client.responses.create(
+            model="gpt-4o",
+            input=[
+                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+                {"role": "user", "content": [
+                    {"type": "input_text", "text": "Voici le dessin de l'utilisateur."},
+                    {"type": "input_image", "image_url": image_data_url}
+                ]}
+            ],
+            max_output_tokens=80,
+            temperature=0.9,
+        )
+
+        comment = (getattr(resp, "output_text", None) or "").strip()
+        if not comment:
+            comment = "Par les nuages sacrés, ton art rayonne !"
+
+        return jsonify({"comment": comment})
+
+    except Exception as e:
+        # Log serveur et message clair côté client
+        print("Erreur /api/comment:", repr(e))
+        return jsonify({"error": "serveur"}), 500
 
 DATAURL_RE = re.compile(r"^data:image/(?:png|jpeg);base64,[A-Za-z0-9+/=\s]+$")
 
