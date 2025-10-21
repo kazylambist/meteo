@@ -13,6 +13,4 @@ COPY . .
 # Fly écoute sur $PORT (8080)
 ENV PORT=8080
 EXPOSE 8080
-
-# Gunicorn → bind 0.0.0.0:8080 et cible ton app Flask
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "mood_speculator_v2:app"]
+CMD ["sh","-c","gunicorn -w 2 -b 0.0.0.0:${PORT:-8080} mood_speculator_v2:app"]
