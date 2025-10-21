@@ -23,6 +23,8 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from flask_login import (
     LoginManager, login_user, login_required, logout_user,
     current_user, UserMixin
@@ -162,9 +164,6 @@ try:
     app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
 except Exception:
     pass
-
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
 
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):

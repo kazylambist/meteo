@@ -13,11 +13,11 @@ primary_region = "cdg"
 
 # Health check HTTP simple (assure-toi d'avoir une route /health qui renvoie 200)
 [[http_service.checks]]
+  path         = "/health"
   grace_period = "30s"
   interval     = "5s"
   timeout      = "2s"
   method       = "GET"
-  path         = "/health"
   protocol     = "http"
 
 [[mounts]]
