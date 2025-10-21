@@ -140,6 +140,21 @@ try:
 except Exception:
     pass
 
+# --- Healthcheck: simple, sans DB ni auth, doit passer avant tout filtre ---
+from flask import Response, request
+
+HEALTH_PATHS = {"/health", "/healthz", "/ready", "/live"}
+
+@app.before_request
+def _bypass_filters_for_health():
+    # Laisse passer les URL de santé sans login/CSRF/redirect/etc.
+    if request.path in HEALTH_PATHS:
+        return None  # ne bloque pas
+
+@app.route("/health", methods=["GET", "HEAD"])
+def health():
+    return Response("ok", mimetype="text/plain")
+
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
