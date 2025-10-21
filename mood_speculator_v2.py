@@ -5460,7 +5460,7 @@ import time  # <-- nécessaire
 import os
 from flask import send_from_directory
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))  # déjà présent plus haut chez toi
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DESSIN_DIR = os.path.join(APP_DIR, "static", "dessin")
 
 @app.route("/dessin/")
@@ -6084,19 +6084,6 @@ def get_openai_client():
         raise RuntimeError("OPENAI_API_KEY manquant côté serveur")
     return OpenAI(api_key=key)
 
-# servir la page /dessin/ si tu préfères (sinon accède /static/dessin/dessin.html)
-import pathlib
-APP_DIR = pathlib.Path(__file__).parent
-DESSIN_DIR = APP_DIR / "static" / "dessin"
-
-@app.route("/dessin/")
-def dessin_page():
-    return send_from_directory(DESSIN_DIR, "dessin.html")
-
-@app.route("/dessin/<path:path>")
-def dessin_assets(path):
-    return send_from_directory(DESSIN_DIR, path)
-
 DATAURL_RE = re.compile(r"^data:image/(?:png|jpeg);base64,[A-Za-z0-9+/=\s]+$")
 
 @app.route("/api/comment", methods=["POST"])
@@ -6284,7 +6271,6 @@ def trade_listings():
         return d
 
     return jsonify([_json_with_mine(r) for r in rows]), 200
-
 
 # -------- util: n’écrire que les colonnes déclarées --------
 def _set_if_declared(row, **kv):
@@ -6829,5 +6815,4 @@ if __name__ == "__main__":
         except Exception as e:
             app.logger.warning(f"[migrate] users.last_seen: {e}")    
 
-    port = int(os.environ.get("PORT", "8080"))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8080")), debug=True)
