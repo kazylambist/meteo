@@ -2310,6 +2310,7 @@ PPP_HTML = """
          style="display:none; margin-left:.5rem;">
         NOUVEAU MESSAGE
       </a>
+      <a href="/static/dessin/dessin.html">Dessin</a>
     </div>
   </div>
 </nav>
