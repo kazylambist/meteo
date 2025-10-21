@@ -1,5 +1,3 @@
-// dessin.js (placé dans static/dessin/)
-
 const canvas = document.getElementById("pad");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
@@ -118,15 +116,16 @@ async function handleComment(){
     btn.disabled=true; btn.textContent="Ça réfléchit…"; result.classList.add("hidden");
     fillWhiteBackground();
     const dataUrl=await toResizedDataURL(canvas,1024,0.85);
+
     const res=await fetch("/api/comment",{
       method:"POST",
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ imageDataUrl: dataUrl })
     });
-    if(!res.ok) throw new Error(`Erreur serveur: ${res.status}`);
+    if(!res.ok) throw new Error(\`Erreur serveur: \${res.status}\`);
     const data=await res.json();
     const comment=(data.comment||"").toString().trim();
-    result.textContent = comment || "Trop chouette !";
+    result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
     result.classList.remove("hidden");
   }catch(err){
     console.error(err);

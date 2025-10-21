@@ -99,6 +99,9 @@ DB_PATH = os.environ.get("DATABASE_URL", "sqlite:///moodspec.db")
 # -----------------------------------------------------------------------------
 # App
 # -----------------------------------------------------------------------------
+from pathlib import Path
+import os
+
 app = Flask(__name__)
 
 try:
@@ -109,10 +112,33 @@ except Exception:
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-key"),
         SQLALCHEMY_DATABASE_URI=os.environ.get(
             "DATABASE_URL",
-            "sqlite:///instance/moodspec.db"
+            "sqlite:///instance/moodspec.db"  # URI relative par défaut
         ),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
     )
+
+# --- Normalisation robuste de l'URI SQLite (absolu + dossier existant) ---
+try:
+    # S'assure que le dossier instance/ existe (utilisé par Flask)
+    os.makedirs(app.instance_path, exist_ok=True)
+
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI")
+    if uri:
+        # Si c'est une URI SQLite relative (sqlite:///chemin/relatif.db), on la rend absolue
+        if uri.startswith("sqlite:///") and not uri.startswith("sqlite:////"):
+            rel = uri.replace("sqlite:///", "")
+            abs_path = (Path(app.root_path) / rel).resolve()
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{abs_path}"
+    else:
+        # Si aucune URI n'a été fournie, fallback propre dans instance/
+        db_file = Path(app.instance_path) / "moodspec.db"
+        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_file}"
+
+    # Au cas où la config ne l'aurait pas posé
+    app.config.setdefault("SQLALCHEMY_TRACK_MODIFICATIONS", False)
+except Exception:
+    pass
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -135,15 +161,15 @@ if not app.debug and not app.testing:
     @app.after_request
     def add_hsts(resp):
         # en environnement Fly, https est signalé via X-Forwarded-Proto
-        if resp and ( 
-            request.is_secure or 
+        if resp and (
+            request.is_secure or
             request.headers.get("X-Forwarded-Proto", "http") == "https"
         ):
             resp.headers["Strict-Transport-Security"] = \
                 "max-age=31536000; includeSubDomains; preload"
         return resp
 
-from sqlalchemy import text    
+from sqlalchemy import text
 
 with app.app_context():
     # Colonnes manquantes existantes (tes migrations "historique")
@@ -164,7 +190,6 @@ with app.app_context():
         pass
 
     # Position.user_id pour relier Position -> User
-    # (Sur SQLite on ne met pas NOT NULL ni FK ici; on backfill d'abord.)
     try:
         db.session.execute(text("PRAGMA foreign_keys=ON"))  # SQLite : activer les FK
         db.session.execute(text(
@@ -294,7 +319,7 @@ with app.app_context():
         pass
 
     db.session.commit()
-
+    
 # -----------------------------------------------------------------------------
 # Models
 # -----------------------------------------------------------------------------
@@ -5402,6 +5427,23 @@ from flask_login import login_required, current_user
 import time  # <-- nécessaire
 # (assure-toi aussi d'avoir: from datetime import datetime, timezone si besoin ailleurs)
 
+# --- DESSIN (statique) ---
+import os
+from flask import send_from_directory
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))  # déjà présent plus haut chez toi
+DESSIN_DIR = os.path.join(APP_DIR, "static", "dessin")
+
+@app.route("/dessin/")
+def dessin_page():
+    # sert le HTML principal
+    return send_from_directory(DESSIN_DIR, "dessin.html")
+
+@app.route("/dessin/<path:path>")
+def dessin_assets(path):
+    # sert JS / assets complémentaires
+    return send_from_directory(DESSIN_DIR, path)
+
 from time import time
 
 @app.route("/trade/")
@@ -6002,6 +6044,73 @@ def users_heartbeat():
 @login_required
 def users_ping():
     return users_heartbeat()
+
+import os, re
+from flask import Flask, request, jsonify, send_from_directory
+from openai import OpenAI
+
+app = Flask(__name__)
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+# servir la page /dessin/ si tu préfères (sinon accède /static/dessin/dessin.html)
+import pathlib
+APP_DIR = pathlib.Path(__file__).parent
+DESSIN_DIR = APP_DIR / "static" / "dessin"
+
+@app.route("/dessin/")
+def dessin_page():
+    return send_from_directory(DESSIN_DIR, "dessin.html")
+
+@app.route("/dessin/<path:path>")
+def dessin_assets(path):
+    return send_from_directory(DESSIN_DIR, path)
+
+DATAURL_RE = re.compile(r"^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+\/=\s]+$")
+
+@app.route("/api/comment", methods=["POST"])
+def api_comment():
+    try:
+        payload = request.get_json(silent=True) or {}
+        image_data_url = (payload.get("imageDataUrl") or "").strip()
+
+        if not image_data_url:
+            return jsonify({"error": "imageDataUrl manquant"}), 400
+        if not DATAURL_RE.match(image_data_url):
+            return jsonify({"error": "imageDataUrl invalide"}), 400
+        if len(image_data_url) > 2_500_000:  # ~2.5 Mo
+            return jsonify({"error": "image trop grande"}), 413
+
+        system_prompt = (
+            "Tu es Zeus, dieu des cieux et du tonnerre.\n"
+            "Rédige un commentaire TRÈS court (1 à 2 phrases), en français simple, majestueux et bienveillant.\n"
+            "Fais toujours une petite référence météo (nuages, éclairs, arc-en-ciel, brise, soleil, pluie…), "
+            "et complimente chaleureusement le talent artistique de l'utilisateur.\n"
+            "Pas de sarcasme, pas d'insultes, pas de stéréotypes, rien de sensible.\n"
+            "Ton: épique mais gentil, avec un léger humour."
+        )
+
+        resp = openai_client.responses.create(  # ← utilise le bon nom de client
+            model="gpt-4o",
+            input=[
+                {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+                {"role": "user", "content": [
+                    {"type": "input_text", "text": "Voici le dessin de l'utilisateur."},
+                    {"type": "input_image", "image_url": image_data_url}
+                ]}
+            ],
+            max_output_tokens=80,
+            temperature=0.9,
+        )
+
+        comment = (getattr(resp, "output_text", None) or "Par les nuages sacrés, ton art rayonne !").strip()
+        return jsonify({"comment": comment})
+
+    except Exception as e:
+        print("Erreur /api/comment:", repr(e))
+        return jsonify({"error": "Erreur lors de l'analyse du dessin."}), 500
+   
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000, debug=True)
 
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user

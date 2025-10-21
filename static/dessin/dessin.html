@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Dessin</title>
+  <title>Offre un dessin à Zeus</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <style>
@@ -75,17 +75,16 @@
       <canvas id="pad" width="1200" height="800" aria-label="Surface de dessin"></canvas>
     </div>
 
-    <p class="hint">Le bouton “Obtenir mon commentaire” enverra l’image à <code>/api/comment</code>.</p>
+    <p class="hint">Le bouton envoie l’image à <code>/api/comment</code> (style Zeus fixé côté serveur).</p>
     <div id="result" class="bubble hidden" aria-live="polite"></div>
 
     <div class="footerbar" style="margin-top:14px">
-      <div class="hint">Ajoute un lien dans ta topbar vers <code>/static/dessin/dessin.html</code>.</div>
+      <div class="hint">Lien topbar : <code>/static/dessin/dessin.html</code>.</div>
       <div class="spacer"></div>
       <button id="download">Télécharger l’image</button>
     </div>
   </div>
 
-  <!-- IMPORTANT : chemin relatif depuis static/dessin/ -->
   <script src="./dessin.js" type="module"></script>
 </body>
 </html>
