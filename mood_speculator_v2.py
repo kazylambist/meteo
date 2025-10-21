@@ -106,28 +106,26 @@ import os
 
 app = Flask(__name__)
 
-# --- Healthcheck: simple, sans DB ni auth, idempotent ---
+# --- HEALTHCHECK : simple, idempotent, sans DB ni auth ---
 from flask import Response, request
 
-HEALTH_PATHS = frozenset(("/health", "/healthz", "/ready", "/live"))
+HEALTH_PATHS = ("/health", "/healthz", "/ready", "/live")
 
 @app.before_request
-def _bypass_filters_for_health():
-    # Laisse passer les URL de santé sans login/CSRF/redirect/etc.
-    if request.path in HEALTH_PATHS:
-        return None  # ne bloque pas
+def _fast_healthchecks():
+    # Répond immédiatement et évite tout autre filtre (auth, CSRF, etc.)
+    if request.path in HEALTH_PATHS and request.method in ("GET", "HEAD"):
+        return Response("ok", status=200, mimetype="text/plain")
 
-def _health_handler():
+def _health_response():
     return Response("ok", status=200, mimetype="text/plain")
 
-# Enregistre une seule fois avec un nom d'endpoint qui n'entre pas en collision
-if "healthcheck" not in app.view_functions:
-    app.add_url_rule("/health", endpoint="healthcheck",
-                     view_func=_health_handler, methods=["GET"])
-    # alias utiles
-    for p in ("/healthz", "/ready", "/live"):
-        app.add_url_rule(p, endpoint=f"healthcheck_{p.strip('/').replace('-', '_')}",
-                         view_func=_health_handler, methods=["GET"])
+# Enregistrement explicite des routes (une seule fois, endpoints uniques)
+for p in HEALTH_PATHS:
+    endpoint = f"health_{p.strip('/').replace('-', '_')}"
+    if endpoint not in app.view_functions:
+        app.add_url_rule(p, endpoint=endpoint,
+                         view_func=_health_response, methods=["GET", "HEAD"])
 
 try:
     app.config.from_object("config")
