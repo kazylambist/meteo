@@ -169,156 +169,169 @@ if not app.debug and not app.testing:
                 "max-age=31536000; includeSubDomains; preload"
         return resp
 
+import os
 from sqlalchemy import text
 
-with app.app_context():
-    # Colonnes manquantes existantes (tes migrations "historique")
-    try:
-        db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text("ALTER TABLE ppp_boosts ADD COLUMN station_id VARCHAR(64)"))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_pppboost_user_date_station "
-            "ON ppp_boosts(user_id, bet_date, station_id)"
-        ))
-    except Exception:
-        pass
+# Exécuter les migrations idempotentes SEULEMENT si RUN_MIGRATIONS=1 (ex: en local)
+RUN_MIG = os.environ.get("RUN_MIGRATIONS", "0") == "1"
 
-    # Position.user_id pour relier Position -> User
-    try:
-        db.session.execute(text("PRAGMA foreign_keys=ON"))  # SQLite : activer les FK
-        db.session.execute(text(
-            "ALTER TABLE position ADD COLUMN user_id INTEGER REFERENCES user(id)"
-        ))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_position_user_id ON position(user_id)"
-        ))
-    except Exception:
-        pass
-
-    # Chat: flag de lecture
-    try:
-        db.session.execute(text(
-            "ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
-        ))
-    except Exception:
-        pass
-    # Index utiles (corrigés)
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_chat_unread_to ON chat_messages(to_user_id, is_read)"
-        ))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_chat_from_to ON chat_messages(from_user_id, to_user_id)"
-        ))
-    except Exception:
-        pass
-
-    # Email unique robuste
-    try:
-        db.session.execute(text(
-            "UPDATE user SET email = lower(trim(email)) WHERE email IS NOT NULL"
-        ))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"
-        ))
-    except Exception:
-        pass
-
-    # PPP: funded_from_balance pour bien séparer stake vs. achat
-    try:
-        db.session.execute(text(
-            "ALTER TABLE ppp_bet ADD COLUMN funded_from_balance INTEGER NOT NULL DEFAULT 1"
-        ))
-    except Exception:
-        pass
-
-    # Index PPP pour accélérer la page
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_pppbet_user_status_station_date "
-            "ON ppp_bet(user_id, status, station_id, bet_date)"
-        ))
-    except Exception:
-        pass
-
-    # ---- TRADE : schéma et index nécessaires ----
-    # 0) Table minimale si absente (évite "no such table: bet_listing")
-    try:
-        db.session.execute(text(
-            "CREATE TABLE IF NOT EXISTS bet_listing (id INTEGER PRIMARY KEY)"
-        ))
-    except Exception:
-        pass
-
-    # 1) Colonnes de base (ajouts idempotents)
-    for ddl in [
-        "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
-        "ALTER TABLE bet_listing ADD COLUMN status TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN payload TEXT",            # JSON en TEXT (SQLite)
-        "ALTER TABLE bet_listing ADD COLUMN kind TEXT DEFAULT 'PPP'", # <— manquante dans tes logs
-        "ALTER TABLE bet_listing ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-        "ALTER TABLE bet_listing ADD COLUMN expires_at TIMESTAMP",
-        "ALTER TABLE bet_listing ADD COLUMN city TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
-        "ALTER TABLE bet_listing ADD COLUMN side TEXT",               # <— utilisé par certains SELECT
-        "ALTER TABLE bet_listing ADD COLUMN stake REAL",
-        "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
-        "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
-        "ALTER TABLE bet_listing ADD COLUMN boosts_add REAL",
-        "ALTER TABLE bet_listing ADD COLUMN total_odds REAL",
-        "ALTER TABLE bet_listing ADD COLUMN potential_gain REAL",
-        # prix demandé (création) et prix réellement payé (vente)
-        "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
-        "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
-        "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
-        "ALTER TABLE bet_listing ADD COLUMN sold_at TIMESTAMP"
-    ]:
+if RUN_MIG:
+    with app.app_context():
         try:
-            db.session.execute(text(ddl))
-        except Exception:
-            pass
+            # Colonnes manquantes existantes (tes migrations "historique")
+            try:
+                db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text("ALTER TABLE ppp_boosts ADD COLUMN station_id VARCHAR(64)"))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pppboost_user_date_station "
+                    "ON ppp_boosts(user_id, bet_date, station_id)"
+                ))
+            except Exception:
+                pass
 
-    # 2) Index utiles pour remaining_points() et les consultations
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status "
-            "ON bet_listing(buyer_id, status)"
-        ))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status "
-            "ON bet_listing(user_id, status)"
-        ))
-    except Exception:
-        pass
-    try:
-        db.session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_betlisting_status_expires "
-            "ON bet_listing(status, expires_at)"
-        ))
-    except Exception:
-        pass
+            # Position.user_id pour relier Position -> User
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE position ADD COLUMN user_id INTEGER REFERENCES user(id)"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_position_user_id ON position(user_id)"
+                ))
+            except Exception:
+                pass
 
-    db.session.commit()
+            # Chat: flag de lecture
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                pass
+            # Index utiles (corrigés)
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_unread_to ON chat_messages(to_user_id, is_read)"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_from_to ON chat_messages(from_user_id, to_user_id)"
+                ))
+            except Exception:
+                pass
+
+            # Email unique robuste
+            try:
+                db.session.execute(text(
+                    "UPDATE user SET email = lower(trim(email)) WHERE email IS NOT NULL"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"
+                ))
+            except Exception:
+                pass
+
+            # PPP: funded_from_balance pour bien séparer stake vs. achat
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE ppp_bet ADD COLUMN funded_from_balance INTEGER NOT NULL DEFAULT 1"
+                ))
+            except Exception:
+                pass
+
+            # Index PPP pour accélérer la page
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_pppbet_user_status_station_date "
+                    "ON ppp_bet(user_id, status, station_id, bet_date)"
+                ))
+            except Exception:
+                pass
+
+            # ---- TRADE : schéma et index nécessaires ----
+            # 0) Table minimale si absente (évite "no such table: bet_listing")
+            try:
+                db.session.execute(text(
+                    "CREATE TABLE IF NOT EXISTS bet_listing (id INTEGER PRIMARY KEY)"
+                ))
+            except Exception:
+                pass
+
+            # 1) Colonnes de base (ajouts idempotents)
+            for ddl in [
+                "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
+                "ALTER TABLE bet_listing ADD COLUMN status TEXT",
+                "ALTER TABLE bet_listing ADD COLUMN payload TEXT",            # JSON en TEXT (SQLite)
+                "ALTER TABLE bet_listing ADD COLUMN kind TEXT DEFAULT 'PPP'", # <— manquante dans tes logs
+                "ALTER TABLE bet_listing ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "ALTER TABLE bet_listing ADD COLUMN expires_at TIMESTAMP",
+                "ALTER TABLE bet_listing ADD COLUMN city TEXT",
+                "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
+                "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
+                "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
+                "ALTER TABLE bet_listing ADD COLUMN side TEXT",               # <— utilisé par certains SELECT
+                "ALTER TABLE bet_listing ADD COLUMN stake REAL",
+                "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
+                "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
+                "ALTER TABLE bet_listing ADD COLUMN boosts_add REAL",
+                "ALTER TABLE bet_listing ADD COLUMN total_odds REAL",
+                "ALTER TABLE bet_listing ADD COLUMN potential_gain REAL",
+                # prix demandé (création) et prix réellement payé (vente)
+                "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
+                "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
+                "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
+                "ALTER TABLE bet_listing ADD COLUMN sold_at TIMESTAMP"
+            ]:
+                try:
+                    db.session.execute(text(ddl))
+                except Exception:
+                    pass
+
+            # 2) Index utiles pour remaining_points() et les consultations
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status "
+                    "ON bet_listing(buyer_id, status)"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_betlisting_user_status "
+                    "ON bet_listing(user_id, status)"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_betlisting_status_expires "
+                    "ON bet_listing(status, expires_at)"
+                ))
+            except Exception:
+                pass
+
+            db.session.commit()
+            print("[MIGRATIONS] OK")
+        except Exception as e:
+            db.session.rollback()
+            print("[MIGRATIONS] ERROR:", repr(e))
+else:
+    # En prod (Fly) par défaut : ne pas bloquer le boot avec des DDL
+    # Lance tes migrations manuellement si nécessaire (ou RUN_MIGRATIONS=1 ponctuellement)
+    pass
     
 # -----------------------------------------------------------------------------
 # Models
@@ -6050,7 +6063,16 @@ from flask import Flask, request, jsonify, send_from_directory
 from openai import OpenAI
 
 app = Flask(__name__)
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+from openai import OpenAI
+import os
+
+def get_openai_client():
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        # Ne plante pas le boot : lève une erreur claire *uniquement* si on appelle l’API
+        raise RuntimeError("OPENAI_API_KEY manquant côté serveur")
+    return OpenAI(api_key=key)
 
 # servir la page /dessin/ si tu préfères (sinon accède /static/dessin/dessin.html)
 import pathlib
@@ -6065,7 +6087,7 @@ def dessin_page():
 def dessin_assets(path):
     return send_from_directory(DESSIN_DIR, path)
 
-DATAURL_RE = re.compile(r"^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+\/=\s]+$")
+DATAURL_RE = re.compile(r"^data:image/(?:png|jpeg);base64,[A-Za-z0-9+/=\s]+$")
 
 @app.route("/api/comment", methods=["POST"])
 def api_comment():
@@ -6089,7 +6111,13 @@ def api_comment():
             "Ton: épique mais gentil, avec un léger humour."
         )
 
-        resp = openai_client.responses.create(  # ← utilise le bon nom de client
+        # --- création "paresseuse" du client OpenAI (évite le crash au boot si la clé manque) ---
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return jsonify({"error": "OPENAI_API_KEY manquant côté serveur"}), 500
+        client = OpenAI(api_key=api_key)
+
+        resp = client.responses.create(
             model="gpt-4o",
             input=[
                 {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
@@ -6102,7 +6130,8 @@ def api_comment():
             temperature=0.9,
         )
 
-        comment = (getattr(resp, "output_text", None) or "Par les nuages sacrés, ton art rayonne !").strip()
+        comment = (getattr(resp, "output_text", None) or
+                   "Par les nuages sacrés, ton art rayonne !").strip()
         return jsonify({"comment": comment})
 
     except Exception as e:
