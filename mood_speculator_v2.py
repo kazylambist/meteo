@@ -4285,10 +4285,6 @@ CARTE_HTML = """
 # -----------------------------------------------------------------------------
 # Routes publiques API/UI
 # -----------------------------------------------------------------------------
-@app.get("/health")
-def health():
-    return "ok", 200
-
 @app.route('/')
 def index():
     return redirect(url_for('intro'))
