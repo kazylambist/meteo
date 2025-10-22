@@ -246,37 +246,48 @@ function addShortcuts(){
   });
 }
 
-// --- Commentaire (Appel backend) ---
-async function handleComment(btn, outEl){
+async function handleComment(){
+  const btn = document.getElementById("commentBtn");
+  const result = document.getElementById("result");
+
+  const show = (text) => {
+    result.textContent = text;
+    result.classList.remove("hidden");
+  };
+
   try{
-    btn.disabled=true; 
-    btn.textContent="Ça réfléchit…";
-    outEl.textContent = "⏳ Zeus contemple ton œuvre…";
+    btn.disabled = true;
+    btn.textContent = "Ça réfléchit…";
+    result.classList.add("hidden");
 
-    // S’assurer qu’il n’y a pas de transparence (fond blanc), puis encoder en JPEG raisonnable
+    // Assure un fond blanc puis compresse *fort* (max 768px, JPEG q=0.72)
     fillWhiteBackground();
-    const dataUrl = await toResizedDataURL(canvas, 1024, 0.85); // réduit si besoin (max 1024)
+    const dataUrl = await toResizedDataURL(canvas, 768, 0.72);
 
-    const res = await fetch("/api/comment",{
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
+    const res = await fetch("/api/comment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageDataUrl: dataUrl })
     });
 
     if (!res.ok) {
-      const msg = await res.text().catch(() => "");
-      throw new Error(`Erreur serveur: ${res.status}${msg ? " — " + msg : ""}`);
+      // essaie d’extraire un message serveur
+      let serverMsg = "";
+      try { serverMsg = await res.text(); } catch {}
+      show(`Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`);
+      return;
     }
 
-    const data = await res.json();
-    const comment = (data.comment || "").toString().trim();
-    outEl.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
-  }catch(err){
+    const data = await res.json().catch(() => ({}));
+    const comment = (data && data.comment ? String(data.comment) : "").trim();
+
+    show(comment || "Par les nuages sacrés, ton art rayonne !");
+  } catch (err){
     console.error(err);
-    outEl.textContent = "Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.";
-  }finally{
-    btn.disabled=false; 
-    btn.textContent="Obtenir mon commentaire";
+    show("Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Obtenir mon commentaire";
   }
 }
 
