@@ -41,7 +41,7 @@
 
     /* 1) Le wallpaper est peint sur <html> (plein écran, fixe) */
     html{
-      min-height: 100%;
+      min-height: 100vh;
       background:
     /* voile clair par-dessus l'image */
         linear-gradient(0deg, rgba(255,255,255,.75), rgba(255,255,255,.75)),
@@ -89,20 +89,24 @@
       align-items: center;
       gap: 10px;
     }
-    .page-title{
-      margin: 0;
-      text-align: center;
-      justify-self: center;
-      font-size: clamp(22px,3vw,32px);
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
     .topbar-logo-link{ display: inline-block; line-height: 0; }
     .brand-logo{ height: 36px; width: auto; display: block; }
     @media (min-width: 900px){ .brand-logo{ height: 40px; } }
 
-    .toolbar,.footerbar{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); padding:12px; border-radius:14px }
-    .toolbar{ margin-bottom:12px }
+    .toolbar,.footerbar{ 
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+      background:var(--card);
+      border:1px solid var(--border);
+      padding:12px;
+      border-radius:14px }
+      justify-content: center;
+    .toolbar{
+      background: color-mix(in srgb, var(--card) 85%, transparent);
+      backdrop-filter: blur(4px);
+    }
     .tool-group{ display:flex; gap:10px; align-items:center }
     label{ font-size:14px; color:var(--muted) }
 
