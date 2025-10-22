@@ -10,7 +10,7 @@
     :root{
       /* Thème clair */
       --bg:#fafafa;       /* fond global doux (peu utilisé car wallpaper plein écran) */
-      --fg:#0e1726;       /* texte principal */
+      --fg:#9bbffa;       /* texte principal */
       --muted:#5b6b7f;    /* texte secondaire */
       --accent:#5b6ee1;   /* accent bleu-violet */
       --card:#ffffff;     /* cartes / barres */
@@ -183,11 +183,12 @@
       <a class="topbar-logo-link" href="/ppp" aria-label="Aller aux prévisions (PPP)">
         <img src="/static/img/weather_bets_S.png" alt="MétéoGod" class="brand-logo">
       </a>
-      <h1 class="page-title">Dessin</h1>
-      <div class="header-spacer" aria-hidden="true"></div>
-      <div class="header-actions">
-        <button id="commentBtn">Montrer à Zeus</button>
+
+      <div class="center-action">
+        <button id="commentBtn" class="primary">Montrer à Zeus</button>
       </div>
+
+      <div class="header-spacer" aria-hidden="true"></div>
     </header>
 
     <!-- Conteneur du commentaire, AU-DESSUS du canvas -->
