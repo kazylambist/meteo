@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <link rel="preload" as="image" href="/static/cabine/img/ciel1.jpg">
+  <link rel="preload" as="image" href="/static/cabine/assets/img/ciel1.jpg">
   <title>Dessin</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
@@ -19,7 +19,7 @@
 
       /* Commentaire (typewriter) */
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      --cmt-text:#24405f;            /* bleu-gris doux */
+      --cmt-text:#9bbffa;            /* bleu-gris doux */
       --cmt-halo:0 0 14px rgba(36,64,95,.35), 0 0 28px rgba(36,64,95,.20);
     }
 
@@ -27,14 +27,14 @@
     @media (prefers-color-scheme: dark){
       :root{
         --bg:#f2f4f7;
-        --fg:#101828;
+        --fg:#9bbffa;
         --muted:#475467;
         --accent:#6b7cff;
         --card:#ffffff;
         --border:#d7dee8;
         --paper:#efe9dc;
 
-        --cmt-text:#2a4060;
+        --cmt-text:#9bbffa;
         --cmt-halo:0 0 14px rgba(42,64,96,.35), 0 0 28px rgba(42,64,96,.20);
       }
     }
@@ -42,12 +42,12 @@
     /* Wallpaper plein écran (sans voile) peint sur <html> */
     html{
       min-height: 100vh;
-      background: url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
+      background: url("/static/cabine/assets/img/ciel1.jpg") center / cover no-repeat fixed;
     }
     @media (prefers-color-scheme: dark){
       html{
         /* même image en "dark", toujours sans voile */
-        background: url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
+        background: url("/static/cabine/assets/img/ciel1.jpg") center / cover no-repeat fixed;
       }
     }
 
