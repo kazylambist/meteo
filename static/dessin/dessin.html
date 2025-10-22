@@ -8,7 +8,7 @@
   <style>
     :root{
       --bg:#ffffff; --fg:#0f172a; --muted:#64748b; --accent:#6366f1; --card:#f8fafc; --border:#e2e8f0;
-      --paper:#E9E3D6; /* teinte papier ancien */
+      --paper:#f7f5f0; /* teinte papier ancien */
     }
     @media (prefers-color-scheme: dark){
       :root{
@@ -109,7 +109,6 @@
       <p id="commentOut" style="margin-top:8px;"></p>
     </div>
 
-    <p class="hint">Le bouton envoie l’image à <code>/api/comment</code> (style Zeus fixé côté serveur).</p>
     <div id="result" class="bubble hidden" aria-live="polite"></div>
 
     <div id="stage">
@@ -117,7 +116,6 @@
     </div>
 
     <div class="footerbar" style="margin-top:14px">
-      <div class="hint">Lien topbar : <code>/static/dessin/dessin.html</code>.</div>
       <div class="spacer"></div>
       <button id="download">Télécharger l’image</button>
     </div>
