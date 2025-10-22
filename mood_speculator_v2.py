@@ -6150,10 +6150,10 @@ def api_comment():
 
         system_prompt = (
             "Tu es Zeus, dieu des cieux et du tonnerre.\n"
-            "Rédige UN commentaire TRÈS court (1 à 2 phrases), en français simple, majestueux et moqueur.\n"
-            "Fais une petite référence météo (nuages, éclairs, arc-en-ciel, brise, soleil, pluie…)\n"
-            "et complimente ironiquement le talent artistique de l'utilisateur.\n"
-            "Traite-le comme un humble mortel"
+            "Rédige UN commentaire court (2 à 3 phrases), en français soutenu, majestueux et moqueur.\n"
+            "Fais une petite référence météorolgique\n"
+            "et critique le talent artistique de l'utilisateur qui n'est pas à la hauteur de tes attentes.\n"
+            "L'utilisateur est un Dieu moins important que toi. Tu veux lui faire sentir son infériorité."
         )
 
         # messages = chat.completions (vision via image_url -> Data URL)
