@@ -39,16 +39,24 @@
       }
     }
 
-    /* Full-page background image (ciel1.jpg) */
+    *{ box-sizing:border-box }
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji";
+      /* background:var(--bg);  <-- à enlever */
+      background: transparent;   /* <-- transparent pour voir le wallpaper */
+      color:var(--fg);
+      position: relative;        /* <-- nécessaire pour le z-index du ::before */
+    }
+    /* 2) Wallpaper : remonte au-dessus du fond du body */
     body::before{
       content:"";
       position: fixed;
       inset: 0;
-      z-index: -1;                 /* sits behind everything */
+      z-index: 0;  /* <-- au lieu de -1 */
       background:
-        linear-gradient(0deg, rgba(255,255,255,.75), rgba(255,255,255,.75)), /* soft wash */
+        linear-gradient(0deg, rgba(255,255,255,.75), rgba(255,255,255,.75)),
         url("/static/cabine/img/ciel1.jpg") center/cover no-repeat fixed;
-      /* tune the wash for dark-mode too (still light overall) */
     }
     @media (prefers-color-scheme: dark){
       body::before{
@@ -57,9 +65,9 @@
           url("/static/cabine/img/ciel1.jpg") center/cover no-repeat fixed;
       }
     }
-    *{ box-sizing:border-box }
-    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--fg) }
-    .container{ max-width:980px; margin:0 auto; padding:16px 20px 48px }
+
+    /* (facultatif, mais souvent utile pour être certain que le contenu passe devant) */
+    .container{ position: relative; z-index: 1; }
 
     /* Header avec logo à gauche et titre centré */
     .site-header{
