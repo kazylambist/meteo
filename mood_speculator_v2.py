@@ -6068,41 +6068,40 @@ def users_heartbeat():
 def users_ping():
     return users_heartbeat()
 
-# --- /api/comment : accepte JSON {imageDataUrl} ou multipart file= ---
+# --- /api/comment robuste (drop-in) ---
 import os, re, io, sys, base64
 from flask import request, jsonify
 from PIL import Image
 
-# Data URL PNG/JPEG stricte (on capture la partie base64)
+# Data URL PNG/JPEG stricte (capture du base64)
 DATAURL_RE = re.compile(r"^data:image/(?:png|jpeg);base64,([A-Za-z0-9+/=\s]+)$")
 
-# Limite stricte pour la Data URL complète (on vise < ~300 Ko)
-MAX_DATAURL_LEN = 300_000
+# Limites (volontairement strictes)
+MAX_DATAURL_LEN = 240_000   # ~240 Ko max transmis au serveur
 
-def _openai_client_and_mode():
+def _get_openai_chat():
     """
-    Retourne (mode, client) :
-      - ("responses", OpenAI(...)) pour le nouveau SDK (>=1.0) -> client.responses.create()
-      - ("chat", openai)         pour l'ancien SDK (<1.0)     -> openai.ChatCompletion.create()
+    Essaie d'utiliser le nouveau SDK (`from openai import OpenAI`) et chat.completions.
+    Si indispo, bascule sur l’ancien `import openai` ChatCompletion.
+    Retourne un tuple (mode, client) où:
+      - mode='new'  => client.chat.completions.create(...)
+      - mode='old'  => client.ChatCompletion.create(...)
     """
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY manquant côté serveur")
+
     try:
         from openai import OpenAI  # nouveau SDK
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY manquant côté serveur")
-        return "responses", OpenAI(api_key=api_key)
+        return "new", OpenAI(api_key=api_key)
     except Exception:
         import openai  # ancien SDK
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY manquant côté serveur")
         openai.api_key = api_key
-        return "chat", openai
+        return "old", openai
 
-def _ensure_jpeg_b64(raw_bytes: bytes, max_side: int = 768, quality: int = 72) -> str:
+def _jpeg_dataurl_small(raw_bytes: bytes, max_side: int = 640, quality: int = 68) -> str:
     """
-    Reçoit des octets d'image (png ou jpeg), convertit en JPEG réduit (≤ max_side, quality),
-    renvoie une Data URL 'data:image/jpeg;base64,...'.
+    Convertit l'image en JPEG compact (<= max_side, quality) et renvoie data:image/jpeg;base64,...
     """
     img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
     w, h = img.size
@@ -6113,9 +6112,7 @@ def _ensure_jpeg_b64(raw_bytes: bytes, max_side: int = 768, quality: int = 72) -
         else:
             nw = max(1, int(w * max_side / h))
             img = img.resize((nw, max_side))
-
     out = io.BytesIO()
-    # quality 72 + optimize pour rester très compact
     img.save(out, format="JPEG", quality=quality, optimize=True)
     out.seek(0)
     b64 = base64.b64encode(out.read()).decode("ascii")
@@ -6128,7 +6125,7 @@ def api_comment_ping():
 @app.post("/api/comment")
 def api_comment():
     try:
-        # 1) Récupère l'image depuis JSON {imageDataUrl} OU en multipart 'file'
+        # --- 1) Récupération image ---
         image_data_url = None
 
         if request.is_json:
@@ -6137,31 +6134,31 @@ def api_comment():
 
         if not image_data_url and "file" in request.files:
             raw = request.files["file"].read()
-            image_data_url = _ensure_jpeg_b64(raw)  # on convertit direct en petit JPEG
+            image_data_url = _jpeg_dataurl_small(raw)  # on compacte directement
 
         if not image_data_url:
             return jsonify({"error": "image manquante"}), 400
 
         m = DATAURL_RE.match(image_data_url)
         if not m:
-            # Si c'est une data URL d'un autre type, on tente de la "réparer" en JPEG compact
+            # Si autre mimetype (ex: data:image/webp,...) on tente la conversion
             if image_data_url.startswith("data:image/") and "," in image_data_url:
-                _, b64 = image_data_url.split(",", 1)
                 try:
+                    _, b64 = image_data_url.split(",", 1)
                     raw = base64.b64decode(b64)
-                    image_data_url = _ensure_jpeg_b64(raw)
+                    image_data_url = _jpeg_dataurl_small(raw)
                     m = DATAURL_RE.match(image_data_url)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[api_comment] dataurl fix failed: {e!r}", file=sys.stderr)
             if not m:
                 return jsonify({"error": "imageDataUrl invalide"}), 400
 
-        # Taille maximale stricte pour la Data URL
+        # Taille max stricte
         if len(image_data_url) > MAX_DATAURL_LEN:
             return jsonify({"error": "image trop grande"}), 413
 
-        # Client OpenAI (auto-détection SDK)
-        mode, client = _openai_client_and_mode()
+        # --- 2) OpenAI ---
+        mode, client = _get_openai_chat()
         model_name = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
         system_prompt = (
@@ -6172,50 +6169,35 @@ def api_comment():
             "Pas de sarcasme, pas d'insultes, pas de stéréotypes."
         )
 
-        # --- Appel OpenAI (compatible 2 SDKs) ---
-        if mode == "responses":
-            resp = client.responses.create(
+        user_content = [
+            {"type": "text", "text": "Voici le dessin de l'utilisateur."},
+            {"type": "image_url", "image_url": {"url": image_data_url}},
+        ]
+
+        if mode == "new":
+            # nouveau SDK
+            resp = client.chat.completions.create(
                 model=model_name,
-                input=[
-                    {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-                    {"role": "user", "content": [
-                        {"type": "input_text", "text": "Voici le dessin de l'utilisateur."},
-                        {"type": "input_image", "image_url": image_data_url},
-                    ]},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
                 ],
-                max_output_tokens=80,
                 temperature=0.9,
+                max_tokens=80,
             )
-            comment = (getattr(resp, "output_text", None) or "").strip()
+            comment = (resp.choices[0].message.content or "").strip()
         else:
-            # Ancien SDK (ChatCompletion). Si l'image n'est pas supportée, fallback texte.
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Voici le dessin de l'utilisateur."},
-                    {"type": "image_url", "image_url": {"url": image_data_url}},
-                ]},
-            ]
-            try:
-                comp = client.ChatCompletion.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=0.9,
-                    max_tokens=80,
-                )
-                comment = comp["choices"][0]["message"]["content"].strip()
-            except Exception as e:
-                print(f"[api_comment] chat-with-image failed: {e}", file=sys.stderr)
-                comp = client.ChatCompletion.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": "Décris très brièvement ce dessin (1-2 phrases)."},
-                    ],
-                    temperature=0.9,
-                    max_tokens=80,
-                )
-                comment = comp["choices"][0]["message"]["content"].strip()
+            # ancien SDK
+            comp = client.ChatCompletion.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.9,
+                max_tokens=80,
+            )
+            comment = comp["choices"][0]["message"]["content"].strip()
 
         if not comment:
             comment = "Par les nuages sacrés, ton art rayonne !"
@@ -6223,7 +6205,7 @@ def api_comment():
         return jsonify({"comment": comment})
 
     except Exception as e:
-        # Log clair côté serveur (visible via fly logs)
+        # Log + retour d'erreur clair
         print(f"[api_comment] ERROR: {e!r}", file=sys.stderr)
         return jsonify({"error": "serveur"}), 500
 
