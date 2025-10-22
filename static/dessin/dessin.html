@@ -9,7 +9,7 @@
   <style>
     :root{
       /* Thème clair */
-      --bg:#fafafa;       /* fond global doux */
+      --bg:#fafafa;       /* fond global doux (peu utilisé car wallpaper plein écran) */
       --fg:#0e1726;       /* texte principal */
       --muted:#5b6b7f;    /* texte secondaire */
       --accent:#5b6ee1;   /* accent bleu-violet */
@@ -26,52 +26,52 @@
     /* Variante sombre... mais lumineuse */
     @media (prefers-color-scheme: dark){
       :root{
-        --bg:#f2f4f7;     /* clair même en dark mode */
-        --fg:#101828;     /* texte un peu plus sombre pour le contraste */
+        --bg:#f2f4f7;
+        --fg:#101828;
         --muted:#475467;
-        --accent:#6b7cff; /* accent un peu plus vibrant */
-        --card:#ffffff;   /* cartes blanches pour la lisibilité */
+        --accent:#6b7cff;
+        --card:#ffffff;
         --border:#d7dee8;
-        --paper:#efe9dc;  /* papier légèrement chaud, très lisible */
+        --paper:#efe9dc;
 
         --cmt-text:#2a4060;
         --cmt-halo:0 0 14px rgba(42,64,96,.35), 0 0 28px rgba(42,64,96,.20);
       }
     }
 
-    /* 1) Le wallpaper est peint sur <html> (plein écran, fixe) */
+    /* Wallpaper plein écran (sans voile) peint sur <html> */
     html{
       min-height: 100vh;
-      background:
-    /* voile clair par-dessus l'image */
-        linear-gradient(0deg, rgba(255,255,255,.75), rgba(255,255,255,.75)),
-        url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
+      background: url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
     }
-
-    /* Variante “sombre mais claire” */
     @media (prefers-color-scheme: dark){
       html{
-        background:
-          linear-gradient(0deg, rgba(242,244,247,.85), rgba(242,244,247,.85)),
-          url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
+        /* même image en "dark", toujours sans voile */
+        background: url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
       }
     }
 
-    /* 2) Le body ne couvre pas le fond */
+    /* Le body ne recouvre pas le fond */
     body{
       margin:0;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji";
-      background: transparent;   /* <- important */
+      background: transparent;
       color:var(--fg);
     }
 
-    /* 3) Assure que le contenu passe “devant” (utile si d’autres couches existent) */
-    .container{ position: relative; z-index: 1; }
+    /* Conteneur centré et borné (évite le plein écran) */
+    .container{
+      position: relative;
+      z-index: 1;
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 16px 20px 48px;
+    }
 
     /* Header avec logo à gauche et titre centré */
     .site-header{
       display: grid;
-      grid-template-columns: auto 1fr auto; /* logo | titre | espace */
+      grid-template-columns: auto 1fr auto; /* logo | titre | actions */
       align-items: center;
       gap: 12px;
       margin: 12px 0 18px;
@@ -93,31 +93,61 @@
     .brand-logo{ height: 36px; width: auto; display: block; }
     @media (min-width: 900px){ .brand-logo{ height: 40px; } }
 
-    .toolbar,.footerbar{ 
+    /* Barres / outils */
+    .toolbar{
       display:flex;
       flex-wrap:wrap;
       gap:10px;
       align-items:center;
-      background:var(--card);
+      background: color-mix(in srgb, var(--card) 85%, transparent);
       border:1px solid var(--border);
       padding:12px;
-      border-radius:14px }
-      justify-content: center;
-    .toolbar{
-      background: color-mix(in srgb, var(--card) 85%, transparent);
+      border-radius:14px;
       backdrop-filter: blur(4px);
+      margin-top: 12px;
     }
+    .footerbar{
+      display:flex;
+      justify-content: center;
+      align-items:center;
+      background: transparent;
+      border: 0;
+      padding: 16px 0;
+    }
+
     .tool-group{ display:flex; gap:10px; align-items:center }
     label{ font-size:14px; color:var(--muted) }
 
-    button,.btn{ appearance:none; border:1px solid var(--border); background:#0000; color:var(--fg); padding:10px 14px; border-radius:12px; cursor:pointer; transition:transform .04s ease,background .2s ease,border-color .2s ease; font-weight:600 }
+    button,.btn{
+      appearance:none;
+      border:1px solid var(--border);
+      background:#0000;
+      color:var(--fg);
+      padding:10px 14px;
+      border-radius:12px;
+      cursor:pointer;
+      transition:transform .04s ease,background .2s ease,border-color .2s ease;
+      font-weight:600
+    }
     button:hover{ background: color-mix(in srgb, var(--accent) 12%, transparent); border-color:var(--accent) }
     button:active{ transform:translateY(1px) }
     button[disabled]{ opacity:.6; cursor:not-allowed }
 
-    /* papier ancien à l’écran */
-    #stage{ position:relative; background:var(--paper); border:1px solid var(--border); border-radius:16px; overflow:hidden }
-    canvas{ width:100%; height:auto; display:block; touch-action:none; background:var(--paper) }
+    /* Toile "papier" lisible au-dessus du wallpaper */
+    #stage{
+      position:relative;
+      background:var(--paper);
+      border:1px solid var(--border);
+      border-radius:16px;
+      overflow:hidden
+    }
+    canvas{
+      width:100%;
+      height:auto;
+      display:block;
+      touch-action:none;
+      background:var(--paper)
+    }
 
     .hint{ font-size:13px; color:var(--muted); margin-top:6px }
     .spacer{ flex:1 1 auto }
@@ -153,14 +183,14 @@
       <a class="topbar-logo-link" href="/ppp" aria-label="Aller aux prévisions (PPP)">
         <img src="/static/img/weather_bets_S.png" alt="MétéoGod" class="brand-logo">
       </a>
-      <h1 class="page-title"></h1>
+      <h1 class="page-title">Dessin</h1>
       <div class="header-spacer" aria-hidden="true"></div>
       <div class="header-actions">
         <button id="commentBtn">Montrer à Zeus</button>
       </div>
     </header>
 
-    <!-- Nouveau conteneur pour le commentaire, AU-DESSUS du canvas -->
+    <!-- Conteneur du commentaire, AU-DESSUS du canvas -->
     <div id="result" class="comment-line hidden" aria-live="polite"></div>
 
     <div id="stage">
