@@ -6,24 +6,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <style>
-    :root { --bg:#ffffff; --fg:#0f172a; --muted:#64748b; --accent:#6366f1; --card:#f8fafc; --border:#e2e8f0; }
-    @media (prefers-color-scheme: dark){
-      :root { --bg:#0b1220; --fg:#e5e7eb; --muted:#94a3b8; --accent:#8b5cf6; --card:#111827; --border:#1f2937; }
+    :root{
+      --bg:#ffffff; --fg:#0f172a; --muted:#64748b; --accent:#6366f1; --card:#f8fafc; --border:#e2e8f0;
+      --paper:#E9E3D6; /* teinte papier ancien */
     }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --bg:#0b1220; --fg:#e5e7eb; --muted:#94a3b8; --accent:#8b5cf6; --card:#111827; --border:#1f2937;
+        --paper:#2a2a28; /* variante sombre lisible (chaude) */
+      }
+    }
+
     *{ box-sizing:border-box }
     body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--fg) }
     .container{ max-width:980px; margin:0 auto; padding:16px 20px 48px }
     .page-title{ font-size:clamp(22px,3vw,32px); font-weight:800; letter-spacing:-.02em; margin:12px 0 18px }
+
     .toolbar,.footerbar{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); padding:12px; border-radius:14px }
     .toolbar{ margin-bottom:12px }
     .tool-group{ display:flex; gap:10px; align-items:center }
     label{ font-size:14px; color:var(--muted) }
-    button,.btn{ appearance:none; border:1px solid var(--border); background:#fff0; color:var(--fg); padding:10px 14px; border-radius:12px; cursor:pointer; transition:transform .04s ease,background .2s ease,border-color .2s ease; font-weight:600 }
+
+    button,.btn{ appearance:none; border:1px solid var(--border); background:#0000; color:var(--fg); padding:10px 14px; border-radius:12px; cursor:pointer; transition:transform .04s ease,background .2s ease,border-color .2s ease; font-weight:600 }
     button:hover{ background: color-mix(in srgb, var(--accent) 12%, transparent); border-color:var(--accent) }
     button:active{ transform:translateY(1px) }
     button[disabled]{ opacity:.6; cursor:not-allowed }
-    #stage{ position:relative; background:#fff; border:1px solid var(--border); border-radius:16px; overflow:hidden }
-    canvas{ width:100%; height:auto; display:block; touch-action:none; background:#fff }
+
+    /* papier ancien à l’écran */
+    #stage{ position:relative; background:var(--paper); border:1px solid var(--border); border-radius:16px; overflow:hidden }
+    canvas{ width:100%; height:auto; display:block; touch-action:none; background:var(--paper) }
+
     .bubble{ margin-top:12px; padding:14px 16px; border-radius:16px; border:1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-family:"Comic Sans MS","Comic Neue",system-ui,sans-serif; font-size:clamp(16px,2.4vw,20px) }
     .bubble::before{ content:"💬 " }
     .hint{ font-size:13px; color:var(--muted); margin-top:6px }
@@ -72,12 +84,12 @@
       <p id="commentOut" style="margin-top:8px;"></p>
     </div>
 
+    <p class="hint">Le bouton envoie l’image à <code>/api/comment</code> (style Zeus fixé côté serveur).</p>
+    <div id="result" class="bubble hidden" aria-live="polite"></div>
+
     <div id="stage">
       <canvas id="pad" width="1200" height="800" aria-label="Surface de dessin"></canvas>
     </div>
-
-    <p class="hint">Le bouton envoie l’image à <code>/api/comment</code> (style Zeus fixé côté serveur).</p>
-    <div id="result" class="bubble hidden" aria-live="polite"></div>
 
     <div class="footerbar" style="margin-top:14px">
       <div class="hint">Lien topbar : <code>/static/dessin/dessin.html</code>.</div>

@@ -33,27 +33,25 @@ function setupDPR() {
 window.addEventListener("resize", setupDPR);
 
 // --- Fond blanc (évite la transparence) ---
-function fillWhiteBackground() {
+function fillPaperBackground() {
+  const col = getComputedStyle(document.documentElement)
+                .getPropertyValue('--paper').trim() || '#E9E3D6';
   ctx.save();
+  // place un aplat en-dessous de tout ce qui existe
   ctx.globalCompositeOperation = "destination-over";
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = col;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
 }
 
 // --- Init ---
 function init() {
-  // fond blanc initial
-  ctx.save(); 
-  ctx.fillStyle = "#ffffff"; 
-  ctx.fillRect(0,0,canvas.width,canvas.height); 
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
-
   setupDPR();
-  pushHistory();
-  bindTools();
-  updateBrushPreview();
-  addShortcuts();
+  fillPaperBackground();   // <-- au lieu du blanc
+  pushHistory(); bindTools(); updateBrushPreview(); addShortcuts();
 }
 // si fonts API dispo, attend sa dispo ; sinon, init direct
 document.fonts ? document.fonts.ready.then(init) : init();
@@ -261,7 +259,7 @@ async function handleComment(){
     result.classList.add("hidden");
 
     // Assure un fond blanc puis compresse *fort* (max 768px, JPEG q=0.72)
-    fillWhiteBackground();
+    fillPaperBackground();
     const dataUrl = await toResizedDataURL(canvas, 768, 0.72);
 
     const res = await fetch("/api/comment", {
@@ -310,7 +308,7 @@ function toResizedDataURL(srcCanvas, maxSide=1024, quality=0.85){
 
 // --- Download ---
 function downloadImage(){
-  fillWhiteBackground();
+  fillPaperBackground();
   const url=canvas.toDataURL("image/png");
   const a=document.createElement("a");
   a.href=url; 
