@@ -46,12 +46,17 @@ function fillPaperBackground() {
 
 // --- Init ---
 function init() {
+  // Option A: ne rien peindre (le fond CSS du canvas fera foi)
+  // ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Option B: peindre la toile au démarrage :
   ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = getPaperColor();   // <-- au lieu de "#ffffff"
+  ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.restore();
-  setupDPR();
-  fillPaperBackground();   // <-- au lieu du blanc
-  pushHistory(); bindTools(); updateBrushPreview(); addShortcuts();
+
+  setupDPR(); pushHistory(); bindTools(); updateBrushPreview(); addShortcuts();
 }
 // si fonts API dispo, attend sa dispo ; sinon, init direct
 document.fonts ? document.fonts.ready.then(init) : init();
@@ -184,8 +189,7 @@ function bindTools(){
       if(!confirm("Effacer tout le dessin ?")) return;
       ctx.save(); 
       ctx.globalCompositeOperation="source-over"; 
-      ctx.fillStyle="#ffffff"; 
-      ctx.fillRect(0,0,canvas.width,canvas.height); 
+      ctx.clearRect(0,0,canvas.width,canvas.height); 
       ctx.restore();
       pushHistory();
     });
@@ -235,7 +239,10 @@ function updateBrushPreview(){
     dot.style.height=dot.style.width; 
   }
 }
-
+function getPaperColor(){
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue("--paper").trim() || "#f3efe6";
+}
 // --- Raccourcis ---
 function addShortcuts(){
   window.addEventListener("keydown", e=>{
@@ -248,6 +255,30 @@ async function handleComment(){
   const btn = document.getElementById("commentBtn");
   const result = document.getElementById("result");
 
+  // Effet machine à écrire (léger)
+  function typeInto(el, text, speed = 18){
+    return new Promise(resolve=>{
+      // reset propre
+      el.classList.remove("hidden");
+      el.textContent = "";
+      const cursor = document.createElement("span");
+      cursor.className = "cursor";
+      cursor.textContent = "▍";
+      el.appendChild(cursor);
+
+      let i = 0;
+      (function tick(){
+        if (i < text.length){
+          cursor.insertAdjacentText("beforebegin", text[i++]);
+          setTimeout(tick, speed);
+        } else {
+          resolve();
+        }
+      })();
+    });
+  }
+
+  // Affiche immédiatement un message (sans typing)
   const show = (text) => {
     result.textContent = text;
     result.classList.remove("hidden");
@@ -257,32 +288,43 @@ async function handleComment(){
     btn.disabled = true;
     btn.textContent = "Ça réfléchit…";
     result.classList.add("hidden");
+    result.textContent = "";
 
-    // Assure un fond blanc puis compresse *fort* (max 768px, JPEG q=0.72)
+    // Assure un fond "papier" puis compresse fort (max 768px, JPEG q=0.72)
     fillPaperBackground();
     const dataUrl = await toResizedDataURL(canvas, 768, 0.72);
 
     const res = await fetch("/api/comment", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type":"application/json" },
       body: JSON.stringify({ imageDataUrl: dataUrl })
     });
 
     if (!res.ok) {
-      // essaie d’extraire un message serveur
       let serverMsg = "";
       try { serverMsg = await res.text(); } catch {}
-      show(`Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`);
+      await typeInto(result, `Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`);
       return;
     }
 
     const data = await res.json().catch(() => ({}));
-    const comment = (data && data.comment ? String(data.comment) : "").trim();
+    const comment = (data && data.comment ? String(data.comment) : "").trim()
+                   || "Par les nuages sacrés, ton art rayonne !";
 
-    show(comment || "Par les nuages sacrés, ton art rayonne !");
+    result.classList.remove("hidden");
+
+    // Accessibilité : si motion réduite, pas d'animation
+    if (prefersReducedMotion()){
+      result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
+    } else {
+      await typeInto(result, comment || "Par les nuages sacrés, ton art rayonne !", 16);
+    }
+
+    // Effet de frappe pour le commentaire
   } catch (err){
     console.error(err);
-    show("Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.");
+    result.classList.remove("hidden");
+    result.textContent = "Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.";
   } finally {
     btn.disabled = false;
     btn.textContent = "Obtenir mon commentaire";
@@ -314,4 +356,27 @@ function downloadImage(){
   a.href=url; 
   a.download="mon_dessin.png"; 
   a.click();
+}
+// --- Effet de dactylo (typewriter)
+function prefersReducedMotion(){
+  return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+let __typeTicket = 0; // pour annuler une frappe en cours si on reclique
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+async function typeInto(el, text, speedMs = 18){
+  el.textContent = '';
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  cursor.textContent = '▍';
+  el.appendChild(cursor);
+
+  const myTicket = ++__typeTicket;
+  for (let i = 0; i < text.length; i++){
+    if (myTicket !== __typeTicket) return; // annulé par un nouveau clic
+    cursor.insertAdjacentText('beforebegin', text[i]);
+    await sleep(speedMs);
+  }
+  cursor.remove();
 }

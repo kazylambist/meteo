@@ -7,20 +7,60 @@
   <meta name="color-scheme" content="light dark" />
   <style>
     :root{
-      --bg:#ffffff; --fg:#0f172a; --muted:#64748b; --accent:#6366f1; --card:#f8fafc; --border:#e2e8f0;
-      --paper:#f7f5f0; /* teinte papier ancien */
+      /* Thème clair */
+      --bg:#fafafa;       /* fond global doux */
+      --fg:#0e1726;       /* texte principal */
+      --muted:#5b6b7f;    /* texte secondaire */
+      --accent:#5b6ee1;   /* accent bleu-violet */
+      --card:#ffffff;     /* cartes / barres */
+      --border:#e7ecf2;   /* bordures */
+      --paper:#f3efe6;    /* "papier ancien" clair */
+
+      /* Commentaire (typewriter) */
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --cmt-text:#24405f;            /* bleu-gris doux */
+      --cmt-halo:0 0 14px rgba(36,64,95,.35), 0 0 28px rgba(36,64,95,.20);
     }
+
+    /* Variante sombre... mais lumineuse */
     @media (prefers-color-scheme: dark){
       :root{
-        --bg:#0b1220; --fg:#e5e7eb; --muted:#94a3b8; --accent:#8b5cf6; --card:#111827; --border:#1f2937;
-        --paper:#2a2a28; /* variante sombre lisible (chaude) */
+        --bg:#f2f4f7;     /* clair même en dark mode */
+        --fg:#101828;     /* texte un peu plus sombre pour le contraste */
+        --muted:#475467;
+        --accent:#6b7cff; /* accent un peu plus vibrant */
+        --card:#ffffff;   /* cartes blanches pour la lisibilité */
+        --border:#d7dee8;
+        --paper:#efe9dc;  /* papier légèrement chaud, très lisible */
+
+        --cmt-text:#2a4060;
+        --cmt-halo:0 0 14px rgba(42,64,96,.35), 0 0 28px rgba(42,64,96,.20);
       }
     }
 
     *{ box-sizing:border-box }
     body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--fg) }
     .container{ max-width:980px; margin:0 auto; padding:16px 20px 48px }
-    .page-title{ font-size:clamp(22px,3vw,32px); font-weight:800; letter-spacing:-.02em; margin:12px 0 18px }
+
+    /* Header avec logo à gauche et titre centré */
+    .site-header{
+      display: grid;
+      grid-template-columns: auto 1fr auto; /* logo | titre | espace */
+      align-items: center;
+      gap: 12px;
+      margin: 12px 0 18px;
+    }
+    .page-title{
+      margin: 0;
+      text-align: center;
+      justify-self: center;
+      font-size: clamp(22px,3vw,32px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .topbar-logo-link{ display: inline-block; line-height: 0; }
+    .brand-logo{ height: 36px; width: auto; display: block; }
+    @media (min-width: 900px){ .brand-logo{ height: 40px; } }
 
     .toolbar,.footerbar{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); padding:12px; border-radius:14px }
     .toolbar{ margin-bottom:12px }
@@ -36,8 +76,6 @@
     #stage{ position:relative; background:var(--paper); border:1px solid var(--border); border-radius:16px; overflow:hidden }
     canvas{ width:100%; height:auto; display:block; touch-action:none; background:var(--paper) }
 
-    .bubble{ margin-top:12px; padding:14px 16px; border-radius:16px; border:1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-family:"Comic Sans MS","Comic Neue",system-ui,sans-serif; font-size:clamp(16px,2.4vw,20px) }
-    .bubble::before{ content:"💬 " }
     .hint{ font-size:13px; color:var(--muted); margin-top:6px }
     .spacer{ flex:1 1 auto }
     .color-swatch{ width:28px; height:28px; border-radius:50%; border:2px solid var(--border); cursor:pointer }
@@ -46,25 +84,24 @@
     .range input[type="range"]{ width:160px }
     .dot{ width:20px; height:20px; border-radius:50%; border:1px solid var(--border); background:var(--fg) }
     .hidden{ display:none !important }
-    /* Header avec logo à gauche et titre centré */
-    .site-header{
-      display: grid;
-      grid-template-columns: auto 1fr auto; /* logo | titre | espace */
-      align-items: center;
-      gap: 12px;
-      margin: 12px 0 18px;
+
+    /* Commentaire à la “intro” (ligne tapée) */
+    .comment-line{
+      margin: 6px 0 12px;
+      text-align:center;
+      font: 700 clamp(18px, 2.2vw, 24px)/1.35 var(--mono);
+      color: var(--cmt-text);
+      text-shadow: var(--cmt-halo);
+      white-space: pre-wrap;
+      min-height: 1.6em; /* évite le saut de layout avant affichage */
     }
-    .site-header .page-title{
-      margin: 0;                 /* écrase la marge globale du .page-title */
-      text-align: center;
-      justify-self: center;      /* centre dans la cellule 2 */
-      font-size: clamp(22px,3vw,32px);
-      font-weight: 800;
-      letter-spacing: -0.02em;
+    .cursor{
+      display:inline-block;
+      width:.6ch;
+      margin-left:2px;
+      animation: blink 1s steps(1,end) infinite;
     }
-    .topbar-logo-link{ display: inline-block; line-height: 0; }
-    .brand-logo{ height: 36px; width: auto; display: block; }
-    @media (min-width: 900px){ .brand-logo{ height: 40px; } }
+    @keyframes blink { 50% { opacity: 0; } }
   </style>
 </head>
 <body>
@@ -73,7 +110,7 @@
       <a class="topbar-logo-link" href="/ppp" aria-label="Aller aux prévisions (PPP)">
         <img src="/static/img/weather_bets_S.png" alt="MétéoGod" class="brand-logo">
       </a>
-      <h1 class="page-title">Dessin</h1>
+      <h1 class="page-title">Faire un offrande à Zeus</h1>
       <div class="header-spacer" aria-hidden="true"></div>
     </header>
 
@@ -106,10 +143,10 @@
       <div class="tool-group">
         <button id="commentBtn">Obtenir mon commentaire</button>
       </div>
-      <p id="commentOut" style="margin-top:8px;"></p>
     </div>
 
-    <div id="result" class="bubble hidden" aria-live="polite"></div>
+    <!-- Nouveau conteneur pour le commentaire, AU-DESSUS du canvas -->
+    <div id="result" class="comment-line hidden" aria-live="polite"></div>
 
     <div id="stage">
       <canvas id="pad" width="1200" height="800" aria-label="Surface de dessin"></canvas>
