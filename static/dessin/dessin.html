@@ -110,9 +110,16 @@
       <a class="topbar-logo-link" href="/ppp" aria-label="Aller aux prévisions (PPP)">
         <img src="/static/img/weather_bets_S.png" alt="MétéoGod" class="brand-logo">
       </a>
-      <h1 class="page-title">Faire un offrande à Zeus</h1>
+      <h1 class="page-title"></h1>
       <div class="header-spacer" aria-hidden="true"></div>
     </header>
+
+    <!-- Nouveau conteneur pour le commentaire, AU-DESSUS du canvas -->
+    <div id="result" class="comment-line hidden" aria-live="polite"></div>
+
+    <div id="stage">
+      <canvas id="pad" width="1200" height="800" aria-label="Surface de dessin"></canvas>
+    </div>
 
     <div class="toolbar" role="toolbar" aria-label="Outils de dessin">
       <div class="tool-group" aria-label="Couleurs">
@@ -143,13 +150,6 @@
       <div class="tool-group">
         <button id="commentBtn">Obtenir mon commentaire</button>
       </div>
-    </div>
-
-    <!-- Nouveau conteneur pour le commentaire, AU-DESSUS du canvas -->
-    <div id="result" class="comment-line hidden" aria-live="polite"></div>
-
-    <div id="stage">
-      <canvas id="pad" width="1200" height="800" aria-label="Surface de dessin"></canvas>
     </div>
 
     <div class="footerbar" style="margin-top:14px">
