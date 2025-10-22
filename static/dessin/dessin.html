@@ -39,34 +39,33 @@
       }
     }
 
-    *{ box-sizing:border-box }
-    body{
-      margin:0;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji";
-      /* background:var(--bg);  <-- à enlever */
-      background: transparent;   /* <-- transparent pour voir le wallpaper */
-      color:var(--fg);
-      position: relative;        /* <-- nécessaire pour le z-index du ::before */
-    }
-    /* 2) Wallpaper : remonte au-dessus du fond du body */
-    body::before{
-      content:"";
-      position: fixed;
-      inset: 0;
-      z-index: 0;  /* <-- au lieu de -1 */
+    /* 1) Le wallpaper est peint sur <html> (plein écran, fixe) */
+    html{
+      min-height: 100%;
       background:
+    /* voile clair par-dessus l'image */
         linear-gradient(0deg, rgba(255,255,255,.75), rgba(255,255,255,.75)),
-        url("/static/cabine/img/ciel1.jpg") center/cover no-repeat fixed;
+        url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
     }
+
+    /* Variante “sombre mais claire” */
     @media (prefers-color-scheme: dark){
-      body::before{
+      html{
         background:
           linear-gradient(0deg, rgba(242,244,247,.85), rgba(242,244,247,.85)),
-          url("/static/cabine/img/ciel1.jpg") center/cover no-repeat fixed;
+          url("/static/cabine/img/ciel1.jpg") center / cover no-repeat fixed;
       }
     }
 
-    /* (facultatif, mais souvent utile pour être certain que le contenu passe devant) */
+    /* 2) Le body ne couvre pas le fond */
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji";
+      background: transparent;   /* <- important */
+      color:var(--fg);
+    }
+
+    /* 3) Assure que le contenu passe “devant” (utile si d’autres couches existent) */
     .container{ position: relative; z-index: 1; }
 
     /* Header avec logo à gauche et titre centré */
