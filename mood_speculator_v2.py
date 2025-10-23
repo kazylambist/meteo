@@ -6068,8 +6068,7 @@ def users_heartbeat():
 def users_ping():
     return users_heartbeat()
 
-# --- /api/comment (chat.completions + vision, robuste) ---
-import os, re, io, sys, base64, traceback
+import os, re, io, sys, base64, traceback, random
 from flask import request, jsonify
 from PIL import Image
 
@@ -6108,6 +6107,27 @@ def _openai_client():
 @app.post("/api/comment/ping")
 def api_comment_ping():
     return jsonify({"ok": True})
+
+def _pick_verdict() -> str:
+    """1/13 'J’accepte ton dessin.' ; 12/13 'Je déteste.'"""
+    return "J’accepte ton dessin." if random.randrange(13) == 0 else "Je déteste."
+
+def _compose_with_limit(base_text: str, verdict: str, limit: int = 268) -> str:
+    """Concatène base + verdict en respectant la limite de caractères."""
+    base = (base_text or "").strip()
+    v = verdict.strip()
+    # Séparateur : ajoute un espace si besoin
+    sep = "" if (not base or base.endswith((" ", " "))) else " "
+    full = base + sep + v
+    if len(full) <= limit:
+        return full
+    # Trop long -> on rogne la partie base et on garde le verdict intact
+    keep = limit - len(v) - len(sep)
+    if keep <= 0:
+        # Au pire, renvoyer seulement le verdict tronqué (très improbable)
+        return (v[:limit]).rstrip()
+    trimmed = base[:max(0, keep - 1)].rstrip() + "…"
+    return trimmed + sep + v
 
 @app.post("/api/comment")
 def api_comment():
@@ -6148,13 +6168,14 @@ def api_comment():
         client = _openai_client()
         model_name = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
+        # On demande explicitement de NE PAS inclure la phrase finale.
+        # On laisse ~220-230 car pour garder de la marge au verdict et à l’éventuelle troncature.
         system_prompt = (
             "Tu es Zeus, dieu des cieux et du tonnerre.\n"
-            "Rédige UN commentaire très court, 268 caractères maximum (espaces et ponctuation inclus), en français soutenu, majestueux et élégant.\n"
-            "Commence par décrire le dessin.\n"
-            "Fais une petite référence météorolgique\n"
-            "et critique le talent artistique de l'utilisateur qui n'est pas à la hauteur de tes attentes.\n"
-            "Tire au sort : Il y a une chance sur deux pour que ta dernière phrase soit 'J'accepte ton dessin', sinon c'est 'Je déteste'."
+            "Rédige UN commentaire très court (≈220 caractères max), en français soutenu, majestueux et élégant.\n"
+            "Commence par décrire le dessin; ajoute une subtile référence météorologique; "
+            "exprime une critique courtoise (exigeante) du talent artistique.\n"
+            "IMPORTANT: N'inclus PAS la phrase finale de verdict ; ne conclus PAS par 'J’accepte ton dessin.' ni 'Je déteste.'"
         )
 
         # messages = chat.completions (vision via image_url -> Data URL)
@@ -6169,13 +6190,16 @@ def api_comment():
         resp = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            max_tokens=80,
+            max_tokens=120,   # un peu de marge
             temperature=0.9,
         )
 
-        comment = (resp.choices[0].message.content or "").strip()
-        if not comment:
-            comment = "Par les nuages sacrés, ton art rayonne !"
+        base_comment = (resp.choices[0].message.content or "").strip()
+        if not base_comment:
+            base_comment = "Par les nuages sacrés, ton art rayonne !"
+
+        verdict = _pick_verdict()  # 1/13 vs 12/13
+        comment = _compose_with_limit(base_comment, verdict, limit=268)
 
         return jsonify({"comment": comment})
 
@@ -6191,7 +6215,7 @@ def api_comment():
 def comment_echo():
     payload = request.get_json(silent=True) or {}
     data = (payload.get("imageDataUrl") or "")
-    return {"len": len(data), "head": data[:32]}, 200    
+    return {"len": len(data), "head": data[:32]}, 200  
 
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user
