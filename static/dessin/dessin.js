@@ -327,7 +327,7 @@ async function handleComment(){
     result.textContent = "Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.";
   } finally {
     btn.disabled = false;
-    btn.textContent = "Obtenir mon commentaire";
+    btn.textContent = "Montrer à ZEUS";
   }
 }
 
