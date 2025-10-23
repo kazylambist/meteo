@@ -6202,7 +6202,7 @@ def api_comment():
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
         return jsonify({
-          "comment": comment
+          "comment": comment,
           "verdict": verdict
         })
 
