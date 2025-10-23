@@ -241,7 +241,7 @@ function updateBrushPreview(){
 }
 function getPaperColor(){
   return getComputedStyle(document.documentElement)
-    .getPropertyValue("--paper").trim() || "#f3efe6";
+    .getPropertyValue("--paper").trim() || "#000000";  // noir par défaut
 }
 // --- Raccourcis ---
 function addShortcuts(){
