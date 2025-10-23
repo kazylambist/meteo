@@ -1703,6 +1703,14 @@ button.danger:hover{ background:#fff2f2; }
   0%,100% { box-shadow: 0 0 0 2px rgba(0,160,0,.12), 0 0 6px rgba(0,160,0,.22); }
   50%     { box-shadow: 0 0 0 2px rgba(0,160,0,.16), 0 0 10px rgba(0,160,0,.36); }
 }
+body.ppp-page {
+  background:
+    url("/static/trade/bg.jpg") center center / cover no-repeat,
+    radial-gradient(1200px 900px at 80% -10%, #0e1430 0%, transparent 55%),
+    radial-gradient(900px 700px at -10% 110%, #191f3b 0%, transparent 55%),
+    linear-gradient(180deg, var(--bg), var(--bg2) 60%, var(--bg) 100%);
+  background-attachment: fixed;
+}
 </style>
 """
 
@@ -2216,6 +2224,7 @@ AUTH_HTML = """
 PPP_HTML = """
 <!doctype html><html lang='fr'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<link rel="preload" as="image" href="/static/trade/bg.jpg">
 <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2" type="image/x-icon">
 <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=2">
 <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=2">
