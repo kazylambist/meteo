@@ -2332,7 +2332,11 @@ PPP_HTML = """
             <span class="caret">▾</span>
           </button>
           <div class="user-dropdown" id="userDropdown" role="menu">
-            <a class="item" href="{{ url_for('cabine_page') }}">Profil</a>
+            <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>
+            <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
+            <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
+            <a class="item" href="/carte">Carte 🗺️</a>
+            <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
             <div class="submenu">
               <button class="item submenu-toggle" id="optionsBtn" type="button">Options ▸</button>
               <div class="submenu-panel" id="optionsMenu" hidden>
@@ -2341,8 +2345,7 @@ PPP_HTML = """
                   <button type="submit" class="danger">Supprimer ce compte</button>
                 </form>
               </div>
-            </div>
-            <a class="item" href="{{ url_for('wet') }}">Wet</a>
+            </div>       
             <a class="item" href="/logout">Se déconnecter</a>
           </div>
         </div>
@@ -2352,19 +2355,6 @@ PPP_HTML = """
       {% endif %}
 
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
-      <a class="brand-map" href="/carte">🗺️</a>
-      <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
-         href="{{ url_for('cabine_page') }}"></a>
-      <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
-         href="{{ url_for('trade_page') }}">🤝</a>
-      <a id="trade-unread"
-         class="badge-unread"
-         href="{{ url_for('trade_page') }}"
-         aria-label="Aller au marché (Trade)"
-         style="display:none; margin-left:.5rem;">
-        NOUVEAU MESSAGE
-      </a>
-      <a href="/static/dessin/dessin.html">🎨</a>
     </div>
   </div>
 </nav>
