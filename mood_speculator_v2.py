@@ -2297,12 +2297,32 @@ PPP_HTML = """
   .user-dropdown .item.disabled{
     opacity: .5; cursor: default; pointer-events: none;
   }
+
   /* Pousse le lien Cabine tout à droite sur PPP */
   .topbar .nav-right { display: flex; align-items: center; }
   .topbar .nav-right a[href^="/🧢"] { margin-left: auto; }
 
   /* (optionnel) un petit espace fixe entre Carte et le bord avant Cabine */
   .topbar .nav-right .brand-map { margin-right: 1px; }
+
+  /* Fullscreen background image derrière tout */
+  body.trade-page::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    z-index:-2;
+    background:
+      linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.25)),
+      url("/static/trade/bg.jpg") center / cover no-repeat fixed;
+  }
+  body.trade-page::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:-1;
+  background: radial-gradient(100% 120% at 50% 0%, rgba(7,25,46,.35) 0%, rgba(7,25,46,.75) 100%);
+  pointer-events:none;
+  }
 </style>
 </head><body>
 <div class="stars"></div>
