@@ -31,12 +31,43 @@ body.trade-page::after{
 }
 
 /* ---- Topbar ---- */
-.topbar{position:sticky;top:0;background:rgba(0,0,0,.25);backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.08)}
-.topbar .container{display:flex;align-items:center;gap:12px;padding:12px 16px}
-.topbar .brand{font-weight:800; color:#79e7ff; text-decoration:none}
-.topbar .spacer{flex:1}
-.topbar .navlink{color:var(--ink); text-decoration:none; padding:8px 10px; border-radius:8px}
-.topbar .navlink.active{background:rgba(255,255,255,.08)}
+.topbar {
+  position: sticky;
+  top: 0;
+  background: rgba(6,7,12,.55);              /* même ton que PPP */
+  backdrop-filter: saturate(120%) blur(8px); /* flou et saturation */
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 0 20px rgba(0,0,0,.3);       /* légère profondeur comme PPP */
+  z-index: 10;
+}
+.topbar .container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.topbar .brand {
+  font-weight: 800;
+  color: #79e7ff; /* accent cyan, cohérent avec PPP */
+  text-decoration: none;
+  text-shadow: 0 0 32px rgba(121,231,255,.25), 0 0 4px rgba(121,231,255,.6);
+}
+.topbar .spacer {
+  flex: 1;
+}
+.topbar .navlink {
+  color: var(--ink);
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  transition: background .2s ease, color .2s ease;
+}
+.topbar .navlink:hover {
+  color: #79e7ff;
+}
+.topbar .navlink.active {
+  background: rgba(255,255,255,.08);
+}
 
 /* ---- Layout colonnes ---- */
 .trade-layout{
