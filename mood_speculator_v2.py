@@ -6109,8 +6109,8 @@ def api_comment_ping():
     return jsonify({"ok": True})
 
 def _pick_verdict() -> str:
-    """1/13 'J’accepte ton dessin.' ; 12/13 'Je déteste.'"""
-    return "J’accepte ton dessin." if random.randrange(13) == 0 else "Je déteste."
+    """1/13 'Beau dessin.' ; 12/13 'Je déteste.'"""
+    return "Beau dessin." if random.randrange(13) == 0 else "Je déteste."
 
 def _compose_with_limit(base_text: str, verdict: str, limit: int = 268) -> str:
     """Concatène base + verdict en respectant la limite de caractères."""
@@ -6175,7 +6175,7 @@ def api_comment():
             "Rédige UN commentaire très court (≈220 caractères max), en français soutenu, majestueux et élégant.\n"
             "Commence par décrire le dessin; ajoute une subtile référence météorologique; "
             "exprime une critique courtoise (exigeante) du talent artistique.\n"
-            "IMPORTANT: N'inclus PAS la phrase finale de verdict ; ne conclus PAS par 'J’accepte ton dessin.' ni 'Je déteste.'"
+            "IMPORTANT: N'inclus PAS la phrase finale de verdict ; ne conclus PAS par 'Beau dessin.' ni 'Je déteste.'"
         )
 
         # messages = chat.completions (vision via image_url -> Data URL)

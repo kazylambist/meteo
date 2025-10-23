@@ -317,7 +317,7 @@ async function handleComment(){
     if (data && data.verdict) {
       let audioFile = null;
 
-      if (data.verdict === "J'accepte ton dessin.") {
+      if (data.verdict === "Beau dessin.") {
         audioFile = "/static/audio/oui.mp3";
       } else if (data.verdict === "Je déteste.") {
         audioFile = "/static/audio/non.mp3";
