@@ -2332,9 +2332,9 @@ PPP_HTML = """
             <span class="caret">▾</span>
           </button>
           <div class="user-dropdown" id="userDropdown" role="menu">
-            <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>
             <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
             <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
+            <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>            
             <a class="item" href="/carte">Carte 🗺️</a>
             <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
             <div class="submenu">
@@ -2353,8 +2353,14 @@ PPP_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}
-
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
+      <a id="trade-unread"
+         class="badge-unread"
+         href="{{ url_for('trade_page') }}"
+         aria-label="Aller au marché (Trade)"
+         style="display:none; margin-left:.5rem;">
+        NOUVEAU MESSAGE
+      </a>      
     </div>
   </div>
 </nav>
@@ -3951,8 +3957,11 @@ CARTE_HTML = """
             <span class="caret">▾</span>
           </button>
           <div class="user-dropdown" id="userDropdown" role="menu">
-            <a class="item"
-               href="{{ url_for('cabine_page') }}">Profil</a>
+            <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
+            <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
+            <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>            
+            <a class="item" href="/carte">Carte 🗺️</a>
+            <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
             <a class="item" href="/logout">Se déconnecter</a>
           </div>
         </div>
@@ -3960,13 +3969,13 @@ CARTE_HTML = """
         <a href="/register">Créer un compte</a>
         <a href="/login">Se connecter</a>
       {% endif %}      
-      <a class="brand-map" href="/carte">🗺️</a>
-      <a class="nav-link {{ 'active' if request.path.startswith('/cabine') else '' }}"
-         href="{{ url_for('cabine_page') }}"></a>
-      <a class="nav-link {{ 'active' if request.path.startswith('/trade') else '' }}"
-         href="{{ url_for('trade_page') }}">🤝</a>
-      <span id="trade-unread" style="display:none; margin-left:.5rem; font-weight:600; color:#0a0; font-size:.9em;">
+      <a id="trade-unread"
+         class="badge-unread"
+         href="{{ url_for('trade_page') }}"
+         aria-label="Aller au marché (Trade)"
+         style="display:none; margin-left:.5rem;">
         NOUVEAU MESSAGE
+      </a>
       </span>
     </div>
   </div>
