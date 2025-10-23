@@ -2332,20 +2332,6 @@ PPP_HTML = """
   background: radial-gradient(100% 120% at 50% 0%, rgba(7,25,46,.35) 0%, rgba(7,25,46,.75) 100%);
   pointer-events:none;
   }
-  /* Rendre la fenêtre du calendrier (la carte autour du ppp-grid) transparente */
-  .card {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-  }
-
-  /* Garde les jours (ppp-day) visibles et lisibles */
-  .ppp-day {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-  }
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
