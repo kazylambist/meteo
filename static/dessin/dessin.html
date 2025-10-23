@@ -71,23 +71,14 @@
     /* Header avec logo à gauche et titre centré */
     .site-header{
       display: grid;
-      grid-template-columns: auto 1fr auto; /* logo | titre | actions */
+      grid-template-columns: 1fr auto 1fr; /* gauche | CENTRE | droite */
       align-items: center;
       gap: 12px;
       margin: 12px 0 18px;
     }
-    .site-header .page-title{
-      margin: 0;
+    .center-action{
+      justify-self: center;   /* centre l’élément dans la colonne du milieu */
       text-align: center;
-      justify-self: center;
-      font-size: clamp(22px,3vw,32px);
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-    .header-actions{
-      display: flex;
-      align-items: center;
-      gap: 10px;
     }
     .topbar-logo-link{ display: inline-block; line-height: 0; }
     .brand-logo{ height: 36px; width: auto; display: block; }
@@ -99,11 +90,11 @@
       flex-wrap:wrap;
       gap:10px;
       align-items:center;
-      background: color-mix(in srgb, var(--card) 85%, transparent);
-      border:1px solid var(--border);
+      background: transparent;
+      border: 0px;
       padding:12px;
       border-radius:14px;
-      backdrop-filter: blur(4px);
+      backdrop-filter: none;
       margin-top: 12px;
     }
     .footerbar{
@@ -153,7 +144,7 @@
     .spacer{ flex:1 1 auto }
     .color-swatch{ width:28px; height:28px; border-radius:50%; border:2px solid var(--border); cursor:pointer }
     .color-swatch.selected{ outline:3px solid var(--accent) }
-    .range{ display:inline-flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--border); padding:6px 10px; border-radius:12px }
+    .range{ display:inline-flex; align-items:center; gap:8px; background:transparent; border:1px solid var(--border); padding:6px 10px; border-radius:12px }
     .range input[type="range"]{ width:160px }
     .dot{ width:20px; height:20px; border-radius:50%; border:1px solid var(--border); background:var(--fg) }
     .hidden{ display:none !important }
