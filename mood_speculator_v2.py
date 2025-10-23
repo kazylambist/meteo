@@ -2333,7 +2333,7 @@ PPP_HTML = """
   pointer-events:none;
   }
 </style>
-</head><body>
+</head><body class="trade-page">
 <div class="stars"></div>
 
 <nav>
