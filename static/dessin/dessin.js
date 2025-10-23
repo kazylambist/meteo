@@ -32,13 +32,11 @@ function setupDPR() {
 }
 window.addEventListener("resize", setupDPR);
 
-// --- Fond blanc (évite la transparence) ---
+// --- Fond pour export ou commentaire ---
 function fillPaperBackground() {
-  const col = getComputedStyle(document.documentElement)
-                .getPropertyValue('--paper').trim() || '#E9E3D6';
+  const col = getPaperColor();
   ctx.save();
-  // place un aplat en-dessous de tout ce qui existe
-  ctx.globalCompositeOperation = "destination-over";
+  ctx.globalCompositeOperation = "destination-over"; // applique derrière le dessin
   ctx.fillStyle = col;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
@@ -46,19 +44,13 @@ function fillPaperBackground() {
 
 // --- Init ---
 function init() {
-  // Option A: ne rien peindre (le fond CSS du canvas fera foi)
-  // ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  // Option B: peindre la toile au démarrage :
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = getPaperColor();   // <-- au lieu de "#ffffff"
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.restore();
-
-  setupDPR(); pushHistory(); bindTools(); updateBrushPreview(); addShortcuts();
+  current.color = document.querySelector(".color-swatch.selected")?.dataset.color || "#111827";
+  setupDPR(); 
+  pushHistory(); 
+  bindTools(); 
+  updateBrushPreview(); 
+  addShortcuts();
 }
-// si fonts API dispo, attend sa dispo ; sinon, init direct
 document.fonts ? document.fonts.ready.then(init) : init();
 
 // --- Dessin ---
@@ -84,6 +76,7 @@ function pointerUp(){
   pushHistory(); 
 }
 
+// --- Coordonnées ---
 function getCanvasXY(evt){
   const rect=canvas.getBoundingClientRect(); 
   const dpr=Math.max(1,window.devicePixelRatio||1);
@@ -99,6 +92,7 @@ function getCanvasXY(evt){
   return {x,y};
 }
 
+// --- Events ---
 canvas.addEventListener("mousedown", e=>{ const {x,y}=getCanvasXY(e); pointerDown(x,y); });
 canvas.addEventListener("mousemove", e=>{ const {x,y}=getCanvasXY(e); pointerMove(x,y); });
 canvas.addEventListener("mouseup", pointerUp);
@@ -139,7 +133,6 @@ function restoreFromDataURL(dataUrl){
 
 // --- Outils UI ---
 function bindTools(){
-  // couleurs prédéfinies
   document.querySelectorAll(".color-swatch").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const color=btn.getAttribute("data-color");
@@ -151,7 +144,6 @@ function bindTools(){
     });
   });
 
-  // color picker
   const colorPicker=document.getElementById("colorPicker");
   if (colorPicker) {
     colorPicker.addEventListener("input", e=>{ 
@@ -160,15 +152,9 @@ function bindTools(){
     });
   }
 
-  // taille pinceau
   const brushSize=document.getElementById("brushSize");
-  if (brushSize) {
-    brushSize.addEventListener("input", e=>{ 
-      setSize(parseInt(e.target.value,10)); 
-    });
-  }
+  if (brushSize) brushSize.addEventListener("input", e=>{ setSize(parseInt(e.target.value,10)); });
 
-  // gomme
   const eraserBtn = document.getElementById("eraser");
   if (eraserBtn) {
     eraserBtn.addEventListener("click", ()=>{
@@ -177,7 +163,6 @@ function bindTools(){
     });
   }
 
-  // actions
   const undoBtn = document.getElementById("undo");
   if (undoBtn) undoBtn.addEventListener("click", undo);
   const redoBtn = document.getElementById("redo");
@@ -198,23 +183,18 @@ function bindTools(){
   const dlBtn = document.getElementById("download");
   if (dlBtn) dlBtn.addEventListener("click", downloadImage);
 
-  // --- Bouton commentaire ---
   const commentBtn = document.getElementById("commentBtn");
   if (commentBtn) {
-    // crée/retourne un élément résultat à côté du bouton si absent
     const resultEl = ensureResultElement(commentBtn);
     commentBtn.addEventListener("click", () => handleComment(commentBtn, resultEl));
   }
 }
-
-// crée un <p id="result"> à côté du bouton si aucun trouvé
 function ensureResultElement(anchorBtn){
   let out = document.getElementById("result");
   if (!out) {
     out = document.createElement("p");
     out.id = "result";
     out.style.marginTop = "8px";
-    // insère juste après le bouton
     anchorBtn.insertAdjacentElement('afterend', out);
   }
   return out;
@@ -241,8 +221,9 @@ function updateBrushPreview(){
 }
 function getPaperColor(){
   return getComputedStyle(document.documentElement)
-    .getPropertyValue("--paper").trim() || "#000000";  // noir par défaut
+    .getPropertyValue("--paper").trim() || "#E9E3D6";
 }
+
 // --- Raccourcis ---
 function addShortcuts(){
   window.addEventListener("keydown", e=>{
@@ -251,38 +232,24 @@ function addShortcuts(){
   });
 }
 
+// --- Commentaires ---
 async function handleComment(){
   const btn = document.getElementById("commentBtn");
   const result = document.getElementById("result");
 
-  // Effet machine à écrire (léger)
-  function typeInto(el, text, speed = 18){
-    return new Promise(resolve=>{
-      // reset propre
-      el.classList.remove("hidden");
-      el.textContent = "";
-      const cursor = document.createElement("span");
-      cursor.className = "cursor";
-      cursor.textContent = "▍";
-      el.appendChild(cursor);
-
-      let i = 0;
-      (function tick(){
-        if (i < text.length){
-          cursor.insertAdjacentText("beforebegin", text[i++]);
-          setTimeout(tick, speed);
-        } else {
-          resolve();
-        }
-      })();
-    });
+  function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+  async function typeInto(el, text, speedMs = 18){
+    el.textContent = '';
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    cursor.textContent = '▍';
+    el.appendChild(cursor);
+    for (let i=0;i<text.length;i++){
+      cursor.insertAdjacentText('beforebegin', text[i]);
+      await sleep(speedMs);
+    }
+    cursor.remove();
   }
-
-  // Affiche immédiatement un message (sans typing)
-  const show = (text) => {
-    result.textContent = text;
-    result.classList.remove("hidden");
-  };
 
   try{
     btn.disabled = true;
@@ -290,7 +257,6 @@ async function handleComment(){
     result.classList.add("hidden");
     result.textContent = "";
 
-    // Assure un fond "papier" puis compresse fort (max 768px, JPEG q=0.72)
     fillPaperBackground();
     const dataUrl = await toResizedDataURL(canvas, 768, 0.72);
 
@@ -312,31 +278,11 @@ async function handleComment(){
                    || "Par les nuages sacrés, ton art rayonne !";
 
     result.classList.remove("hidden");
-
-    // --- 🔊 Lecture du son selon le verdict ---
-    if (data && data.verdict) {
-      let audioFile = null;
-
-      if (data.verdict === "Beau dessin.") {
-        audioFile = "/static/audio/oui.mp3";
-      } else if (data.verdict === "Je déteste.") {
-        audioFile = "/static/audio/non.mp3";
-      }
-
-      if (audioFile) {
-        const audio = new Audio(audioFile);
-        audio.play().catch(err => console.warn("Erreur lecture audio:", err));
-      }
-    }
-
-    // Accessibilité : si motion réduite, pas d'animation
     if (prefersReducedMotion()){
-      result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
+      result.textContent = comment;
     } else {
-      await typeInto(result, comment || "Par les nuages sacrés, ton art rayonne !", 16);
+      await typeInto(result, comment, 16);
     }
-
-    // Effet de frappe pour le commentaire
   } catch (err){
     console.error(err);
     result.classList.remove("hidden");
@@ -347,7 +293,11 @@ async function handleComment(){
   }
 }
 
-// --- Redimensionnement + encodage JPEG ---
+function prefersReducedMotion(){
+  return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// --- Export/Download ---
 function toResizedDataURL(srcCanvas, maxSide=1024, quality=0.85){
   return new Promise((resolve)=>{
     const w=srcCanvas.width, h=srcCanvas.height;
@@ -364,7 +314,6 @@ function toResizedDataURL(srcCanvas, maxSide=1024, quality=0.85){
   });
 }
 
-// --- Download ---
 function downloadImage(){
   fillPaperBackground();
   const url=canvas.toDataURL("image/png");
@@ -372,27 +321,4 @@ function downloadImage(){
   a.href=url; 
   a.download="mon_dessin.png"; 
   a.click();
-}
-// --- Effet de dactylo (typewriter)
-function prefersReducedMotion(){
-  return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-let __typeTicket = 0; // pour annuler une frappe en cours si on reclique
-function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
-
-async function typeInto(el, text, speedMs = 18){
-  el.textContent = '';
-  const cursor = document.createElement('span');
-  cursor.className = 'cursor';
-  cursor.textContent = '▍';
-  el.appendChild(cursor);
-
-  const myTicket = ++__typeTicket;
-  for (let i = 0; i < text.length; i++){
-    if (myTicket !== __typeTicket) return; // annulé par un nouveau clic
-    cursor.insertAdjacentText('beforebegin', text[i]);
-    await sleep(speedMs);
-  }
-  cursor.remove();
 }
