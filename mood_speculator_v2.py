@@ -6201,7 +6201,10 @@ def api_comment():
         verdict = _pick_verdict()  # 1/13 vs 12/13
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
-        return jsonify({"comment": comment})
+        return jsonify({
+          "comment": comment
+          "verdict": verdict
+        })
 
     except Exception as e:
         print("[/api/comment] ERROR:", repr(e), file=sys.stderr)

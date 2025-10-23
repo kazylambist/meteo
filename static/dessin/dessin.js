@@ -313,6 +313,22 @@ async function handleComment(){
 
     result.classList.remove("hidden");
 
+    // --- 🔊 Lecture du son selon le verdict ---
+    if (data && data.verdict) {
+      let audioFile = null;
+
+      if (data.verdict === "J'accepte ton dessin.") {
+        audioFile = "/static/audio/oui.mp3";
+      } else if (data.verdict === "Je déteste.") {
+        audioFile = "/static/audio/non.mp3";
+      }
+
+      if (audioFile) {
+        const audio = new Audio(audioFile);
+        audio.play().catch(err => console.warn("Erreur lecture audio:", err));
+      }
+    }
+
     // Accessibilité : si motion réduite, pas d'animation
     if (prefersReducedMotion()){
       result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
