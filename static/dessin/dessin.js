@@ -37,7 +37,7 @@ function fillPaperBackground() {
   const col = getPaperColor();
   ctx.save();
   ctx.globalCompositeOperation = "destination-over"; // applique derrière le dessin
-  ctx.fillStyle = col;
+  ctx.fillStyle = #000000;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
 }
