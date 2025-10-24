@@ -2,223 +2,253 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <link rel="preload" as="image" href="/static/cabine/assets/img/ciel1.jpg">
-  <title>Dessin</title>
+  <title>Dessin Sombre</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light dark" />
   <style>
-    :root{
-      /* Thème clair */
-      --bg:#fafafa;       /* fond global doux (peu utilisé car wallpaper plein écran) */
-      --fg:#9bbffa;       /* texte principal */
-      --muted:#5b6b7f;    /* texte secondaire */
-      --accent:#5b6ee1;   /* accent bleu-violet */
-      --card:#ffffff;     /* cartes / barres */
-      --border:#111827;   /* bordures */
-      --paper:#111827;    /* "papier ancien" clair */
-
-      /* Commentaire (typewriter) */
-      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      --cmt-text:#9bbffa;            /* bleu-gris doux */
-      --cmt-halo:0 0 14px rgba(36,64,95,.35), 0 0 28px rgba(36,64,95,.20);
+    /* Variables thème sombre */
+    :root {
+      --bg: #111827;       /* fond global */
+      --fg: #9bbffa;       /* texte principal */
+      --muted: #5b6b7f;    /* texte secondaire */
+      --accent: #6b7cff;   /* accent bleu-violet */
+      --border: #ffffff33; /* bordures claires semi-transparentes */
+      --paper: #000000;    /* fond du canvas */
     }
 
-    /* Variante sombre... mais lumineuse */
-    @media (prefers-color-scheme: dark){
-      :root{
-        --bg:#f2f4f7;
-        --fg:#9bbffa;
-        --muted:#475467;
-        --accent:#6b7cff;
-        --card:#ffffff;
-        --border:#111827;
-        --paper:#111827;
-
-        --cmt-text:#9bbffa;
-        --cmt-halo:0 0 14px rgba(42,64,96,.35), 0 0 28px rgba(42,64,96,.20);
-      }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
     }
 
-    /* Wallpaper plein écran (sans voile) peint sur <html> */
-    html{
-      min-height: 100vh;
-      background: url("/static/cabine/assets/img/ciel1.jpg") center / cover no-repeat fixed;
-    }
-    @media (prefers-color-scheme: dark){
-      html{
-        /* même image en "dark", toujours sans voile */
-        background: url("/static/cabine/assets/img/ciel1.jpg") center / cover no-repeat fixed;
-      }
-    }
-
-    /* Le body ne recouvre pas le fond */
-    body{
-      margin:0;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,"Apple Color Emoji","Segoe UI Emoji";
-      background: transparent;
-      color:var(--fg);
-    }
-
-    /* Conteneur centré et borné (évite le plein écran) */
-    .container{
-      position: relative;
-      z-index: 1;
+    .container {
       max-width: 980px;
       margin: 0 auto;
       padding: 16px 20px 48px;
     }
 
-    /* Header avec logo à gauche et titre centré */
-    .site-header{
+    .site-header {
       display: grid;
-      grid-template-columns: 1fr auto 1fr; /* gauche | CENTRE | droite */
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
       gap: 12px;
       margin: 12px 0 18px;
     }
-    .center-action{
-      justify-self: center;   /* centre l’élément dans la colonne du milieu */
+
+    .center-action {
+      justify-self: center;
       text-align: center;
     }
-    .topbar-logo-link{ display: inline-block; line-height: 0; }
-    .brand-logo{ height: 36px; width: auto; display: block; }
+
+    .brand-logo { height: 36px; width: auto; display: block; }
     @media (min-width: 900px){ .brand-logo{ height: 40px; } }
 
-    /* Barres / outils */
+    /* Toolbar et boutons */
     .toolbar{
       display:flex;
       flex-wrap:wrap;
       gap:10px;
       align-items:center;
       background: transparent;
-      border: 0px;
       padding:12px;
-      border-radius:14px;
-      backdrop-filter: none;
-      margin-top: 12px;
     }
-    .footerbar{
-      display:flex;
-      justify-content: center;
-      align-items:center;
-      background: transparent;
-      border: 0;
-      padding: 16px 0;
-    }
+    .tool-group{ display:flex; gap:10px; align-items:center; }
+    label{ font-size:14px; color:var(--muted); }
 
-    .tool-group{ display:flex; gap:10px; align-items:center }
-    label{ font-size:14px; color:var(--muted) }
-
-    button,.btn{
+    button, .btn {
       appearance:none;
       border:1px solid var(--border);
-      background:#0000;
+      background: transparent;
       color:var(--fg);
       padding:10px 14px;
       border-radius:12px;
       cursor:pointer;
-      transition:transform .04s ease,background .2s ease,border-color .2s ease;
-      font-weight:600
+      font-weight:600;
     }
-    button:hover{ background: color-mix(in srgb, var(--accent) 12%, transparent); border-color:var(--accent) }
-    button:active{ transform:translateY(1px) }
-    button[disabled]{ opacity:.6; cursor:not-allowed }
+    button:hover{ background: var(--accent); border-color: var(--accent); }
+    button:active{ transform: translateY(1px); }
 
-    /* Toile "papier" lisible au-dessus du wallpaper */
-    #stage{
-      position:relative;
-      background:rgba(243,239,230,0.85);
-      border: 1px solid rgba(255,255,255,0.25);
-      border-radius:16px;
-      overflow:hidden;
-      backdrop-filter: blur(4px);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.2);
-    }
-    canvas{
-      width:100%;
-      height:auto;
-      display:block;
-      touch-action:none;
-      background:transparent;
+    .spacer{ flex:1 1 auto; }
+
+    /* Canvas */
+    #stage {
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--paper);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+      margin-bottom: 12px;
     }
 
-    .hint{ font-size:13px; color:var(--muted); margin-top:6px }
-    .spacer{ flex:1 1 auto }
-    .color-swatch{ width:28px; height:28px; border-radius:50%; border:2px solid var(--border); cursor:pointer }
-    .color-swatch.selected{ outline:3px solid var(--accent) }
-    .range{ display:inline-flex; align-items:center; gap:8px; background:transparent; border:1px solid var(--border); padding:6px 10px; border-radius:12px }
-    .range input[type="range"]{ width:160px }
-    .dot{ width:20px; height:20px; border-radius:50%; border:1px solid var(--border); background:var(--fg) }
-    .hidden{ display:none !important }
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      touch-action: none;
+      background: var(--paper);
+    }
 
-    /* Commentaire à la “intro” (ligne tapée) */
+    .color-swatch {
+      width:28px;
+      height:28px;
+      border-radius:50%;
+      border:2px solid var(--border);
+      cursor:pointer;
+    }
+    .color-swatch.selected{ outline:3px solid var(--accent); }
+
+    .range { display:inline-flex; align-items:center; gap:8px; background:transparent; border:1px solid var(--border); padding:6px 10px; border-radius:12px; }
+    .range input[type="range"]{ width:160px; }
+    .dot{ width:20px; height:20px; border-radius:50%; border:1px solid var(--border); background:var(--fg); }
+
+    /* Commentaire ligne */
     .comment-line{
       margin: 6px 0 12px;
       text-align:center;
-      font: 700 clamp(18px, 2.2vw, 24px)/1.35 var(--mono);
-      color: var(--cmt-text);
-      text-shadow: var(--cmt-halo);
-      white-space: pre-wrap;
-      min-height: 1.6em; /* évite le saut de layout avant affichage */
+      font: 700 clamp(18px, 2.2vw, 24px)/1.35 monospace;
+      color: var(--fg);
+      min-height: 1.6em;
     }
-    .cursor{
-      display:inline-block;
-      width:.6ch;
-      margin-left:2px;
-      animation: blink 1s steps(1,end) infinite;
-    }
-    @keyframes blink { 50% { opacity: 0; } }
   </style>
 </head>
 <body>
   <div class="container">
     <header class="site-header">
-      <a class="topbar-logo-link" href="/ppp" aria-label="Aller aux prévisions (PPP)">
-        <img src="/static/img/weather_bets_S.png" alt="MétéoGod" class="brand-logo">
+      <a class="topbar-logo-link" href="#" aria-label="Logo">
+        <img src="/static/img/weather_bets_S.png" alt="Logo" class="brand-logo">
       </a>
-
       <div class="center-action">
-        <button id="commentBtn" class="primary">Solliciter ZEUS</button>
+        <button id="commentBtn">Solliciter ZEUS</button>
       </div>
-
       <div class="header-spacer" aria-hidden="true"></div>
     </header>
 
-    <!-- Conteneur du commentaire, AU-DESSUS du canvas -->
-    <div id="result" class="comment-line hidden" aria-live="polite"></div>
+    <div id="result" class="comment-line"></div>
 
     <div id="stage">
       <canvas id="pad" width="1200" height="800" aria-label="Surface de dessin"></canvas>
     </div>
 
-    <div class="toolbar" role="toolbar" aria-label="Outils de dessin">
-      <div class="tool-group" aria-label="Couleurs">
-        <button class="color-swatch selected" data-color="#e6ebf5" title="Blanc" style="background:#e6ebf5"></button>
-        <button class="color-swatch" data-color="#ef4444" title="Rouge" style="background:#ef4444"></button>
-        <button class="color-swatch" data-color="#f59e0b" title="Orange" style="background:#f59e0b"></button>
-        <button class="color-swatch" data-color="#10b981" title="Vert" style="background:#10b981"></button>
-        <button class="color-swatch" data-color="#3b82f6" title="Bleu" style="background:#3b82f6"></button>
-        <button class="color-swatch" data-color="#a855f7" title="Violet" style="background:#a855f7"></button>
-        <input type="color" id="colorPicker" value="#111827" aria-label="Choisir une couleur" />
+    <div class="toolbar" role="toolbar">
+      <div class="tool-group">
+        <button class="color-swatch selected" data-color="#ffffff" style="background:#ffffff"></button>
+        <button class="color-swatch" data-color="#ef4444" style="background:#ef4444"></button>
+        <button class="color-swatch" data-color="#f59e0b" style="background:#f59e0b"></button>
+        <button class="color-swatch" data-color="#10b981" style="background:#10b981"></button>
+        <button class="color-swatch" data-color="#3b82f6" style="background:#3b82f6"></button>
+        <button class="color-swatch" data-color="#a855f7" style="background:#a855f7"></button>
+        <input type="color" id="colorPicker" value="#ffffff" />
       </div>
 
       <div class="tool-group">
         <div class="range">
           <label for="brushSize">Taille</label>
           <input id="brushSize" type="range" min="1" max="40" value="6" />
-          <div id="brushDot" class="dot" aria-hidden="true"></div>
+          <div id="brushDot" class="dot"></div>
         </div>
-
-        <button id="eraser" title="Gomme">🧽 Gomme</button>
-        <button id="undo" title="Annuler (Ctrl+Z)">↶ Annuler</button>
-        <button id="redo" title="Rétablir (Ctrl+Y)">↷ Rétablir</button>
-        <button id="clear" title="Tout effacer">🗑️ Effacer</button>
+        <button id="eraser">🧽 Gomme</button>
+        <button id="undo">↶ Annuler</button>
+        <button id="redo">↷ Rétablir</button>
+        <button id="clear">🗑️ Effacer</button>
       </div>
-
       <div class="spacer"></div>
     </div>
   </div>
 
-  <script type="module" src="/dessin/dessin.js"></script>
+  <script>
+    const canvas = document.getElementById('pad');
+    const ctx = canvas.getContext('2d');
+
+    // Initialiser le fond noir
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    let drawing = false;
+    let brushColor = '#ffffff';
+    let brushSize = 6;
+    const undoStack = [];
+    const redoStack = [];
+
+    function startDraw(e){
+      drawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    }
+    function draw(e){
+      if(!drawing) return;
+      ctx.lineTo(e.offsetX, e.offsetY);
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+    function endDraw(){
+      if(drawing){
+        undoStack.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+        drawing = false;
+      }
+    }
+
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mouseout', endDraw);
+
+    // Changement de couleur
+    document.querySelectorAll('.color-swatch').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        brushColor = btn.dataset.color;
+        document.querySelectorAll('.color-swatch').forEach(b=>b.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
+    });
+    document.getElementById('colorPicker').addEventListener('input', (e)=>{
+      brushColor = e.target.value;
+    });
+
+    // Taille du pinceau
+    const brushSizeInput = document.getElementById('brushSize');
+    const brushDot = document.getElementById('brushDot');
+    brushSizeInput.addEventListener('input', ()=>{
+      brushSize = brushSizeInput.value;
+      brushDot.style.width = brushSize + 'px';
+      brushDot.style.height = brushSize + 'px';
+    });
+
+    // Effacer tout
+    document.getElementById('clear').addEventListener('click', ()=>{
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      undoStack.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+    });
+
+    // Gomme
+    document.getElementById('eraser').addEventListener('click', ()=>{
+      brushColor = '#000000';
+    });
+
+    // Undo/Redo
+    document.getElementById('undo').addEventListener('click', ()=>{
+      if(undoStack.length > 0){
+        redoStack.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+        const img = undoStack.pop();
+        ctx.putImageData(img,0,0);
+      }
+    });
+    document.getElementById('redo').addEventListener('click', ()=>{
+      if(redoStack.length > 0){
+        undoStack.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+        const img = redoStack.pop();
+        ctx.putImageData(img,0,0);
+      }
+    });
+
+    // Initialiser le premier état pour undo
+    undoStack.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+  </script>
 </body>
 </html>
