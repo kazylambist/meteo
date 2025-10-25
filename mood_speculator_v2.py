@@ -1510,7 +1510,7 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
   gap: 12px;
 }
 .nav-left, .nav-right { display: inline-flex; align-items: center; gap: 14px; }
-.nav-center { display: flex; justify-content: center; }
+.nav-center { display: flex; justify-content: center; align-items: center; flex: 1; }
 
 .solde-box {
   display: inline-flex; align-items: center; gap: 6px;
@@ -2345,51 +2345,57 @@ PPP_HTML = """
     </div>
 
     <div class="nav-center">
-      {% if current_user.is_authenticated and solde_str %}
-        <div class="solde-box">
-          <span class="solde-label">Solde&nbsp;:</span>
-          <span class="solde-value">{{ solde_str }}</span>
+      {% if current_user.is_authenticated %}
+        <div class="center-box">
+          {% if solde_str %}
+            <div class="solde-box">
+              <span class="solde-label">Solde&nbsp;:</span>
+              <span class="solde-value">{{ solde_str }}</span>
+            </div>
+          {% endif %}
+
+          <div class="user-menu">
+            <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+              <strong>{{ current_user.username }}</strong>
+              <span class="caret">▾</span>
+            </button>
+            <div class="user-dropdown" id="userDropdown" role="menu">
+              <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
+              <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
+              <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>            
+              <a class="item" href="/carte">Carte 🗺️</a>
+              <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
+              <div class="submenu">
+                <button class="item submenu-toggle" id="optionsBtn" type="button">Options ▸</button>
+                <div class="submenu-panel" id="optionsMenu" hidden>
+                  <form id="deleteAccountForm" action="{{ url_for('delete_account') }}" method="POST"
+                        onsubmit="return confirm('Supprimer définitivement ce compte ? Cette action est irréversible.');">
+                    <button type="submit" class="danger">Supprimer ce compte</button>
+                  </form>
+                </div>
+              </div>       
+              <a class="item" href="/logout">Se déconnecter</a>
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <div class="center-box">
+          <a href="/register">Créer un compte</a>
+          <a href="/login">Se connecter</a>
         </div>
       {% endif %}
     </div>
 
     <div class="nav-right">
-      {% if current_user.is_authenticated %}
-        <div class="user-menu">
-          <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
-            <strong>{{ current_user.username }}</strong>
-            <span class="caret">▾</span>
-          </button>
-          <div class="user-dropdown" id="userDropdown" role="menu">
-            <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
-            <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
-            <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>            
-            <a class="item" href="/carte">Carte 🗺️</a>
-            <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
-            <div class="submenu">
-              <button class="item submenu-toggle" id="optionsBtn" type="button">Options ▸</button>
-              <div class="submenu-panel" id="optionsMenu" hidden>
-                <form id="deleteAccountForm" action="{{ url_for('delete_account') }}" method="POST"
-                      onsubmit="return confirm('Supprimer définitivement ce compte ? Cette action est irréversible.');">
-                  <button type="submit" class="danger">Supprimer ce compte</button>
-                </form>
-              </div>
-            </div>       
-            <a class="item" href="/logout">Se déconnecter</a>
-          </div>
-        </div>
-      {% else %}
-        <a href="/register">Créer un compte</a>
-        <a href="/login">Se connecter</a>
-      {% endif %}
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
+
       <a id="trade-unread"
          class="badge-unread"
          href="{{ url_for('trade_page') }}"
          aria-label="Aller au marché (Trade)"
          style="display:none; margin-left:.5rem;">
         NOUVEAU MESSAGE
-      </a>      
+      </a>
     </div>
   </div>
 </nav>
