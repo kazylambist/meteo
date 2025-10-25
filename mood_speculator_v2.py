@@ -199,84 +199,15 @@ RUN_MIG = os.environ.get("RUN_MIGRATIONS", "0") == "1"
 if RUN_MIG:
     with app.app_context():
         try:
-            # Colonnes manquantes existantes (tes migrations "historique")
-            try:
-                db.session.execute(text("ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"))
-            except Exception:
-                pass
-            try:
-                db.session.execute(text("ALTER TABLE ppp_boosts ADD COLUMN station_id VARCHAR(64)"))
-            except Exception:
-                pass
+            # --- PPP : colonnes historiques ---
             try:
                 db.session.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pppboost_user_date_station "
-                    "ON ppp_boosts(user_id, bet_date, station_id)"
+                    "ALTER TABLE ppp_bet ADD COLUMN station_id VARCHAR(64)"
                 ))
             except Exception:
                 pass
 
-            # Position.user_id pour relier Position -> User
-            try:
-                db.session.execute(text(
-                    "ALTER TABLE position ADD COLUMN user_id INTEGER REFERENCES user(id)"
-                ))
-            except Exception:
-                pass
-            try:
-                db.session.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_position_user_id ON position(user_id)"
-                ))
-            except Exception:
-                pass
-
-            # Chat: flag de lecture
-            try:
-                db.session.execute(text(
-                    "ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
-                ))
-            except Exception:
-                pass
-            # Index utiles (corrigés)
-            try:
-                db.session.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_chat_unread_to ON chat_messages(to_user_id, is_read)"
-                ))
-            except Exception:
-                pass
-            try:
-                db.session.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_chat_from_to ON chat_messages(from_user_id, to_user_id)"
-                ))
-            except Exception:
-                pass
-
-            # Email unique robuste
-            try:
-                db.session.execute(text(
-                    "UPDATE user SET email = lower(trim(email)) WHERE email IS NOT NULL"
-                ))
-            except Exception:
-                pass
-            try:
-                db.session.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"
-                ))
-            except Exception:
-                pass
-            
-            # Colonne 'bolts' pour limiter les éclairs
-            try:
-                db.session.execute(text("ALTER TABLE user ADD COLUMN bolts INTEGER NOT NULL DEFAULT 10"))
-            except Exception:
-                # colonne déjà présente
-                pass
-            try:
-                db.session.execute(text("UPDATE user SET bolts = 10 WHERE bolts IS NULL or bolts = 0"))
-            except Exception:
-                pass
-
-            # PPP: funded_from_balance pour bien séparer stake vs. achat
+            # PPP: funded_from_balance pour séparer solde vs. achat
             try:
                 db.session.execute(text(
                     "ALTER TABLE ppp_bet ADD COLUMN funded_from_balance INTEGER NOT NULL DEFAULT 1"
@@ -293,8 +224,103 @@ if RUN_MIG:
             except Exception:
                 pass
 
-            # ---- TRADE : schéma et index nécessaires ----
-            # 0) Table minimale si absente (évite "no such table: bet_listing")
+            # --- POSITION : rattacher à user ---
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE position ADD COLUMN user_id INTEGER REFERENCES user(id)"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_position_user_id ON position(user_id)"
+                ))
+            except Exception:
+                pass
+
+            # --- CHAT : flag lecture + index ---
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE chat_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_unread_to ON chat_messages(to_user_id, is_read)"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_from_to ON chat_messages(from_user_id, to_user_id)"
+                ))
+            except Exception:
+                pass
+
+            # --- USER : email unique robuste ---
+            try:
+                db.session.execute(text(
+                    "UPDATE user SET email = lower(trim(email)) WHERE email IS NOT NULL"
+                ))
+            except Exception:
+                pass
+            try:
+                db.session.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"
+                ))
+            except Exception:
+                pass
+
+            # --- USER : stock d'éclairs (bolts) ---
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE user ADD COLUMN bolts INTEGER NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                pass
+            # Normalisation défensive (sans écraser des valeurs existantes)
+            try:
+                db.session.execute(text(
+                    "UPDATE user SET bolts = COALESCE(bolts, 0)"
+                ))
+            except Exception:
+                pass
+
+            # --- PPP_BOOSTS : schéma normalisé + clé unique incluant station ---
+            # Crée la table si absente (SQLite)
+            try:
+                db.session.execute(text("""
+                    CREATE TABLE IF NOT EXISTS ppp_boosts (
+                        id INTEGER PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        bet_date TEXT NOT NULL,              -- YYYY-MM-DD
+                        station_id TEXT NOT NULL DEFAULT '', -- '' = toutes stations
+                        value REAL NOT NULL DEFAULT 0,
+                        created_at TEXT
+                    )
+                """))
+            except Exception:
+                pass
+            # Si ancienne colonne nullable → normaliser à '' (éviter NULL dans UNIQUE)
+            try:
+                db.session.execute(text("""
+                    UPDATE ppp_boosts SET station_id = ''
+                    WHERE station_id IS NULL
+                """))
+            except Exception:
+                pass
+            # Clé unique (user_id, bet_date, station_id)
+            try:
+                db.session.execute(text("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pppboost_user_date_station
+                    ON ppp_boosts(user_id, bet_date, station_id)
+                """))
+            except Exception:
+                pass
+
+            # --- TRADE : schéma et index nécessaires ---
+            # Table minimale si absente
             try:
                 db.session.execute(text(
                     "CREATE TABLE IF NOT EXISTS bet_listing (id INTEGER PRIMARY KEY)"
@@ -302,29 +328,28 @@ if RUN_MIG:
             except Exception:
                 pass
 
-            # 1) Colonnes de base (ajouts idempotents)
+            # Colonnes de base (idempotent)
             for ddl in [
                 "ALTER TABLE bet_listing ADD COLUMN user_id INTEGER",
                 "ALTER TABLE bet_listing ADD COLUMN status TEXT",
-                "ALTER TABLE bet_listing ADD COLUMN payload TEXT",            # JSON en TEXT (SQLite)
-                "ALTER TABLE bet_listing ADD COLUMN kind TEXT DEFAULT 'PPP'", # <— manquante dans tes logs
+                "ALTER TABLE bet_listing ADD COLUMN payload TEXT",                 # JSON en TEXT
+                "ALTER TABLE bet_listing ADD COLUMN kind TEXT DEFAULT 'PPP'",      # ← manquait dans tes logs
                 "ALTER TABLE bet_listing ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
                 "ALTER TABLE bet_listing ADD COLUMN expires_at TIMESTAMP",
                 "ALTER TABLE bet_listing ADD COLUMN city TEXT",
                 "ALTER TABLE bet_listing ADD COLUMN date_label TEXT",
                 "ALTER TABLE bet_listing ADD COLUMN deadline_key TEXT",
                 "ALTER TABLE bet_listing ADD COLUMN choice TEXT",
-                "ALTER TABLE bet_listing ADD COLUMN side TEXT",               # <— utilisé par certains SELECT
+                "ALTER TABLE bet_listing ADD COLUMN side TEXT",
                 "ALTER TABLE bet_listing ADD COLUMN stake REAL",
                 "ALTER TABLE bet_listing ADD COLUMN base_odds REAL",
                 "ALTER TABLE bet_listing ADD COLUMN boosts_count INTEGER",
                 "ALTER TABLE bet_listing ADD COLUMN boosts_add REAL",
                 "ALTER TABLE bet_listing ADD COLUMN total_odds REAL",
                 "ALTER TABLE bet_listing ADD COLUMN potential_gain REAL",
-                # prix demandé (création) et prix réellement payé (vente)
-                "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",
-                "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",
-                "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",
+                "ALTER TABLE bet_listing ADD COLUMN ask_price REAL",               # prix demandé
+                "ALTER TABLE bet_listing ADD COLUMN buyer_id INTEGER",             # acheteur
+                "ALTER TABLE bet_listing ADD COLUMN sale_price REAL",              # prix payé
                 "ALTER TABLE bet_listing ADD COLUMN sold_at TIMESTAMP"
             ]:
                 try:
@@ -332,7 +357,7 @@ if RUN_MIG:
                 except Exception:
                     pass
 
-            # 2) Index utiles pour remaining_points() et les consultations
+            # Index pour remaining_points() et listes
             try:
                 db.session.execute(text(
                     "CREATE INDEX IF NOT EXISTS ix_betlisting_buyer_status "
@@ -355,29 +380,14 @@ if RUN_MIG:
             except Exception:
                 pass
 
-            # --- USER: stock d'éclairs ---
-            # Ajoute la colonne si absente (SQLite accepte NOT NULL avec DEFAULT)
-            try:
-                db.session.execute(text(
-                    "ALTER TABLE user ADD COLUMN bolts INTEGER NOT NULL DEFAULT 0"
-                ))
-            except Exception:
-                pass
-
-            # Backfill défensif (si la colonne existe déjà mais avec des NULL, selon anciens schémas)
-            try:
-                db.session.execute(text("UPDATE user SET bolts = 5 WHERE bolts IS NULL OR bolts = 0"))
-            except Exception:
-                pass
-            
             db.session.commit()
             print("[MIGRATIONS] OK")
         except Exception as e:
             db.session.rollback()
             print("[MIGRATIONS] ERROR:", repr(e))
 else:
-    # En prod (Fly) par défaut : ne pas bloquer le boot avec des DDL
-    # Lance tes migrations manuellement si nécessaire (ou RUN_MIGRATIONS=1 ponctuellement)
+    # En prod (Fly) : ne pas bloquer le boot avec des DDL
+    # Définis RUN_MIGRATIONS=1 ponctuellement si tu veux exécuter ces migrations au boot.
     pass
     
 # -----------------------------------------------------------------------------
@@ -399,7 +409,7 @@ class User(UserMixin, db.Model):
     allocation_locked = db.Column(db.Boolean, default=False)
     bal_pierre = db.Column(db.Float, default=0.0)
     bal_marie  = db.Column(db.Float, default=0.0)
-    bolts = db.Column(db.Integer, nullable=False, default=10)
+    bolts = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
 
     @validates("email", "username")
