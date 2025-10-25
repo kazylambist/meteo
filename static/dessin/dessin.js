@@ -195,12 +195,12 @@ function bindTools(){
   if (clearBtn) {
     clearBtn.addEventListener("click", ()=>{
       if(!confirm("Effacer tout le dessin ?")) return;
-      fillPaperBackground();                // ← fond noir, pas transparent
-      // on revient automatiquement au crayon blanc après effacement
-      current.erasing = false;
-      current.color   = "#ffffff";
+      ctx.save();
       ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = current.color;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
       pushHistory();
     });
   }
@@ -300,9 +300,7 @@ async function handleComment(){
     result.classList.add("hidden");
     result.textContent = "";
 
-    // Assure un fond "papier" puis compresse fort (max 768px, JPEG q=0.72)
-    fillPaperBackground();
-    const dataUrl = await toResizedDataURL(canvas, 768, 0.72);
+    const dataUrl = await snapshotWithBackground(canvas, "#000000", 768, 0.72);
 
     const res = await fetch("/api/comment", {
       method: "POST",
@@ -374,13 +372,37 @@ function toResizedDataURL(srcCanvas, maxSide=1024, quality=0.85){
   });
 }
 
+// --- Snapshot non destructif avec fond noir ---
+function snapshotWithBackground(srcCanvas, bg = "#000000", maxSide = 1024, quality = 0.85){
+  return new Promise((resolve)=>{
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const scale = Math.min(1, maxSide / Math.max(w, h));
+    const outW = Math.round(w * scale), outH = Math.round(h * scale);
+
+    const off = document.createElement("canvas");
+    off.width = outW; 
+    off.height = outH;
+    const octx = off.getContext("2d");
+
+    // 1) peindre d'abord le fond noir
+    octx.fillStyle = bg;
+    octx.fillRect(0, 0, outW, outH);
+
+    // 2) dessiner le contenu courant par-dessus
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = "high";
+    octx.drawImage(srcCanvas, 0, 0, w, h, 0, 0, outW, outH);
+
+    resolve(off.toDataURL("image/jpeg", quality));
+  });
+}
+
 // --- Download ---
-function downloadImage(){
-  fillPaperBackground();
-  const url=canvas.toDataURL("image/png");
-  const a=document.createElement("a");
-  a.href=url; 
-  a.download="mon_dessin.png"; 
+async function downloadImage(){
+  const url = await snapshotWithBackground(canvas, "#000000", 4096, 0.95);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mon_dessin.jpg"; // JPEG conseillé (fond noir)
   a.click();
 }
 // --- Effet de dactylo (typewriter)
