@@ -34,3 +34,4 @@ wheel==0.45.1
 WTForms==3.2.1
 # rebuild Mer 15 oct 2025 16:43:00 CEST
 openai==2.6.0
+Flask-Migrate
