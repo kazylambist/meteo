@@ -350,6 +350,21 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            # --- USER: stock d'éclairs ---
+            # Ajoute la colonne si absente (SQLite accepte NOT NULL avec DEFAULT)
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE user ADD COLUMN bolts INTEGER NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                pass
+
+            # Backfill défensif (si la colonne existe déjà mais avec des NULL, selon anciens schémas)
+            try:
+                db.session.execute(text("UPDATE user SET bolts = 0 WHERE bolts IS NULL"))
+            except Exception:
+                pass
+
             db.session.commit()
             print("[MIGRATIONS] OK")
         except Exception as e:
