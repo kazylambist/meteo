@@ -23,8 +23,10 @@ function setupDPR() {
   canvas.width = targetW; 
   canvas.height = targetH;
 
+  fillPaperBackground();
+
   ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "source-over";
   ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, 0, 0, canvas.width, canvas.height);
   ctx.restore();
 
