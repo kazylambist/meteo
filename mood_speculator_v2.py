@@ -259,6 +259,17 @@ if RUN_MIG:
                 ))
             except Exception:
                 pass
+            
+            # Colonne 'bolts' pour limiter les éclairs
+            try:
+                db.session.execute(text("ALTER TABLE user ADD COLUMN bolts INTEGER NOT NULL DEFAULT 10"))
+            except Exception:
+                # colonne déjà présente
+                pass
+            try:
+                db.session.execute(text("UPDATE user SET bolts = 10 WHERE bolts IS NULL"))
+            except Exception:
+                pass
 
             # PPP: funded_from_balance pour bien séparer stake vs. achat
             try:
@@ -368,6 +379,7 @@ class User(UserMixin, db.Model):
     allocation_locked = db.Column(db.Boolean, default=False)
     bal_pierre = db.Column(db.Float, default=0.0)
     bal_marie  = db.Column(db.Float, default=0.0)
+    bolts = db.Column(db.Integer, nullable=False, default=10)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
 
     @validates("email", "username")
@@ -2268,6 +2280,17 @@ PPP_HTML = """
     cursor:grab; user-select:none; -webkit-user-drag:element;
   }
   .bolt-tool:active { cursor:grabbing; }
+  /* badge numérique d'éclairs */
+  #boltTool{ position: relative; }
+  #boltTool::after{
+    content: attr(data-count);
+    position: absolute; top: -6px; right: -8px;
+    font-size: 11px; font-weight: 800;
+    background: #1e88e5; color: #fff;
+    border-radius: 999px; padding: 2px 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  
 
   /* Feedback drop */
   .ppp-day.drop-ok   { outline:2px dashed rgba(255,215,0,.65); outline-offset:3px; }
@@ -2781,18 +2804,42 @@ PPP_HTML = """
       if (e.target === modal) modal.classList.remove('open');
     });
   }
+  // --- Gestion du stock d'éclairs ---
+  function setBoltCount(n){
+    const bolt = document.getElementById('boltTool');
+    if (!bolt) return;
+    const count = Math.max(0, Number(n||0));
+    bolt.dataset.count = String(count);
+    bolt.title = count > 0 ? `Éclairs restants : ${count}` : `Plus d’éclairs`;
+    bolt.style.opacity = (count > 0) ? '1' : '.35';
+    bolt.style.pointerEvents = (count > 0) ? 'auto' : 'none';
+  }
+  async function fetchBoltCount(){
+    try{
+      const r = await fetch('/api/users/bolts', { credentials:'same-origin' });
+      if (!r.ok) return;
+      const j = await r.json();
+      setBoltCount(j.bolts);
+    }catch(_){}
+  }
 
   // --- Drag source de l’éclair (unique) ---
   const bolt = document.getElementById('boltTool');
   if (bolt){
+    fetchBoltCount();
     bolt.setAttribute('draggable','true');
     bolt.style.webkitUserDrag = 'element';
     bolt.addEventListener('dragstart', (ev) => {
+      const count = Number(bolt.dataset.count || '0');
+      if (count <= 0) {
+        ev.preventDefault();
+        return;
+      }
       try {
         ev.dataTransfer.setData('text/plain', 'bolt');
         ev.dataTransfer.effectAllowed = 'copy';
       } catch (e) { /* no-op */ }
-    });
+    });    
   }
 
   // --- Utilitaire: cible -> cellule robuste ---
@@ -2864,6 +2911,10 @@ PPP_HTML = """
       let total = 0;
       try {
         const json = await resp.json();
+        // Met à jour le stock d'éclairs si fourni par le backend
+        if (json && typeof json.bolts_left !== 'undefined') {
+          setBoltCount(json.bolts_left);
+        }        
         // Liste de clés possibles renvoyées par l'API
         const candidates = [
           'total','new_total','boost_total','total_boost','boost','value','newTotal','cumul'
@@ -4476,7 +4527,7 @@ def register():
         return redirect(url_for('register'))
 
     # --- Création ---
-    u = User(username=username, email=email, pw_hash=generate_password_hash(password))
+    u = User(username=username, email=email, pw_hash=generate_password_hash(password), bolts=10)
     db.session.add(u)
     try:
         db.session.commit()
@@ -5085,77 +5136,127 @@ try:
 except ImportError:
     from datetime import timezone as _tz
     UTC = _tz.utc
+
 from flask import request, jsonify
 from flask_login import login_required, current_user
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-# ✅ ensure you have your db import
-# from yourapp import db  # <-- adjust to your app structure
 
 @app.post("/ppp/boost")
 @login_required
 def ppp_boost():
     """
-    Ajoute un boost (éclair) de +value à la cote d'une date,
-    éventuellement pour une station donnée.
-    Réponse: { ok: true, total: <cumul pour ce user+date(+station)> }
+    Ajoute un boost (éclair) de +value (par défaut +5.0) à la cote d'une date,
+    éventuellement pour une station (station_id). L'opération consomme 1 éclair
+    dans le stock utilisateur (User.bolts), de façon atomique.
+
+    Règles:
+      - Stock d'éclairs (User.bolts) : doit être > 0
+      - Plafond par cible (user_id, bet_date, station_id_normalisé) :
+          total_value <= MAX_BOOSTS_PER_TARGET * BOOST_UNIT
+    Réponse: { ok: true, total: <nouvelle somme pour cette cible>, bolts_left: <restant> }
     """
     data = request.get_json(silent=True) or {}
-    date_str = (data.get("date") or "").strip()
-    station_id = data.get("station_id")  # peut être None / null côté JS
+    date_str   = (data.get("date") or "").strip()
+    station_id = data.get("station_id")  # peut être None côté JS
 
-    # Parse & validation
+    # --- Config du plafond ---
+    MAX_BOOSTS_PER_TARGET = int(getattr(app.config, "PPP_MAX_BOOSTS_PER_TARGET", 5))
+    BOOST_UNIT            = float(getattr(app.config, "PPP_BOOST_UNIT", 5.0))
+
+    # Normalisation station (⚠️ SQLite + NULL dans UNIQUE → pas d'UPSERT)
+    # On force une chaîne vide pour représenter "toutes stations".
+    sid_norm = (station_id or "")
+
+    # Parse de l'incrément demandé (on accepte valeur libre mais on la reborne)
     try:
-        inc = float(data.get("value") or 5.0)
+        inc_req = float(data.get("value") or BOOST_UNIT)
     except Exception:
-        return jsonify(ok=False, error="bad value"), 400
+        return jsonify(ok=False, error="bad_value"), 400
+    if inc_req <= 0:
+        return jsonify(ok=False, error="bad_value"), 400
 
     if not date_str:
-        return jsonify(ok=False, error="missing date"), 400
+        return jsonify(ok=False, error="missing_date"), 400
     try:
         bet_date = date.fromisoformat(date_str)
     except Exception:
-        return jsonify(ok=False, error="bad date"), 400
+        return jsonify(ok=False, error="bad_date"), 400
 
-    if inc <= 0:
-        return jsonify(ok=False, error="bad value"), 400
+    uid = int(current_user.id)
 
-    # UPSERT avec prise en compte station_id dans la clé unique
-    upsert_sql = text("""
-        INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
-        VALUES (:uid, :d, :sid, :inc, :now)
-        ON CONFLICT(user_id, bet_date, station_id)
-        DO UPDATE SET
-            value = COALESCE(ppp_boosts.value, 0) + :inc
-    """)
-
+    # --- Récup total existant pour la cible ---
     sel_sql = text("""
-      SELECT value FROM ppp_boosts
-      WHERE user_id = :uid
-        AND bet_date = :d
-        AND (
-          (:sid IS NULL AND station_id IS NULL)
-          OR station_id = :sid
-        )
+        SELECT COALESCE(value, 0.0)
+        FROM ppp_boosts
+        WHERE user_id = :uid
+          AND bet_date = :d
+          AND COALESCE(station_id, '') = :sid
+        LIMIT 1
     """)
+    cur_val = float(db.session.execute(sel_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
 
-    params = {
-        "uid": current_user.id,
-        "d": bet_date,
-        "sid": station_id,
-        "inc": inc,
-        "now": datetime.now(UTC),
-    }
+    cap_value = MAX_BOOSTS_PER_TARGET * BOOST_UNIT
+    remaining_value = cap_value - cur_val
+    if remaining_value <= 1e-12:
+        # Plafond déjà atteint
+        bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
+        return jsonify(ok=False, error="cap_reached", total=cur_val, bolts_left=bolts_left), 400
 
+    # On ne pousse pas au-delà du plafond
+    inc = min(inc_req, remaining_value)
+    if inc <= 1e-12:
+        bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
+        return jsonify(ok=False, error="cap_reached", total=cur_val, bolts_left=bolts_left), 400
+
+    # --- Transaction atomique ---
     try:
-        db.session.execute(upsert_sql, params)
-        db.session.commit()
+        with db.session.begin():
+            # 1) Réserver 1 éclair si disponible
+            upd_bolts = db.session.execute(text("""
+                UPDATE user
+                SET bolts = bolts - 1
+                WHERE id = :uid AND COALESCE(bolts, 0) > 0
+            """), {"uid": uid})
+            if upd_bolts.rowcount != 1:
+                # pas d'éclair en stock
+                raise IntegrityError("no_bolts", params=None, orig=None)
+
+            # 2) UPSERT sur la cible, clampé au plafond
+            #    - insert → value = MIN(:inc, :cap_value)
+            #    - conflict → value = MIN(COALESCE(value,0)+:inc, :cap_value)
+            upsert_sql = text("""
+                INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
+                VALUES (:uid, :d, :sid, MIN(:inc, :cap), :now)
+                ON CONFLICT(user_id, bet_date, station_id)
+                DO UPDATE SET
+                    value = MIN(COALESCE(ppp_boosts.value, 0) + :inc, :cap)
+            """)
+            db.session.execute(upsert_sql, {
+                "uid": uid,
+                "d": bet_date,
+                "sid": sid_norm,
+                "inc": inc,
+                "cap": cap_value,
+                "now": datetime.now(UTC),
+            })
+
+            # 3) Lire le total actualisé et le stock restant
+            new_total = float(db.session.execute(sel_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+            bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
+
+        return jsonify(ok=True, total=new_total, bolts_left=bolts_left), 200
+
+    except IntegrityError as ie:
+        # soit plus d'éclairs, soit autre contrainte
+        db.session.rollback()
+        if str(ie).startswith("no_bolts"):
+            bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
+            return jsonify(ok=False, error="no_bolts", bolts_left=bolts_left), 400
+        return jsonify(ok=False, error="conflict"), 409
     except Exception as e:
         db.session.rollback()
-        return jsonify(ok=False, error=str(e)), 500
-
-    total = db.session.execute(sel_sql, {"uid": params["uid"], "d": params["d"], "sid": params["sid"]}).scalar() or 0.0
-    return jsonify(ok=True, total=float(total)), 200
+        return jsonify(ok=False, error="server_error"), 500
 
 @app.post('/api/ppp/bets/<int:bet_id>/boosts')
 @login_required
