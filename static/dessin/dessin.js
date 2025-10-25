@@ -2,7 +2,10 @@ const canvas = document.getElementById("pad");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
 const state = { drawing:false, lastX:0, lastY:0, history:[], redoStack:[] };
-const current = { color:"#111827", size:6, erasing:false };
+
+// Fond du canvas (noir) et crayon blanc par défaut
+const CANVAS_BG = "#000000";
+const current = { color:"#ffffff", size:6, erasing:false }; // crayon blanc
 
 // --- DPR / mise à l’échelle ---
 function setupDPR() {
@@ -34,29 +37,32 @@ window.addEventListener("resize", setupDPR);
 
 // --- Fond blanc (évite la transparence) ---
 function fillPaperBackground() {
-  const col = getComputedStyle(document.documentElement)
-                .getPropertyValue('--paper').trim() || '#E9E3D6';
   ctx.save();
-  // place un aplat en-dessous de tout ce qui existe
-  ctx.globalCompositeOperation = "destination-over";
-  ctx.fillStyle = col;
+  ctx.globalCompositeOperation = "source-over"; // on peint, pas de transparence
+  ctx.fillStyle = CANVAS_BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
 }
 
 // --- Init ---
 function init() {
-  // Option A: ne rien peindre (le fond CSS du canvas fera foi)
-  // ctx.clearRect(0,0,canvas.width,canvas.height);
+  // Peindre un fond NOIR réel (pas transparent)
+  fillPaperBackground();
 
-  // Option B: peindre la toile au démarrage :
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = getPaperColor();   // <-- au lieu de "#ffffff"
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.restore();
+  setupDPR();
+  // Assure que le pinceau reflète bien le blanc par défaut
+  ctx.strokeStyle = current.color;
+  ctx.lineWidth   = current.size * (window.devicePixelRatio || 1);
 
-  setupDPR(); pushHistory(); bindTools(); updateBrushPreview(); addShortcuts();
+  // marquer l'état initial
+  pushHistory(); 
+  bindTools(); 
+  updateBrushPreview(); 
+  addShortcuts();
+
+  // UI : si tu as des pastilles/couleurs, marque le blanc comme sélectionné
+  const picker = document.getElementById("colorPicker");
+  if (picker) picker.value = "#ffffff";
 }
 // si fonts API dispo, attend sa dispo ; sinon, init direct
 document.fonts ? document.fonts.ready.then(init) : init();
@@ -70,8 +76,8 @@ function pointerDown(x,y){
 }
 function pointerMove(x,y){
   if(!state.drawing) return;
-  ctx.globalCompositeOperation = current.erasing ? "destination-out" : "source-over";
-  ctx.strokeStyle = current.color;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.strokeStyle = current.erasing ? CANVAS_BG : current.color; // gomme = noir
   ctx.lineWidth = current.size * (window.devicePixelRatio || 1);
   ctx.lineTo(x,y); 
   ctx.stroke(); 
@@ -187,10 +193,12 @@ function bindTools(){
   if (clearBtn) {
     clearBtn.addEventListener("click", ()=>{
       if(!confirm("Effacer tout le dessin ?")) return;
-      ctx.save(); 
-      ctx.globalCompositeOperation="source-over"; 
-      ctx.clearRect(0,0,canvas.width,canvas.height); 
-      ctx.restore();
+      fillPaperBackground();                // ← fond noir, pas transparent
+      // on revient automatiquement au crayon blanc après effacement
+      current.erasing = false;
+      current.color   = "#ffffff";
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = current.color;
       pushHistory();
     });
   }
