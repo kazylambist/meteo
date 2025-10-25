@@ -361,10 +361,10 @@ if RUN_MIG:
 
             # Backfill défensif (si la colonne existe déjà mais avec des NULL, selon anciens schémas)
             try:
-                db.session.execute(text("UPDATE user SET bolts = 0 WHERE bolts IS NULL"))
+                db.session.execute(text("UPDATE user SET bolts = 5 WHERE bolts IS NULL OR bolts = 0"))
             except Exception:
                 pass
-
+            
             db.session.commit()
             print("[MIGRATIONS] OK")
         except Exception as e:
@@ -5179,7 +5179,7 @@ def ppp_boost():
     MAX_BOOSTS_PER_TARGET = int(getattr(app.config, "PPP_MAX_BOOSTS_PER_TARGET", 5))
     BOOST_UNIT            = float(getattr(app.config, "PPP_BOOST_UNIT", 5.0))
 
-    # Normalisation station (⚠️ SQLite + NULL dans UNIQUE → pas d'UPSERT)
+    # Normalisation station (SQLite + NULL dans UNIQUE → pas d'UPSERT fiable)
     # On force une chaîne vide pour représenter "toutes stations".
     sid_norm = (station_id or "")
 
@@ -5198,6 +5198,8 @@ def ppp_boost():
     except Exception:
         return jsonify(ok=False, error="bad_date"), 400
 
+    # Toujours passer une chaîne ISO à SQLite pour des comparaisons stables
+    d_iso = bet_date.isoformat()
     uid = int(current_user.id)
 
     # --- Récup total existant pour la cible ---
@@ -5209,12 +5211,11 @@ def ppp_boost():
           AND COALESCE(station_id, '') = :sid
         LIMIT 1
     """)
-    cur_val = float(db.session.execute(sel_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+    cur_val = float(db.session.execute(sel_sql, {"uid": uid, "d": d_iso, "sid": sid_norm}).scalar() or 0.0)
 
     cap_value = MAX_BOOSTS_PER_TARGET * BOOST_UNIT
     remaining_value = cap_value - cur_val
     if remaining_value <= 1e-12:
-        # Plafond déjà atteint
         bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
         return jsonify(ok=False, error="cap_reached", total=cur_val, bolts_left=bolts_left), 400
 
@@ -5238,8 +5239,8 @@ def ppp_boost():
                 raise IntegrityError("no_bolts", params=None, orig=None)
 
             # 2) UPSERT sur la cible, clampé au plafond
-            #    - insert → value = MIN(:inc, :cap_value)
-            #    - conflict → value = MIN(COALESCE(value,0)+:inc, :cap_value)
+            #    - insert → value = MIN(:inc, :cap)
+            #    - conflict → value = MIN(COALESCE(value,0)+:inc, :cap)
             upsert_sql = text("""
                 INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
                 VALUES (:uid, :d, :sid, MIN(:inc, :cap), :now)
@@ -5249,27 +5250,27 @@ def ppp_boost():
             """)
             db.session.execute(upsert_sql, {
                 "uid": uid,
-                "d": bet_date,
+                "d": d_iso,
                 "sid": sid_norm,
                 "inc": inc,
                 "cap": cap_value,
                 "now": datetime.now(UTC),
             })
 
-            # 3) Lire le total actualisé et le stock restant
-            new_total = float(db.session.execute(sel_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+            # 3) Lire le total actualisé et le stock restant (même session/txn)
+            new_total = float(db.session.execute(sel_sql, {"uid": uid, "d": d_iso, "sid": sid_norm}).scalar() or 0.0)
+            # NB: db.session.get() relira la valeur mise à jour dans la même transaction
             bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
 
         return jsonify(ok=True, total=new_total, bolts_left=bolts_left), 200
 
     except IntegrityError as ie:
-        # soit plus d'éclairs, soit autre contrainte
         db.session.rollback()
         if str(ie).startswith("no_bolts"):
             bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
             return jsonify(ok=False, error="no_bolts", bolts_left=bolts_left), 400
         return jsonify(ok=False, error="conflict"), 409
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         return jsonify(ok=False, error="server_error"), 500
 
