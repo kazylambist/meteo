@@ -169,6 +169,11 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
         pass
 
 db = SQLAlchemy(app)
+
+# --- Flask-Migrate (migrations Alembic automatiques) ---
+from flask_migrate import Migrate
+migrate = Migrate(app, db)
+
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
@@ -267,7 +272,7 @@ if RUN_MIG:
                 # colonne déjà présente
                 pass
             try:
-                db.session.execute(text("UPDATE user SET bolts = 10 WHERE bolts IS NULL"))
+                db.session.execute(text("UPDATE user SET bolts = 10 WHERE bolts IS NULL or bolts = 0"))
             except Exception:
                 pass
 
