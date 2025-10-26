@@ -922,6 +922,26 @@ def remaining_points(user):
     )
     return max(0.0, round(left, 6))
 
+# --- helper défensif: garantit user.bolts ---
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+
+def ensure_bolts_column():
+    try:
+        # Détecte la colonne
+        rows = db.session.execute(text("PRAGMA table_info(user)")).all()
+        cols = {r[1] for r in rows}  # (cid, name, type, notnull, dflt_value, pk)
+        if "bolts" not in cols:
+            # Ajoute la colonne
+            db.session.execute(text("ALTER TABLE user ADD COLUMN bolts INTEGER NOT NULL DEFAULT 0"))
+            # Backfill doux (tu peux mettre 5, 10, …)
+            db.session.execute(text("UPDATE user SET bolts = 5 WHERE bolts IS NULL OR bolts = 0"))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        # On laisse la route échouer si on n'a pas pu réparer proprement
+        raise
+
 from zoneinfo import ZoneInfo
 from datetime import timezone
 
@@ -5180,6 +5200,7 @@ from sqlalchemy.exc import IntegrityError
 @app.post("/ppp/boost")
 @login_required
 def ppp_boost():
+    ensure_bolts_column()
     """
     Ajoute un boost (éclair) de +value (par défaut +5.0) à la cote d'une date,
     éventuellement pour une station (station_id). L'opération consomme 1 éclair
