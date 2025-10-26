@@ -1753,6 +1753,8 @@ body.ppp-page {
     linear-gradient(180deg, var(--bg), var(--bg2) 60%, var(--bg) 100%);
   background-attachment: fixed;
 }
+#boltTool:not([data-count])::after,
+#boltTool[data-count=""]::after { display:none; }
 </style>
 """
 
@@ -2320,7 +2322,6 @@ PPP_HTML = """
     border-radius: 999px; padding: 2px 6px;
     box-shadow: 0 2px 8px rgba(0,0,0,.25);
   }
-  
 
   /* Feedback drop */
   .ppp-day.drop-ok   { outline:2px dashed rgba(255,215,0,.65); outline-offset:3px; }
@@ -2442,6 +2443,14 @@ PPP_HTML = """
     <div class="nav-right">
       <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
 
+    <div class="nav-right">
+      <span
+        id="boltTool"
+        class="bolt-tool"
+        draggable="true"
+        data-count="{{ current_user.bolts or 0 }}"
+        title="Éclairs restants : {{ current_user.bolts or 0 }}"
+      >⚡</span>
       <a id="trade-unread"
          class="badge-unread"
          href="{{ url_for('trade_page') }}"
@@ -6384,7 +6393,13 @@ def api_comment():
 def comment_echo():
     payload = request.get_json(silent=True) or {}
     data = (payload.get("imageDataUrl") or "")
-    return {"len": len(data), "head": data[:32]}, 200  
+    return {"len": len(data), "head": data[:32]}, 200
+
+@app.get("/api/users/bolts")
+@login_required
+def api_users_bolts():
+    u = db.session.get(User, current_user.id)
+    return jsonify({"bolts": int(getattr(u, "bolts", 0))})
 
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user
