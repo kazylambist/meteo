@@ -207,6 +207,20 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE ppp_boosts ADD COLUMN value REAL NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                pass
+
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE ppp_boosts ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ))
+            except Exception:
+                pass
+
             # PPP: funded_from_balance pour séparer solde vs. achat
             try:
                 db.session.execute(text(
