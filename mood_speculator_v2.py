@@ -2439,10 +2439,6 @@ PPP_HTML = """
         </div>
       {% endif %}
     </div>
-
-    <div class="nav-right">
-      <span id="boltTool" class="bolt-tool" draggable="true" title="Éclair x5">⚡</span>
-
     <div class="nav-right">
       <span
         id="boltTool"
