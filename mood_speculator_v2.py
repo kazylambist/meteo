@@ -5279,40 +5279,48 @@ def ppp_boost():
                 # pas d'éclair en stock
                 raise IntegrityError("no_bolts", params=None, orig=None)
 
-            # 2) UPSERT sur la cible, clampé au plafond
-            #    - insert → value = MIN(:inc, :cap)
-            #    - conflict → value = MIN(COALESCE(value,0)+:inc, :cap)
-            upsert_sql = text("""
+            # 2) UPSERT clampé au plafond
+            db.session.execute(text("""
                 INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
                 VALUES (:uid, :d, :sid, MIN(:inc, :cap), :now)
                 ON CONFLICT(user_id, bet_date, station_id)
                 DO UPDATE SET
                     value = MIN(COALESCE(ppp_boosts.value, 0) + :inc, :cap)
-            """)
-            db.session.execute(upsert_sql, {
+            """), {
                 "uid": uid,
-                "d": d_iso,
+                "d": bet_date,
                 "sid": sid_norm,
                 "inc": inc,
                 "cap": cap_value,
                 "now": datetime.now(UTC),
             })
 
-            # 3) Lire le total actualisé et le stock restant (même session/txn)
-            new_total = float(db.session.execute(sel_sql, {"uid": uid, "d": d_iso, "sid": sid_norm}).scalar() or 0.0)
-            # NB: db.session.get() relira la valeur mise à jour dans la même transaction
-            bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
+            # ⚠️ IMPORTANT: relire par SQL (ne pas utiliser l'ORM identity map)
+            new_total = float(db.session.execute(text("""
+                SELECT COALESCE(value, 0.0)
+                FROM ppp_boosts
+                WHERE user_id = :uid AND bet_date = :d AND COALESCE(station_id, '') = :sid
+                LIMIT 1
+            """), {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+
+            bolts_left = int(db.session.execute(text("""
+                SELECT COALESCE(bolts, 0) FROM user WHERE id = :uid
+            """), {"uid": uid}).scalar() or 0)
 
         return jsonify(ok=True, total=new_total, bolts_left=bolts_left), 200
 
     except IntegrityError as ie:
         db.session.rollback()
         if str(ie).startswith("no_bolts"):
-            bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
+            # relire proprement
+            bolts_left = int(db.session.execute(text(
+                "SELECT COALESCE(bolts,0) FROM user WHERE id = :uid"
+            ), {"uid": uid}).scalar() or 0)
             return jsonify(ok=False, error="no_bolts", bolts_left=bolts_left), 400
         return jsonify(ok=False, error="conflict"), 409
-    except Exception:
+    except Exception as e:
         db.session.rollback()
+        app.logger.exception("ppp_boost server_error")
         return jsonify(ok=False, error="server_error"), 500
 
 @app.post('/api/ppp/bets/<int:bet_id>/boosts')
@@ -6415,8 +6423,10 @@ def comment_echo():
 @app.get("/api/users/bolts")
 @login_required
 def api_users_bolts():
-    u = db.session.get(User, current_user.id)
-    return jsonify({"bolts": int(getattr(u, "bolts", 0))})
+    bolts = int(db.session.execute(text(
+        "SELECT COALESCE(bolts,0) FROM user WHERE id = :uid"
+    ), {"uid": int(current_user.id)}).scalar() or 0)
+    return jsonify({"bolts": bolts})
 
 # --- Trade API ---------------------------------------------------------------------
 from flask_login import login_required, current_user
