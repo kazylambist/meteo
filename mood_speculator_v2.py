@@ -316,6 +316,14 @@ if RUN_MIG:
                 """))
             except Exception:
                 pass
+
+            # PPP boosts: normaliser station_id NULL -> '' pour cohérence avec l’UPSERT
+            try:
+                db.session.execute(text("UPDATE ppp_boosts SET station_id = '' WHERE station_id IS NULL"))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                
             # Si ancienne colonne nullable → normaliser à '' (éviter NULL dans UNIQUE)
             try:
                 db.session.execute(text("""
@@ -4764,7 +4772,7 @@ def ppp(station_id=None):
         page_title = "Zeus"
 
     def _ppp_url():
-        return url_for('ppp', station_id=scope_station_id) if scope_station_id else url_for('ppp')    
+        return url_for('ppp', station_id=scope_station_id) if scope_station_id else url_for('ppp')
 
     # ------------------ POST: créer une mise ------------------
     if request.method == 'POST':
@@ -4792,9 +4800,9 @@ def ppp(station_id=None):
             flash("Date invalide.")
             return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
 
-        # validations métier (garde tes helpers existants)
-        today = today_paris_date()  # ta fonction existante
-        ok, msg, offset, odds = ppp_validate_can_bet(target, today)  # ta fonction existante
+        # validations métier
+        today = today_paris_date()
+        ok, msg, offset, odds = ppp_validate_can_bet(target, today)
         if not ok:
             flash(msg or "Mise impossible pour ce jour.")
             return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
@@ -4816,7 +4824,7 @@ def ppp(station_id=None):
             return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
 
         # budget
-        grem = remaining_points(current_user)  # ton helper
+        grem = remaining_points(current_user)
         if amount > grem + 1e-6:
             flash(f"Budget insuffisant. Points restants : {grem:.3f}.")
             return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
@@ -4827,7 +4835,7 @@ def ppp(station_id=None):
             bet_date=target,
             choice=choice,
             amount=amount,
-            odds=float(odds),         # cote initiale (sans boost) renvoyée par ton helper
+            odds=float(odds),         # cote initiale (sans boost)
             status='ACTIVE',
             station_id=scope_station_id,
             funded_from_balance=1
@@ -4873,23 +4881,23 @@ def ppp(station_id=None):
         })
         bets_map[key] = entry
 
-    # Boosts groupés par jour pour CE scope
+    # -------- Boosts groupés par jour pour CE scope (normalisation station_id -> '') --------
     boosts_map = {}
+    sid_norm = scope_station_id or ""  # IMPORTANT: même normalisation que dans /ppp/boost
     res = db.session.execute(
         text("""
-          SELECT substr(bet_date,1,10) AS d, SUM(COALESCE(value,0)) AS total
-          FROM ppp_boosts
-          WHERE user_id = :uid
-            AND (
-              (:sid IS NULL AND station_id IS NULL)
-              OR station_id = :sid
-            )
-          GROUP BY d
+          SELECT bet_date AS d, SUM(COALESCE(value,0)) AS total
+            FROM ppp_boosts
+           WHERE user_id = :uid
+             AND COALESCE(station_id, '') = :sid
+           GROUP BY d
         """),
-        {"uid": current_user.id, "sid": scope_station_id}
+        {"uid": current_user.id, "sid": sid_norm}
     )
     for d, total in res:
-        boosts_map[str(d)] = float(total or 0.0)
+        # d peut être un objet date ou une str selon le driver
+        key = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
+        boosts_map[key] = float(total or 0.0)
 
     return render_template_string(
         PPP_HTML.replace("Zeus", page_title),
