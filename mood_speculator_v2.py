@@ -5214,31 +5214,24 @@ from sqlalchemy.exc import IntegrityError
 @app.post("/ppp/boost")
 @login_required
 def ppp_boost():
-    ensure_bolts_column()
     """
     Ajoute un boost (éclair) de +value (par défaut +5.0) à la cote d'une date,
-    éventuellement pour une station (station_id). L'opération consomme 1 éclair
-    dans le stock utilisateur (User.bolts), de façon atomique.
-
-    Règles:
-      - Stock d'éclairs (User.bolts) : doit être > 0
-      - Plafond par cible (user_id, bet_date, station_id_normalisé) :
-          total_value <= MAX_BOOSTS_PER_TARGET * BOOST_UNIT
-    Réponse: { ok: true, total: <nouvelle somme pour cette cible>, bolts_left: <restant> }
+    éventuellement pour une station. Consomme 1 éclair (User.bolts).
+    Plafond total clampé par cible (user_id, bet_date, station_id_normalisé).
     """
     data = request.get_json(silent=True) or {}
     date_str   = (data.get("date") or "").strip()
-    station_id = data.get("station_id")  # peut être None côté JS
+    station_id = data.get("station_id")
 
-    # --- Config du plafond ---
+    # Config
     MAX_BOOSTS_PER_TARGET = int(getattr(app.config, "PPP_MAX_BOOSTS_PER_TARGET", 5))
     BOOST_UNIT            = float(getattr(app.config, "PPP_BOOST_UNIT", 5.0))
+    cap_value             = MAX_BOOSTS_PER_TARGET * BOOST_UNIT
 
-    # Normalisation station (SQLite + NULL dans UNIQUE → pas d'UPSERT fiable)
-    # On force une chaîne vide pour représenter "toutes stations".
+    # Normalisation: on remplace NULL par chaîne vide pour une clé stable
     sid_norm = (station_id or "")
 
-    # Parse de l'incrément demandé (on accepte valeur libre mais on la reborne)
+    # Parse inputs
     try:
         inc_req = float(data.get("value") or BOOST_UNIT)
     except Exception:
@@ -5253,88 +5246,64 @@ def ppp_boost():
     except Exception:
         return jsonify(ok=False, error="bad_date"), 400
 
-    # Toujours passer une chaîne ISO à SQLite pour des comparaisons stables
-    d_iso = bet_date.isoformat()
     uid = int(current_user.id)
 
-    # --- Récup total existant pour la cible ---
-    sel_sql = text("""
-        SELECT COALESCE(value, 0.0)
-        FROM ppp_boosts
-        WHERE user_id = :uid
-          AND bet_date = :d
-          AND COALESCE(station_id, '') = :sid
-        LIMIT 1
+    # SQL prêts
+    upd_bolts_sql = text("""
+        UPDATE user
+           SET bolts = bolts - 1
+         WHERE id = :uid
+           AND COALESCE(bolts, 0) > 0
     """)
-    cur_val = float(db.session.execute(sel_sql, {"uid": uid, "d": d_iso, "sid": sid_norm}).scalar() or 0.0)
 
-    cap_value = MAX_BOOSTS_PER_TARGET * BOOST_UNIT
-    remaining_value = cap_value - cur_val
-    if remaining_value <= 1e-12:
-        bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
-        return jsonify(ok=False, error="cap_reached", total=cur_val, bolts_left=bolts_left), 400
+    upsert_sql = text("""
+        INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
+        VALUES (:uid, :d, :sid, MIN(:inc, :cap), :now)
+        ON CONFLICT(user_id, bet_date, station_id)
+        DO UPDATE SET
+            value = MIN(COALESCE(ppp_boosts.value, 0) + :inc, :cap)
+    """)
 
-    # On ne pousse pas au-delà du plafond
-    inc = min(inc_req, remaining_value)
-    if inc <= 1e-12:
-        bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
-        return jsonify(ok=False, error="cap_reached", total=cur_val, bolts_left=bolts_left), 400
+    sel_total_sql = text("""
+        SELECT COALESCE(value, 0.0)
+          FROM ppp_boosts
+         WHERE user_id = :uid
+           AND bet_date = :d
+           AND COALESCE(station_id, '') = :sid
+         LIMIT 1
+    """)
 
-    # --- Transaction atomique ---
     try:
-        with db.session.begin():
-            # 1) Réserver 1 éclair si disponible
-            upd_bolts = db.session.execute(text("""
-                UPDATE user
-                SET bolts = bolts - 1
-                WHERE id = :uid AND COALESCE(bolts, 0) > 0
-            """), {"uid": uid})
-            if upd_bolts.rowcount != 1:
-                # pas d'éclair en stock
-                raise IntegrityError("no_bolts", params=None, orig=None)
+        # 1) Réserver 1 éclair
+        res = db.session.execute(upd_bolts_sql, {"uid": uid})
+        if res.rowcount != 1:
+            db.session.rollback()
+            # Plus de stock
+            u = db.session.get(User, uid)
+            return jsonify(ok=False, error="no_bolts", bolts_left=int((u and u.bolts) or 0)), 400
 
-            # 2) UPSERT clampé au plafond
-            db.session.execute(text("""
-                INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
-                VALUES (:uid, :d, :sid, MIN(:inc, :cap), :now)
-                ON CONFLICT(user_id, bet_date, station_id)
-                DO UPDATE SET
-                    value = MIN(COALESCE(ppp_boosts.value, 0) + :inc, :cap)
-            """), {
-                "uid": uid,
-                "d": bet_date,
-                "sid": sid_norm,
-                "inc": inc,
-                "cap": cap_value,
-                "now": datetime.now(UTC),
-            })
+        # 2) Appliquer le boost (clampé par cap_value)
+        db.session.execute(upsert_sql, {
+            "uid": uid, "d": bet_date, "sid": sid_norm,
+            "inc": inc_req, "cap": cap_value, "now": datetime.now(UTC),
+        })
 
-            # ⚠️ IMPORTANT: relire par SQL (ne pas utiliser l'ORM identity map)
-            new_total = float(db.session.execute(text("""
-                SELECT COALESCE(value, 0.0)
-                FROM ppp_boosts
-                WHERE user_id = :uid AND bet_date = :d AND COALESCE(station_id, '') = :sid
-                LIMIT 1
-            """), {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+        # 3) Lire le total actualisé + le stock restant
+        new_total  = float(db.session.execute(sel_total_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+        bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
 
-            bolts_left = int(db.session.execute(text("""
-                SELECT COALESCE(bolts, 0) FROM user WHERE id = :uid
-            """), {"uid": uid}).scalar() or 0)
-
+        # 4) Commit
+        db.session.commit()
         return jsonify(ok=True, total=new_total, bolts_left=bolts_left), 200
 
-    except IntegrityError as ie:
+    except IntegrityError:
         db.session.rollback()
-        if str(ie).startswith("no_bolts"):
-            # relire proprement
-            bolts_left = int(db.session.execute(text(
-                "SELECT COALESCE(bolts,0) FROM user WHERE id = :uid"
-            ), {"uid": uid}).scalar() or 0)
-            return jsonify(ok=False, error="no_bolts", bolts_left=bolts_left), 400
+        # Cas limite: conflit/contrainte (ex.: table/colonnes manquantes)
         return jsonify(ok=False, error="conflict"), 409
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        app.logger.exception("ppp_boost server_error")
+        # Laisse tes logs en place pour voir la stack
+        current_app.logger.exception("ppp_boost server_error")
         return jsonify(ok=False, error="server_error"), 500
 
 @app.post('/api/ppp/bets/<int:bet_id>/boosts')
