@@ -341,6 +341,66 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            # --- PPP_BOOSTS : normalisation + déduplication ---
+            try:
+                # 1) Normalise les NULL en '' (aligne avec la clé logique côté app)
+                db.session.execute(text("""
+                    UPDATE ppp_boosts
+                    SET station_id = ''
+                    WHERE station_id IS NULL
+                """))
+            except Exception:
+                pass
+
+            # 2) Agrège tout dans une table temporaire
+            try:
+                db.session.execute(text("DROP TABLE IF EXISTS _agg_boosts"))
+            except Exception:
+                pass
+
+            try:
+                db.session.execute(text("""
+                    CREATE TEMPORARY TABLE _agg_boosts AS
+                    SELECT
+                        user_id,
+                        bet_date,
+                        COALESCE(station_id, '') AS station_id,
+                        SUM(COALESCE(value,0))   AS v,
+                        MIN(created_at)          AS first_created
+                    FROM ppp_boosts
+                    GROUP BY user_id, bet_date, COALESCE(station_id,'')
+                """))
+            except Exception:
+                pass
+
+            # 3) Remplace les données par la version agrégée (1 ligne par clé)
+            #    (⚠️ si tu avais des FKs référant ppp_boosts.id, dis-le : je te donnerai
+            #    une variante qui conserve les ids. Par défaut ppp_boosts n’est pas référencée.)
+            try:
+                db.session.execute(text("DELETE FROM ppp_boosts"))
+                db.session.execute(text("""
+                    INSERT INTO ppp_boosts (user_id, bet_date, station_id, value, created_at)
+                    SELECT user_id, bet_date, station_id, v, first_created
+                    FROM _agg_boosts
+                """))
+            except Exception:
+                pass
+
+            # 4) (Re)crée l’index unique pour verrouiller l’unicité
+            try:
+                db.session.execute(text("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pppboost_user_date_station
+                    ON ppp_boosts(user_id, bet_date, station_id)
+                """))
+            except Exception:
+                pass
+
+            # 5) Nettoie la table temporaire
+            try:
+                db.session.execute(text("DROP TABLE IF EXISTS _agg_boosts"))
+            except Exception:
+                pass
+
             # --- TRADE : schéma et index nécessaires ---
             # Table minimale si absente
             try:
@@ -5214,7 +5274,7 @@ except ImportError:
     from datetime import timezone as _tz
     UTC = _tz.utc
 
-from flask import request, jsonify
+from flask import request, jsonify, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -5224,22 +5284,26 @@ from sqlalchemy.exc import IntegrityError
 def ppp_boost():
     """
     Ajoute un boost (éclair) de +value (par défaut +5.0) à la cote d'une date,
-    éventuellement pour une station. Consomme 1 éclair (User.bolts).
-    Plafond total clampé par cible (user_id, bet_date, station_id_normalisé).
+    éventuellement pour une station. Consomme 1 éclair (User.bolts) SI ET SEULEMENT SI
+    on peut encore augmenter la valeur (plafond non atteint).
+
+    Plafond total clampé par cible (user_id, bet_date, station_id_normalisé) :
+      total <= MAX_BOOSTS_PER_TARGET * BOOST_UNIT
+    Réponse JSON: { ok, total, bolts_left } (+ erreurs explicites)
     """
     data = request.get_json(silent=True) or {}
     date_str   = (data.get("date") or "").strip()
     station_id = data.get("station_id")
 
-    # Config
+    # --- Config plafond ---
     MAX_BOOSTS_PER_TARGET = int(getattr(app.config, "PPP_MAX_BOOSTS_PER_TARGET", 5))
     BOOST_UNIT            = float(getattr(app.config, "PPP_BOOST_UNIT", 5.0))
     cap_value             = MAX_BOOSTS_PER_TARGET * BOOST_UNIT
 
-    # Normalisation: on remplace NULL par chaîne vide pour une clé stable
+    # Normalisation: chaîne vide pour « toutes stations »
     sid_norm = (station_id or "")
 
-    # Parse inputs
+    # --- Parse inputs ---
     try:
         inc_req = float(data.get("value") or BOOST_UNIT)
     except Exception:
@@ -5256,7 +5320,15 @@ def ppp_boost():
 
     uid = int(current_user.id)
 
-    # SQL prêts
+    # --- SQL helpers ---
+    sel_total_sql = text("""
+        SELECT COALESCE(SUM(COALESCE(value, 0.0)), 0.0)
+          FROM ppp_boosts
+         WHERE user_id = :uid
+           AND bet_date = :d
+           AND COALESCE(station_id, '') = :sid
+    """)
+
     upd_bolts_sql = text("""
         UPDATE user
            SET bolts = bolts - 1
@@ -5272,45 +5344,60 @@ def ppp_boost():
             value = MIN(COALESCE(ppp_boosts.value, 0) + :inc, :cap)
     """)
 
-    sel_total_sql = text("""
-        SELECT COALESCE(value, 0.0)
-          FROM ppp_boosts
-         WHERE user_id = :uid
-           AND bet_date = :d
-           AND COALESCE(station_id, '') = :sid
-         LIMIT 1
-    """)
-
     try:
-        # 1) Réserver 1 éclair
+        # 1) Lire le total actuel (somme robuste)
+        cur_total = float(
+            db.session.execute(
+                sel_total_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}
+            ).scalar() or 0.0
+        )
+
+        # 2) Vérifier marge restante
+        remaining = cap_value - cur_total
+        if remaining <= 1e-12:
+            # déjà au plafond → ne pas consommer d'éclair
+            u = db.session.get(User, uid)
+            return jsonify(ok=False, error="cap_reached", total=cur_total,
+                           bolts_left=int((u and u.bolts) or 0)), 400
+
+        # 3) Clamp de l'incrément demandé
+        inc = min(inc_req, remaining)
+        if inc <= 1e-12:
+            u = db.session.get(User, uid)
+            return jsonify(ok=False, error="cap_reached", total=cur_total,
+                           bolts_left=int((u and u.bolts) or 0)), 400
+
+        # 4) Décrémenter 1 éclair (si dispo)
         res = db.session.execute(upd_bolts_sql, {"uid": uid})
         if res.rowcount != 1:
             db.session.rollback()
-            # Plus de stock
             u = db.session.get(User, uid)
-            return jsonify(ok=False, error="no_bolts", bolts_left=int((u and u.bolts) or 0)), 400
+            return jsonify(ok=False, error="no_bolts",
+                           bolts_left=int((u and u.bolts) or 0)), 400
 
-        # 2) Appliquer le boost (clampé par cap_value)
+        # 5) UPSERT clampé
         db.session.execute(upsert_sql, {
             "uid": uid, "d": bet_date, "sid": sid_norm,
-            "inc": inc_req, "cap": cap_value, "now": datetime.now(UTC),
+            "inc": inc, "cap": cap_value, "now": datetime.now(UTC),
         })
 
-        # 3) Lire le total actualisé + le stock restant
-        new_total  = float(db.session.execute(sel_total_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}).scalar() or 0.0)
+        # 6) Lire le total après mise à jour + stock restant
+        new_total = float(
+            db.session.execute(
+                sel_total_sql, {"uid": uid, "d": bet_date, "sid": sid_norm}
+            ).scalar() or 0.0
+        )
         bolts_left = int((db.session.get(User, uid) or User()).bolts or 0)
 
-        # 4) Commit
+        # 7) Commit la transaction implicite
         db.session.commit()
         return jsonify(ok=True, total=new_total, bolts_left=bolts_left), 200
 
     except IntegrityError:
         db.session.rollback()
-        # Cas limite: conflit/contrainte (ex.: table/colonnes manquantes)
         return jsonify(ok=False, error="conflict"), 409
     except Exception:
         db.session.rollback()
-        # Laisse tes logs en place pour voir la stack
         current_app.logger.exception("ppp_boost server_error")
         return jsonify(ok=False, error="server_error"), 500
 
