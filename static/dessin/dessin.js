@@ -320,7 +320,7 @@ async function handleComment(){
 
     if (!res.ok) {
       let serverMsg = "";
-      try { serverMsg = await res.text(); } catch {}
+      try { serverMsg = await res.text(); } catch (e) {}
       await typeInto(result, `Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`);
       return;
     }
