@@ -48,6 +48,7 @@ function fillPaperBackground() {
 
 // --- Init ---
 function init() {
+  canvas.style.background = "#000";
   // Peindre un fond NOIR réel (pas transparent)
   fillPaperBackground();
 
