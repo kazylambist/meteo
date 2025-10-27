@@ -5785,6 +5785,10 @@ DESSIN_DIR = APP_DIR / "static" / "dessin"
 def dessin_page():
     return send_from_directory(os.fspath(DESSIN_DIR), "dessin.html")
 
+@app.route("/static/dessin/dessin.html")
+def redirect_old_dessin():
+    return redirect(url_for("dessin_page"), code=301)
+
 @app.route("/dessin/<path:path>")
 def dessin_assets(path):
     return send_from_directory(os.fspath(DESSIN_DIR), path)
