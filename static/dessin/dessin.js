@@ -302,10 +302,19 @@ async function handleComment(){
 
     const dataUrl = await snapshotWithBackground(canvas, "#000000", 768, 0.72);
 
+    // lire la mise
+    const stakeInput = document.getElementById("betAmount");
+    const stake = stakeInput ? Math.floor(Math.max(1, Number(stakeInput.value||0))) : 0;
+    // on exige au moins 1 pt
+    if (!stake || stake < 1) {
+      await typeInto(result, "Il faut miser au moins 1 point avant d’invoquer ZEUS ⚡");
+      return;
+    }
+
     const res = await fetch("/api/comment", {
       method: "POST",
       headers: { "Content-Type":"application/json" },
-      body: JSON.stringify({ imageDataUrl: dataUrl })
+      body: JSON.stringify({ imageDataUrl: dataUrl, stake })
     });
 
     if (!res.ok) {
@@ -341,7 +350,27 @@ async function handleComment(){
     if (prefersReducedMotion()){
       result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
     } else {
-      await typeInto(result, comment || "Par les nuages sacrés, ton art rayonne !", 16);
+    // Compléter l'affichage selon verdict + infos back (multiplier, payout, balance, bolts)
+    let extra = "";
+    if (typeof data.multiplier !== "undefined" && typeof data.payout !== "undefined") {
+      if (data.multiplier > 0) {
+        extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', {maximumFractionDigits:0})} pts (mise × ${data.multiplier}).`;
+        extra += `\n⚡ Bonus: +1 éclair.`;
+      } else {
+        extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
+      }
+    }
+    if (typeof data.balance !== "undefined" && data.balance !== null) {
+      extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
+    }
+    if (typeof data.bolts !== "undefined" && data.bolts !== null) {
+      extra += `\n⚡ Éclairs: ${data.bolts}`;
+    }
+
+    if (extra) {
+      await typeInto(result, comment + extra);
+    } else {
+      await typeInto(result, comment);
     }
 
     // Effet de frappe pour le commentaire

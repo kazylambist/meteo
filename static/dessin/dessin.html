@@ -236,6 +236,43 @@
     @keyframes blink {
       50% { opacity: 0; }
     }
+    .action-row{
+      display:inline-flex;
+      gap:10px;
+      align-items:center;
+    }
+
+    .bet-box{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background: color-mix(in srgb, var(--card) 70%, transparent);
+      box-shadow: 0 1px 4px rgba(0,0,0,.05);
+    }
+
+    .bet-box label{
+      font-size:12px;
+      color:var(--muted);
+    }
+
+    .bet-box .unit{
+      font-size:12px;
+      color:var(--muted);
+      margin-left:2px;
+    }
+
+    #betAmount{
+      width:72px;
+      padding:8px;
+      border:1px solid var(--border);
+      border-radius:10px;
+      background: transparent;
+      color: var(--fg);
+      font-weight:600;
+    }
   </style>
 </head>
 <body>
@@ -245,8 +282,16 @@
         <img src="/static/img/weather_bets_S.png" alt="MétéoGod" class="brand-logo">
       </a>
       <div class="center-action">
-        <button id="commentBtn" class="primary">Solliciter ZEUS</button>
+        <div class="action-row">
+          <button id="commentBtn" class="primary">Solliciter ZEUS</button>
+          <div class="bet-box" role="group" aria-label="Mise">
+            <label for="betAmount">Mise</label>
+            <input id="betAmount" type="number" inputmode="numeric" min="1" step="1" value="1" />
+            <span class="unit">pts</span>
+          </div>
+        </div>
       </div>
+
       <div class="header-spacer" aria-hidden="true"></div>
     </header>
 
