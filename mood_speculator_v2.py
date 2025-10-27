@@ -462,6 +462,23 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            try:
+                db.session.execute(text("""
+                    CREATE TABLE IF NOT EXISTS art_bets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        amount REAL NOT NULL,
+                        verdict TEXT NOT NULL,
+                        multiplier INTEGER NOT NULL,
+                        payout REAL NOT NULL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_artbets_user ON art_bets(user_id)"))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
             db.session.commit()
             print("[MIGRATIONS] OK")
         except Exception as e:
@@ -783,6 +800,18 @@ with app.app_context():
             )
     except Exception:
         pass
+
+class ArtBet(db.Model):
+    __tablename__ = "art_bets"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    amount = db.Column(db.Float, nullable=False)            # points misés
+    verdict = db.Column(db.String(12), nullable=False)      # "WIN" | "LOSE"
+    multiplier = db.Column(db.Integer, nullable=False)      # 7..14 si WIN, sinon 0
+    payout = db.Column(db.Float, nullable=False, default=0) # amount * multiplier ou 0
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', backref=db.backref('art_bets', lazy=True))    
     
 # -----------------------------------------------------------------------------
 # Helpers
@@ -1003,6 +1032,21 @@ def remaining_points(user):
         + float(trade_earned)   # prix encaissés sur les ventes
     )
     return max(0.0, round(left, 6))
+
+    # --- Art bets (dessin) : on ajoute le net (gains - mises) ---
+    try:
+        art_net = float(db.session.execute(text("""
+            SELECT COALESCE(SUM(payout - amount), 0.0) FROM art_bets WHERE user_id = :uid
+        """), {"uid": uid}).scalar() or 0.0)
+    except Exception:
+        art_net = 0.0
+
+    # tout à la fin du calcul (retour)
+    return base \
+           - ppp_active_funded + ppp_won \
+           - wet_active        + wet_won \
+           - trade_spent       + trade_resale_gain \
+           + art_net
 
 # --- helper défensif: garantit user.bolts ---
 from sqlalchemy import text
@@ -6413,10 +6457,15 @@ def api_comment():
     try:
         # ---- 1) Récup image (JSON ou multipart) ----
         image_data_url = None
+        stake = 0.0
 
         if request.is_json:
             payload = request.get_json(silent=True) or {}
             image_data_url = (payload.get("imageDataUrl") or "").strip()
+            try:
+                stake = float(payload.get("stake") or 0.0)
+            except Exception:
+                stake = 0.0
 
         if not image_data_url and "file" in request.files:
             raw = request.files["file"].read()
@@ -6446,8 +6495,6 @@ def api_comment():
         client = _openai_client()
         model_name = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
-        # On demande explicitement de NE PAS inclure la phrase finale.
-        # On laisse ~220-230 car pour garder de la marge au verdict et à l’éventuelle troncature.
         system_prompt = (
             "Tu es Zeus, dieu des cieux et du tonnerre.\n"
             "Rédige UN commentaire très court (≈220 caractères max), en français soutenu, majestueux et élégant.\n"
@@ -6456,7 +6503,6 @@ def api_comment():
             "IMPORTANT: N'inclus PAS la phrase finale de verdict ; ne conclus PAS par 'Beau dessin.' ni 'Je déteste.'"
         )
 
-        # messages = chat.completions (vision via image_url -> Data URL)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": [
@@ -6468,7 +6514,7 @@ def api_comment():
         resp = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            max_tokens=120,   # un peu de marge
+            max_tokens=120,
             temperature=0.9,
         )
 
@@ -6479,10 +6525,79 @@ def api_comment():
         verdict = _pick_verdict()  # 1/13 vs 12/13
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
-        return jsonify({
-          "comment": comment,
-          "verdict": verdict
-        })
+        # ---- 3) Gestion mise / gain / perte / éclairs ----
+        from flask_login import current_user
+        from sqlalchemy import text
+
+        multiplier = None
+        payout = None
+        balance = None
+        bolts_now = None
+
+        if stake >= 1.0 and getattr(current_user, "is_authenticated", False):
+            try:
+                uid = int(current_user.id)
+
+                if verdict == "Beau dessin.":
+                    multiplier = int(random.randint(7, 14))
+                    payout = float(stake * multiplier)
+                    db.session.add(ArtBet(
+                        user_id=uid,
+                        amount=stake,
+                        verdict="WIN",
+                        multiplier=multiplier,
+                        payout=payout,
+                    ))
+                    # +1 éclair
+                    db.session.execute(text("""
+                        UPDATE user SET bolts = COALESCE(bolts,0) + 1
+                        WHERE id = :uid
+                    """), {"uid": uid})
+                else:
+                    multiplier = 0
+                    payout = 0.0
+                    db.session.add(ArtBet(
+                        user_id=uid,
+                        amount=stake,
+                        verdict="LOSE",
+                        multiplier=0,
+                        payout=0.0,
+                    ))
+
+                db.session.commit()
+
+                # Recalcul du solde et des éclairs
+                try:
+                    balance = float(remaining_points(current_user))
+                except Exception:
+                    balance = None
+
+                try:
+                    bolts_now = int(db.session.execute(text(
+                        "SELECT COALESCE(bolts,0) FROM user WHERE id = :uid"
+                    ), {"uid": uid}).scalar() or 0)
+                except Exception:
+                    bolts_now = None
+
+            except Exception as e:
+                db.session.rollback()
+                print("[/api/comment] artbet ERROR:", repr(e), file=sys.stderr)
+
+        # ---- 4) Retour JSON ----
+        resp = {
+            "comment": comment,
+            "verdict": verdict,
+        }
+        if multiplier is not None:
+            resp["multiplier"] = multiplier
+        if payout is not None:
+            resp["payout"] = payout
+        if balance is not None:
+            resp["balance"] = balance
+        if bolts_now is not None:
+            resp["bolts"] = bolts_now
+
+        return jsonify(resp)
 
     except Exception as e:
         print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
