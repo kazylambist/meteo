@@ -41,13 +41,13 @@ window.addEventListener("resize", setupDPR);
 function setBalance(newBalance) {
   if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
   const text = Math.round(Number(newBalance)).toLocaleString('fr-FR');
-  const candidates = document.querySelectorAll(
-    '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value'
-  );
-  candidates.forEach(el => {
+  document.querySelectorAll(
+    '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value, .solde-value, .solde-box .solde-value'
+  ).forEach(el => {
     if (el.tagName === 'INPUT') el.value = text;
     else el.textContent = text;
   });
+  document.dispatchEvent(new CustomEvent('balance:update', { detail: { balance: Number(newBalance) } }));
 }
 
 // Met à jour l’affichage des boosts (compatible avec anciens sélecteurs "bolts")
