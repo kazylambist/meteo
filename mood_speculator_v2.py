@@ -385,7 +385,7 @@ if RUN_MIG:
                 """))
             except Exception:
                 pass
-
+            
             # 4) (Re)crée l’index unique pour verrouiller l’unicité
             try:
                 db.session.execute(text("""

@@ -280,33 +280,12 @@ async function handleComment(){
   const btn = document.getElementById("commentBtn");
   const result = document.getElementById("result");
 
-  function typeInto(el, text, speed = 18){
-    return new Promise(resolve=>{
-      el.classList.remove("hidden");
-      el.textContent = "";
-      const cursor = document.createElement("span");
-      cursor.className = "cursor";
-      cursor.textContent = "▍";
-      el.appendChild(cursor);
-
-      let i = 0;
-      (function tick(){
-        if (i < text.length){
-          cursor.insertAdjacentText("beforebegin", text[i++]);
-          setTimeout(tick, speed);
-        } else {
-          resolve();
-        }
-      })();
-    });
-  }
-
   const show = (text) => {
     result.textContent = text;
     result.classList.remove("hidden");
   };
 
-  try{
+  try {
     btn.disabled = true;
     btn.textContent = "Ça réfléchit…";
     result.classList.add("hidden");
@@ -315,7 +294,7 @@ async function handleComment(){
     const dataUrl = await snapshotWithBackground(canvas, "#000000", 768, 0.72);
 
     const stakeInput = document.getElementById("betAmount");
-    const stake = stakeInput ? Math.floor(Math.max(1, Number(stakeInput.value||0))) : 0;
+    const stake = stakeInput ? Math.floor(Math.max(1, Number(stakeInput.value || 0))) : 0;
     if (!stake || stake < 1) {
       await typeInto(result, "Il faut miser au moins 1 point avant d’invoquer ZEUS ⚡");
       return;
@@ -323,14 +302,31 @@ async function handleComment(){
 
     const res = await fetch("/api/comment", {
       method: "POST",
-      headers: { "Content-Type":"application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageDataUrl: dataUrl, stake })
     });
 
     if (!res.ok) {
+      // Essaye d'extraire un message + un solde éventuel (ex: solde insuffisant)
       let serverMsg = "";
-      try { serverMsg = await res.text(); } catch (e) {}
-      await typeInto(result, `Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`);
+      try {
+        const txt = await res.text();
+        try {
+          const j = JSON.parse(txt);
+          if (j && typeof j.balance !== "undefined" && j.balance !== null) {
+            setBalance(j.balance);
+          }
+          serverMsg = j && j.error ? String(j.error) : (txt || "");
+        } catch {
+          serverMsg = txt || "";
+        }
+      } catch {}
+      const msg = `Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`;
+      if (prefersReducedMotion()) {
+        show(msg);
+      } else {
+        await typeInto(result, msg);
+      }
       return;
     }
 
@@ -341,12 +337,12 @@ async function handleComment(){
     result.classList.remove("hidden");
 
     // MAJ solde & éclairs si fournis par l'API
-    if (typeof data.balance !== 'undefined' && data.balance !== null) {
+    if (data.balance !== undefined && data.balance !== null) {
       setBalance(data.balance);
     }
-    if (typeof data.bolts !== 'undefined' && data.bolts !== null) {
-      const boltsEls = document.querySelectorAll('[data-role="bolts"], #bolts, .js-bolts');
-      boltsEls.forEach(el => el.textContent = String(data.bolts));
+    if (data.bolts !== undefined && data.bolts !== null) {
+      document.querySelectorAll('[data-role="bolts"], #bolts, .js-bolts')
+        .forEach(el => el.textContent = String(data.bolts));
     }
 
     // --- 🔊 Son selon le verdict ---
@@ -363,39 +359,40 @@ async function handleComment(){
       }
     }
 
-    if (prefersReducedMotion()){
-      result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
-    } else {
-      // Compléter l'affichage selon verdict + infos back (multiplier, payout, balance, bolts)
-      let extra = "";
-      if (typeof data.multiplier !== "undefined" && typeof data.payout !== "undefined") {
-        if (data.multiplier > 0) {
-          extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', {maximumFractionDigits:0})} pts (mise × ${data.multiplier}).`;
-          extra += `\n⚡ Bonus: +1 éclair.`;
-        } else {
-          extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
-        }
-      }
-      if (typeof data.balance !== "undefined" && data.balance !== null) {
-        extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
-      }
-      if (typeof data.bolts !== "undefined" && data.bolts !== null) {
-        extra += `\n⚡ Éclairs: ${data.bolts}`;
-      }
-
-      if (extra) {
-        await typeInto(result, comment + extra);
+    // 👉 Construire 'extra' AVANT l'affichage, pour l'avoir aussi en mode "motion réduite"
+    let extra = "";
+    if (data.multiplier !== undefined && data.payout !== undefined) {
+      if (data.multiplier > 0) {
+        extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} pts (mise × ${data.multiplier}).`;
+        extra += `\n⚡ Bonus: +1 éclair.`;
       } else {
-        await typeInto(result, comment);
+        extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
       }
-    } // ⟵ ferme le else
-  } catch (err){ // ⟵ et ici le try est désormais correctement fermé
+    }
+    if (data.balance !== undefined && data.balance !== null) {
+      extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
+    }
+    if (data.bolts !== undefined && data.bolts !== null) {
+      extra += `\n⚡ Éclairs: ${data.bolts}`;
+    }
+
+    const fullText = comment + (extra || "");
+
+    if (prefersReducedMotion()) {
+      // sans animation, mais on garde bien les infos
+      result.textContent = fullText;
+    } else {
+      // avec animation dactylo
+      await typeInto(result, fullText);
+    }
+
+  } catch (err) {
     console.error(err);
     result.classList.remove("hidden");
     result.textContent = "Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.";
   } finally {
     btn.disabled = false;
-    btn.textContent = "Montrer à ZEUS";
+    btn.textContent = "Solliciter ZEUS";
   }
 }
 
