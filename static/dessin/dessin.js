@@ -40,14 +40,25 @@ window.addEventListener("resize", setupDPR);
 // Utilitaire : met à jour toutes les zones "solde"
 function setBalance(newBalance) {
   if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
-  const text = Math.round(Number(newBalance)).toLocaleString('fr-FR');
+
+  const n = Math.max(0, Math.round(Number(newBalance)));
+  const text = n.toLocaleString('fr-FR');
+
+  // 1) Tous les sélecteurs déjà gérés
   document.querySelectorAll(
-    '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value, .solde-value, .solde-box .solde-value'
+    '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value'
   ).forEach(el => {
     if (el.tagName === 'INPUT') el.value = text;
     else el.textContent = text;
   });
-  document.dispatchEvent(new CustomEvent('balance:update', { detail: { balance: Number(newBalance) } }));
+
+  // 2) 🔧 Ajout indispensable pour la topbar PPP
+  document.querySelectorAll('.solde-box .solde-value, .solde-value').forEach(el => {
+    el.textContent = text;
+  });
+
+  // 3) (optionnel) Notifier le reste de l’app
+  document.dispatchEvent(new CustomEvent('balance:update', { detail: { balance: n } }));
 }
 
 // Met à jour l’affichage des boosts (compatible avec anciens sélecteurs "bolts")
@@ -349,6 +360,32 @@ async function handleComment(){
         : null;
     if (boostsVal !== null) {
       setBoosts(boostsVal);
+    }
+
+    // MAJ solde & boosts (avec fallback si balance manquant)
+    if (data.balance != null) {
+      setBalance(data.balance);
+    } else if (typeof stake === 'number' && data && data.verdict) {
+      // Fallback : si l'API n'a pas renvoyé "balance", on ajuste localement
+      const delta = (data.verdict === 'Beau dessin.')
+        ? (Number(data.payout || 0) - stake)
+        : -stake;
+
+      const el = document.querySelector('.solde-box .solde-value, .solde-value');
+      if (el) {
+        const current = Number(String(el.textContent).replace(/\D+/g, '') || 0);
+        setBalance(current + delta);
+      }
+    }
+
+    // Boosts (compat bolts)
+    {
+      const boostsVal = (data.boosts !== undefined && data.boosts !== null)
+        ? data.boosts
+        : (data.bolts !== undefined && data.bolts !== null)
+          ? data.bolts
+          : null;
+      if (boostsVal !== null) setBoosts(boostsVal);
     }
 
     // --- 🔊 Son selon le verdict ---
