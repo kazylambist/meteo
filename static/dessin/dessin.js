@@ -41,7 +41,6 @@ window.addEventListener("resize", setupDPR);
 function setBalance(newBalance) {
   if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
   const text = Math.round(Number(newBalance)).toLocaleString('fr-FR');
-  // cible plusieurs sélecteurs possibles (adapte au besoin)
   const candidates = document.querySelectorAll(
     '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value'
   );
@@ -51,10 +50,20 @@ function setBalance(newBalance) {
   });
 }
 
-// --- Fond blanc (évite la transparence) ---
+// Met à jour l’affichage des boosts (compatible avec anciens sélecteurs "bolts")
+function setBoosts(val) {
+  if (val === undefined || val === null) return;
+  const text = String(val);
+  document.querySelectorAll(
+    '[data-role="boosts"], #boosts, .js-boosts, ' +   // nouveaux sélecteurs
+    '[data-role="bolts"], #bolts, .js-bolts'          // rétro-compat
+  ).forEach(el => { el.textContent = text; });
+}
+
+// --- Fond noir (évite la transparence) ---
 function fillPaperBackground() {
   ctx.save();
-  ctx.globalCompositeOperation = "source-over"; // on peint, pas de transparence
+  ctx.globalCompositeOperation = "source-over";
   ctx.fillStyle = CANVAS_BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
@@ -63,25 +72,20 @@ function fillPaperBackground() {
 // --- Init ---
 function init() {
   canvas.style.background = "#000";
-  // Peindre un fond NOIR réel (pas transparent)
   fillPaperBackground();
 
   setupDPR();
-  // Assure que le pinceau reflète bien le blanc par défaut
   ctx.strokeStyle = current.color;
   ctx.lineWidth   = current.size * (window.devicePixelRatio || 1);
 
-  // marquer l'état initial
   pushHistory(); 
   bindTools(); 
   updateBrushPreview(); 
   addShortcuts();
 
-  // UI : si tu as des pastilles/couleurs, marque le blanc comme sélectionné
   const picker = document.getElementById("colorPicker");
   if (picker) picker.value = "#ffffff";
 }
-// si fonts API dispo, attend sa dispo ; sinon, init direct
 document.fonts ? document.fonts.ready.then(init) : init();
 
 // --- Dessin ---
@@ -226,9 +230,9 @@ function bindTools(){
   // --- Bouton commentaire ---
   const commentBtn = document.getElementById("commentBtn");
   if (commentBtn) {
-    // crée/retourne un élément résultat à côté du bouton si absent
-    const resultEl = ensureResultElement(commentBtn);
-    commentBtn.addEventListener("click", () => handleComment(commentBtn, resultEl));
+    // on s'assure que #result existe puis on branche simplement
+    ensureResultElement(commentBtn);
+    commentBtn.addEventListener("click", handleComment);
   }
 }
 
@@ -239,7 +243,6 @@ function ensureResultElement(anchorBtn){
     out = document.createElement("p");
     out.id = "result";
     out.style.marginTop = "8px";
-    // insère juste après le bouton
     anchorBtn.insertAdjacentElement('afterend', out);
   }
   return out;
@@ -307,15 +310,14 @@ async function handleComment(){
     });
 
     if (!res.ok) {
-      // Essaye d'extraire un message + un solde éventuel (ex: solde insuffisant)
+      // Essaye d'extraire un message + un solde/boosts éventuels (ex: solde insuffisant)
       let serverMsg = "";
       try {
         const txt = await res.text();
         try {
           const j = JSON.parse(txt);
-          if (j && typeof j.balance !== "undefined" && j.balance !== null) {
-            setBalance(j.balance);
-          }
+          if (j && j.balance != null) setBalance(j.balance);
+          if (j && (j.boosts != null || j.bolts != null)) setBoosts(j.boosts ?? j.bolts);
           serverMsg = j && j.error ? String(j.error) : (txt || "");
         } catch {
           serverMsg = txt || "";
@@ -336,13 +338,17 @@ async function handleComment(){
 
     result.classList.remove("hidden");
 
-    // MAJ solde & éclairs si fournis par l'API
+    // MAJ solde & boosts si fournis par l'API
     if (data.balance !== undefined && data.balance !== null) {
       setBalance(data.balance);
     }
-    if (data.bolts !== undefined && data.bolts !== null) {
-      document.querySelectorAll('[data-role="bolts"], #bolts, .js-bolts')
-        .forEach(el => el.textContent = String(data.bolts));
+    const boostsVal = (data.boosts !== undefined && data.boosts !== null)
+      ? data.boosts
+      : (data.bolts !== undefined && data.bolts !== null)
+        ? data.bolts
+        : null;
+    if (boostsVal !== null) {
+      setBoosts(boostsVal);
     }
 
     // --- 🔊 Son selon le verdict ---
@@ -364,7 +370,7 @@ async function handleComment(){
     if (data.multiplier !== undefined && data.payout !== undefined) {
       if (data.multiplier > 0) {
         extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} pts (mise × ${data.multiplier}).`;
-        extra += `\n⚡ Bonus: +1 éclair.`;
+        extra += `\n⚡ Bonus: +1 boost.`;
       } else {
         extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
       }
@@ -372,17 +378,16 @@ async function handleComment(){
     if (data.balance !== undefined && data.balance !== null) {
       extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
     }
-    if (data.bolts !== undefined && data.bolts !== null) {
-      extra += `\n⚡ Éclairs: ${data.bolts}`;
+    const boostsValForText = (data.boosts ?? data.bolts);
+    if (boostsValForText !== undefined && boostsValForText !== null) {
+      extra += `\n⚡ Boosts : ${boostsValForText}`;
     }
 
     const fullText = comment + (extra || "");
 
     if (prefersReducedMotion()) {
-      // sans animation, mais on garde bien les infos
       result.textContent = fullText;
     } else {
-      // avec animation dactylo
       await typeInto(result, fullText);
     }
 
@@ -446,6 +451,7 @@ async function downloadImage(){
   a.download = "mon_dessin.jpg"; // JPEG conseillé (fond noir)
   a.click();
 }
+
 // --- Effet de dactylo (typewriter)
 function prefersReducedMotion(){
   return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
