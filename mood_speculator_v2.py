@@ -913,31 +913,35 @@ def remaining_weather_points(u: User) -> float:
 BUDGET_INITIAL = 500.0
 
 from sqlalchemy import text, func
+import os
 
 def remaining_points(user):
-    """Retourne le solde réel de l'utilisateur en lisant prioritairement user.points,
-    avec fallback sur les anciens calculs si cette colonne n'existe pas ou vaut NULL.
+    """
+    1) Essaie d'abord de lire user.points (source de vérité).
+    2) Sinon, retombe sur un calcul 'ledger' à partir des tables PPP/Wet/Trade/ArtBet.
+    3) Optionnel: si POINTS_RECONCILE=1 et divergence détectée, retourne le ledger.
     """
     if not user or not getattr(user, "id", None):
         return 0.0
     uid = int(user.id)
 
-    # --- 0) Tentative : lire directement le solde depuis la table user ---
+    # --- (A) Lecture directe du solde ---
+    points_now = None
     try:
         points_now = db.session.execute(
-            text("SELECT points FROM \"user\" WHERE id = :uid"),
+            text('SELECT points FROM "user" WHERE id = :uid'),
             {"uid": uid}
         ).scalar()
         if points_now is not None:
-            return float(points_now)
+            points_now = float(points_now)
     except Exception:
-        # table ou colonne absente → on retombe sur la logique historique
+        # table ou colonne absente → on passera en ledger
         pass
 
-    # --- 1) Base de départ ---
+    # --- (B) Calcul "ledger" de secours ---
     base = 500.0
 
-    # --- PPP actifs financés depuis le solde ---
+    # PPP actifs financés depuis le solde
     try:
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
@@ -945,8 +949,7 @@ def remaining_points(user):
                 PPPBet.user_id == uid,
                 PPPBet.status == 'ACTIVE',
                 func.coalesce(PPPBet.funded_from_balance, 1) == 1
-            )
-            .scalar()
+            ).scalar()
         ) or 0.0
     except Exception:
         ppp_active_funded = (
@@ -955,7 +958,7 @@ def remaining_points(user):
             .scalar()
         ) or 0.0
 
-    # --- Wet actifs et payés ---
+    # Wet
     wet_active = (
         db.session.query(func.coalesce(func.sum(WetBet.amount), 0.0))
         .filter(WetBet.user_id == uid, WetBet.status == 'ACTIVE')
@@ -967,7 +970,7 @@ def remaining_points(user):
         .scalar()
     ) or 0.0
 
-    # --- Détection table Trade (bet_listing ou trade_listings) ---
+    # Détection table Trade
     def _table_exists(name: str) -> bool:
         try:
             row = db.session.execute(
@@ -981,7 +984,6 @@ def remaining_points(user):
     tbl = "bet_listing" if _table_exists("bet_listing") else (
           "trade_listings" if _table_exists("trade_listings") else None)
 
-    # --- Sommes Trade ---
     def _sum_price_generic(table: str, where_sql: str, params: dict) -> float:
         try:
             v = db.session.execute(text(f"""
@@ -996,9 +998,7 @@ def remaining_points(user):
             return v
         try:
             v2 = db.session.execute(text(f"""
-                SELECT COALESCE(SUM(
-                    COALESCE(json_extract(payload, '$.ask_price'), 0.0)
-                ), 0.0)
+                SELECT COALESCE(SUM(COALESCE(json_extract(payload, '$.ask_price'), 0.0)), 0.0)
                 FROM {table}
                 WHERE {where_sql}
             """), params).scalar()
@@ -1010,41 +1010,22 @@ def remaining_points(user):
         if not tbl:
             return 0.0
         where = "status = 'SOLD' AND CAST(buyer_id AS INTEGER) = :uid"
-        try:
-            return _sum_price_generic(tbl, where, {"uid": uid_int})
-        except Exception:
-            return 0.0
+        return _sum_price_generic(tbl, where, {"uid": uid_int})
 
     def _sum_trade_earned(uid_int: int) -> float:
         if not tbl:
             return 0.0
         where_user = "status = 'SOLD' AND CAST(user_id AS INTEGER) = :uid"
-        try:
-            val = _sum_price_generic(tbl, where_user, {"uid": uid_int})
-            if val > 0:
-                return val
-        except Exception:
-            pass
+        val = _sum_price_generic(tbl, where_user, {"uid": uid_int})
+        if val > 0:
+            return val
         where_seller = "status = 'SOLD' AND CAST(seller_id AS INTEGER) = :uid"
-        try:
-            return _sum_price_generic(tbl, where_seller, {"uid": uid_int})
-        except Exception:
-            return 0.0
+        return _sum_price_generic(tbl, where_seller, {"uid": uid_int})
 
     trade_spent  = _sum_trade_spent(uid)
     trade_earned = _sum_trade_earned(uid)
 
-    # --- Calcul fallback si user.points absent ---
-    left = (
-        base
-        - float(ppp_active_funded)
-        - float(wet_active)
-        + float(wet_won)
-        - float(trade_spent)
-        + float(trade_earned)
-    )
-
-    # --- Art bets (dessin) ---
+    # Art bets (Dessin) → net = SUM(payout - amount)
     try:
         art_net = float(db.session.execute(text("""
             SELECT COALESCE(SUM(payout - amount), 0.0)
@@ -1054,9 +1035,29 @@ def remaining_points(user):
     except Exception:
         art_net = 0.0
 
-    left += art_net
+    ledger_points = (
+        base
+        - float(ppp_active_funded)
+        - float(wet_active)
+        + float(wet_won)
+        - float(trade_spent)
+        + float(trade_earned)
+        + float(art_net)
+    )
+    ledger_points = max(0.0, round(ledger_points, 6))
 
-    return max(0.0, round(left, 6))
+    # --- (C) Choix de la valeur retournée ---
+    # 1) Si user.points est lisible → on le retourne par défaut (source de vérité).
+    if points_now is not None:
+        # 2) Réconciliation optionnelle (activable par env pour debug/fiabilisation)
+        if os.environ.get("POINTS_RECONCILE", "0") == "1":
+            # Si divergence franche, préfère le ledger (tu peux journaliser ici).
+            if abs(points_now - ledger_points) > 0.5:  # seuil tolérance
+                return ledger_points
+        return points_now
+
+    # 3) Sinon, fallback: ledger
+    return ledger_points
 
 # --- helper défensif: garantit user.bolts ---
 from sqlalchemy import text
