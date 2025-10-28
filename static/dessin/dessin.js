@@ -266,10 +266,8 @@ async function handleComment(){
   const btn = document.getElementById("commentBtn");
   const result = document.getElementById("result");
 
-  // Effet machine à écrire (léger)
   function typeInto(el, text, speed = 18){
     return new Promise(resolve=>{
-      // reset propre
       el.classList.remove("hidden");
       el.textContent = "";
       const cursor = document.createElement("span");
@@ -289,7 +287,6 @@ async function handleComment(){
     });
   }
 
-  // Affiche immédiatement un message (sans typing)
   const show = (text) => {
     result.textContent = text;
     result.classList.remove("hidden");
@@ -303,10 +300,8 @@ async function handleComment(){
 
     const dataUrl = await snapshotWithBackground(canvas, "#000000", 768, 0.72);
 
-    // lire la mise
     const stakeInput = document.getElementById("betAmount");
     const stake = stakeInput ? Math.floor(Math.max(1, Number(stakeInput.value||0))) : 0;
-    // on exige au moins 1 pt
     if (!stake || stake < 1) {
       await typeInto(result, "Il faut miser au moins 1 point avant d’invoquer ZEUS ⚡");
       return;
@@ -331,51 +326,47 @@ async function handleComment(){
 
     result.classList.remove("hidden");
 
-    // --- 🔊 Lecture du son selon le verdict ---
+    // --- 🔊 Son selon le verdict ---
     if (data && data.verdict) {
       let audioFile = null;
-
       if (data.verdict === "Beau dessin.") {
         audioFile = "/static/audio/oui.mp3";
       } else if (data.verdict === "Je déteste.") {
         audioFile = "/static/audio/non.mp3";
       }
-
       if (audioFile) {
         const audio = new Audio(audioFile);
         audio.play().catch(err => console.warn("Erreur lecture audio:", err));
       }
     }
 
-    // Accessibilité : si motion réduite, pas d'animation
     if (prefersReducedMotion()){
       result.textContent = comment || "Par les nuages sacrés, ton art rayonne !";
     } else {
-    // Compléter l'affichage selon verdict + infos back (multiplier, payout, balance, bolts)
-    let extra = "";
-    if (typeof data.multiplier !== "undefined" && typeof data.payout !== "undefined") {
-      if (data.multiplier > 0) {
-        extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', {maximumFractionDigits:0})} pts (mise × ${data.multiplier}).`;
-        extra += `\n⚡ Bonus: +1 éclair.`;
-      } else {
-        extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
+      // Compléter l'affichage selon verdict + infos back (multiplier, payout, balance, bolts)
+      let extra = "";
+      if (typeof data.multiplier !== "undefined" && typeof data.payout !== "undefined") {
+        if (data.multiplier > 0) {
+          extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', {maximumFractionDigits:0})} pts (mise × ${data.multiplier}).`;
+          extra += `\n⚡ Bonus: +1 éclair.`;
+        } else {
+          extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
+        }
       }
-    }
-    if (typeof data.balance !== "undefined" && data.balance !== null) {
-      extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
-    }
-    if (typeof data.bolts !== "undefined" && data.bolts !== null) {
-      extra += `\n⚡ Éclairs: ${data.bolts}`;
-    }
+      if (typeof data.balance !== "undefined" && data.balance !== null) {
+        extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
+      }
+      if (typeof data.bolts !== "undefined" && data.bolts !== null) {
+        extra += `\n⚡ Éclairs: ${data.bolts}`;
+      }
 
-    if (extra) {
-      await typeInto(result, comment + extra);
-    } else {
-      await typeInto(result, comment);
-    }
-
-    // Effet de frappe pour le commentaire
-  } catch (err){
+      if (extra) {
+        await typeInto(result, comment + extra);
+      } else {
+        await typeInto(result, comment);
+      }
+    } // ⟵ ferme le else
+  } catch (err){ // ⟵ et ici le try est désormais correctement fermé
     console.error(err);
     result.classList.remove("hidden");
     result.textContent = "Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.";
