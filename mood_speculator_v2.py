@@ -6479,7 +6479,9 @@ def api_comment():
             image_data_url = _jpeg_dataurl_small(raw)
 
         if not image_data_url:
-            return jsonify({"error": "image manquante"}), 400
+            res = jsonify({"error": "image manquante"})
+            res.headers["Cache-Control"] = "no-store"
+            return res, 400
 
         m = DATAURL_RE.match(image_data_url)
         if not m:
@@ -6492,10 +6494,14 @@ def api_comment():
                 except Exception:
                     pass
             if not m:
-                return jsonify({"error": "imageDataUrl invalide"}), 400
+                res = jsonify({"error": "imageDataUrl invalide"})
+                res.headers["Cache-Control"] = "no-store"
+                return res, 400
 
         if len(image_data_url) > MAX_DATAURL_LEN:
-            return jsonify({"error": "image trop grande"}), 413
+            res = jsonify({"error": "image trop grande"})
+            res.headers["Cache-Control"] = "no-store"
+            return res, 413
 
         # ---- 2) OpenAI: chat.completions avec image_url (Data URL) ----
         client = _openai_client()
@@ -6533,19 +6539,26 @@ def api_comment():
         # ---- 3) Gestion mise / gain / perte / éclairs ----
         from flask_login import current_user
 
-        multiplier = None
-        payout = None
-        balance = None
-        bolts_now = None
-
         # Normaliser la mise (entier >=1)
         stake = max(1, int(stake))
 
+        # 👉 Calculer TOUJOURS les extras pour l'affichage (même hors login)
+        if verdict == "Beau dessin.":
+            multiplier = int(random.randint(7, 14))
+            payout = int(stake * multiplier)     # gain brut
+        else:
+            multiplier = 0
+            payout = 0
+
+        balance = None
+        bolts_now = None
+
+        # 👉 Si connecté, appliquer réellement la variation et renvoyer balance/bolts
         if getattr(current_user, "is_authenticated", False) and stake >= 1:
             try:
                 uid = int(current_user.id)
                 with db.session.begin():  # transaction atomique
-                    # 3.1 Lire le solde courant AVEC verrou (si dispo)
+                    # NOTE: si SQLite, FOR UPDATE n'est pas supporté → retire-le si besoin
                     row = db.session.execute(
                         text("SELECT points, COALESCE(bolts,0) AS bolts FROM user WHERE id = :uid FOR UPDATE"),
                         {"uid": uid}
@@ -6557,43 +6570,34 @@ def api_comment():
                     bolts_now = int(row["bolts"] or 0)
 
                     if points_now < stake:
-                        # Solde insuffisant
-                        return jsonify({
-                            "error": "solde insuffisant",
-                            "balance": points_now
-                        }), 400
+                        res = jsonify({"error": "solde insuffisant", "balance": points_now})
+                        res.headers["Cache-Control"] = "no-store"
+                        return res, 400
 
-                    if verdict == "Beau dessin.":
-                        multiplier = int(random.randint(7, 14))
-                        payout = int(stake * multiplier)     # gain brut
-                        net = payout - stake                  # variation réelle du solde
+                    if multiplier > 0:  # WIN
+                        net = payout - stake
                         verdict_tag = "WIN"
-                        # +1 éclair
                         bolts_now += 1
                         db.session.execute(
                             text("UPDATE user SET bolts = :bolts WHERE id = :uid"),
                             {"uid": uid, "bolts": bolts_now}
                         )
-                    else:
-                        multiplier = 0
-                        payout = 0
+                    else:               # LOSE
                         net = -stake
                         verdict_tag = "LOSE"
 
-                    # 3.2 Appliquer la variation de solde
                     new_points = points_now + net
                     db.session.execute(
                         text("UPDATE user SET points = :p WHERE id = :uid"),
                         {"p": new_points, "uid": uid}
                     )
 
-                    # 3.3 Tracer le pari
                     db.session.add(ArtBet(
                         user_id=uid,
                         amount=stake,
                         verdict=verdict_tag,
                         multiplier=multiplier,
-                        payout=payout,         # on garde le gain brut pour l’historique
+                        payout=payout,         # gain brut pour l’historique
                     ))
 
                     balance = int(new_points)
@@ -6609,11 +6613,9 @@ def api_comment():
         payload = {
             "comment": comment,
             "verdict": verdict,
+            "multiplier": int(multiplier),
+            "payout":     int(payout),
         }
-        if multiplier is not None:
-            payload["multiplier"] = int(multiplier)
-        if payout is not None:
-            payload["payout"] = int(payout)
         if balance is not None:
             payload["balance"] = int(balance)
         if bolts_now is not None:
@@ -6629,7 +6631,9 @@ def api_comment():
         body = {"error": "serveur"}
         if DEBUG:
             body["why"] = f"{e.__class__.__name__}: {e}"
-        return jsonify(body), 500
+        res = jsonify(body)
+        res.headers["Cache-Control"] = "no-store"
+        return res, 500
 
 @app.post("/api/comment/echo")
 def comment_echo():
