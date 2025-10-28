@@ -37,6 +37,20 @@ function setupDPR() {
 }
 window.addEventListener("resize", setupDPR);
 
+// Utilitaire : met à jour toutes les zones "solde"
+function setBalance(newBalance) {
+  if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
+  const text = Math.round(Number(newBalance)).toLocaleString('fr-FR');
+  // cible plusieurs sélecteurs possibles (adapte au besoin)
+  const candidates = document.querySelectorAll(
+    '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value'
+  );
+  candidates.forEach(el => {
+    if (el.tagName === 'INPUT') el.value = text;
+    else el.textContent = text;
+  });
+}
+
 // --- Fond blanc (évite la transparence) ---
 function fillPaperBackground() {
   ctx.save();
@@ -325,6 +339,15 @@ async function handleComment(){
                    || "Par les nuages sacrés, ton art rayonne !";
 
     result.classList.remove("hidden");
+
+    // MAJ solde & éclairs si fournis par l'API
+    if (typeof data.balance !== 'undefined' && data.balance !== null) {
+      setBalance(data.balance);
+    }
+    if (typeof data.bolts !== 'undefined' && data.bolts !== null) {
+      const boltsEls = document.querySelectorAll('[data-role="bolts"], #bolts, .js-bolts');
+      boltsEls.forEach(el => el.textContent = String(data.bolts));
+    }
 
     // --- 🔊 Son selon le verdict ---
     if (data && data.verdict) {

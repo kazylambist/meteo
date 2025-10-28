@@ -6455,6 +6455,9 @@ def _compose_with_limit(base_text: str, verdict: str, limit: int = 268) -> str:
     trimmed = base[:max(0, keep - 1)].rstrip() + "…"
     return trimmed + sep + v
 
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
 @app.post("/api/comment")
 def api_comment():
     DEBUG = os.environ.get("DEBUG_COMMENTS") == "1"
@@ -6480,7 +6483,6 @@ def api_comment():
 
         m = DATAURL_RE.match(image_data_url)
         if not m:
-            # Si autre mime (webp, etc.), on ré-encode proprement en JPEG petit
             if image_data_url.startswith("data:image/") and "," in image_data_url:
                 try:
                     _, b64 = image_data_url.split(",", 1)
@@ -6522,86 +6524,104 @@ def api_comment():
             temperature=0.9,
         )
 
-        base_comment = (resp.choices[0].message.content or "").strip()
-        if not base_comment:
-            base_comment = "Par les nuages sacrés, ton art rayonne !"
+        base_comment = (resp.choices[0].message.content or "").strip() or \
+                       "Par les nuages sacrés, ton art rayonne !"
 
-        verdict = _pick_verdict()  # 1/13 vs 12/13
+        verdict = _pick_verdict()  # "Beau dessin." / "Je déteste."
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
         # ---- 3) Gestion mise / gain / perte / éclairs ----
         from flask_login import current_user
-        from sqlalchemy import text
 
         multiplier = None
         payout = None
         balance = None
         bolts_now = None
 
-        if stake >= 1.0 and getattr(current_user, "is_authenticated", False):
+        # Normaliser la mise (entier >=1)
+        stake = max(1, int(stake))
+
+        if getattr(current_user, "is_authenticated", False) and stake >= 1:
             try:
                 uid = int(current_user.id)
+                with db.session.begin():  # transaction atomique
+                    # 3.1 Lire le solde courant AVEC verrou (si dispo)
+                    row = db.session.execute(
+                        text("SELECT points, COALESCE(bolts,0) AS bolts FROM user WHERE id = :uid FOR UPDATE"),
+                        {"uid": uid}
+                    ).mappings().first()
+                    if not row:
+                        raise ValueError("Utilisateur introuvable")
 
-                if verdict == "Beau dessin.":
-                    multiplier = int(random.randint(7, 14))
-                    payout = float(stake * multiplier)
+                    points_now = int(row["points"] or 0)
+                    bolts_now = int(row["bolts"] or 0)
+
+                    if points_now < stake:
+                        # Solde insuffisant
+                        return jsonify({
+                            "error": "solde insuffisant",
+                            "balance": points_now
+                        }), 400
+
+                    if verdict == "Beau dessin.":
+                        multiplier = int(random.randint(7, 14))
+                        payout = int(stake * multiplier)     # gain brut
+                        net = payout - stake                  # variation réelle du solde
+                        verdict_tag = "WIN"
+                        # +1 éclair
+                        bolts_now += 1
+                        db.session.execute(
+                            text("UPDATE user SET bolts = :bolts WHERE id = :uid"),
+                            {"uid": uid, "bolts": bolts_now}
+                        )
+                    else:
+                        multiplier = 0
+                        payout = 0
+                        net = -stake
+                        verdict_tag = "LOSE"
+
+                    # 3.2 Appliquer la variation de solde
+                    new_points = points_now + net
+                    db.session.execute(
+                        text("UPDATE user SET points = :p WHERE id = :uid"),
+                        {"p": new_points, "uid": uid}
+                    )
+
+                    # 3.3 Tracer le pari
                     db.session.add(ArtBet(
                         user_id=uid,
                         amount=stake,
-                        verdict="WIN",
+                        verdict=verdict_tag,
                         multiplier=multiplier,
-                        payout=payout,
-                    ))
-                    # +1 éclair
-                    db.session.execute(text("""
-                        UPDATE user SET bolts = COALESCE(bolts,0) + 1
-                        WHERE id = :uid
-                    """), {"uid": uid})
-                else:
-                    multiplier = 0
-                    payout = 0.0
-                    db.session.add(ArtBet(
-                        user_id=uid,
-                        amount=stake,
-                        verdict="LOSE",
-                        multiplier=0,
-                        payout=0.0,
+                        payout=payout,         # on garde le gain brut pour l’historique
                     ))
 
-                db.session.commit()
+                    balance = int(new_points)
 
-                # Recalcul du solde et des éclairs
-                try:
-                    balance = float(remaining_points(current_user))
-                except Exception:
-                    balance = None
-
-                try:
-                    bolts_now = int(db.session.execute(text(
-                        "SELECT COALESCE(bolts,0) FROM user WHERE id = :uid"
-                    ), {"uid": uid}).scalar() or 0)
-                except Exception:
-                    bolts_now = None
-
+            except SQLAlchemyError as e:
+                db.session.rollback()
+                print("[/api/comment] artbet SQL ERROR:", repr(e), file=sys.stderr)
             except Exception as e:
                 db.session.rollback()
                 print("[/api/comment] artbet ERROR:", repr(e), file=sys.stderr)
 
         # ---- 4) Retour JSON ----
-        resp = {
+        payload = {
             "comment": comment,
             "verdict": verdict,
         }
         if multiplier is not None:
-            resp["multiplier"] = multiplier
+            payload["multiplier"] = int(multiplier)
         if payout is not None:
-            resp["payout"] = payout
+            payload["payout"] = int(payout)
         if balance is not None:
-            resp["balance"] = balance
+            payload["balance"] = int(balance)
         if bolts_now is not None:
-            resp["bolts"] = bolts_now
+            payload["bolts"] = int(bolts_now)
 
-        return jsonify(resp)
+        res = jsonify(payload)
+        res.headers["Cache-Control"] = "no-store"
+        return res
 
     except Exception as e:
         print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
