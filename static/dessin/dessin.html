@@ -276,6 +276,17 @@
     #pad{ background:#000 !important; }
   </style>
   <script src="{{ url_for('dessin_assets', path='dessin.js') }}" defer></script>
+  <script>
+  (function () {
+    const locked = typeof lockdown === 'function' ||
+                   (typeof Compartment === 'function') ||
+                   Object.isFrozen(Object.prototype);
+    if (locked) {
+      console.warn('SES/lockdown détecté : certaines fonctionnalités de dessin peuvent être limitées.');
+      // Optionnel : affiche un bandeau d’avertissement à l’utilisateur.
+    }
+  })();
+  </script>
 </head>
 <body>
   <div class="container">
