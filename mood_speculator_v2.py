@@ -915,9 +915,26 @@ BUDGET_INITIAL = 500.0
 from sqlalchemy import text, func
 
 def remaining_points(user):
+    """Retourne le solde réel de l'utilisateur en lisant prioritairement user.points,
+    avec fallback sur les anciens calculs si cette colonne n'existe pas ou vaut NULL.
+    """
     if not user or not getattr(user, "id", None):
         return 0.0
     uid = int(user.id)
+
+    # --- 0) Tentative : lire directement le solde depuis la table user ---
+    try:
+        points_now = db.session.execute(
+            text("SELECT points FROM \"user\" WHERE id = :uid"),
+            {"uid": uid}
+        ).scalar()
+        if points_now is not None:
+            return float(points_now)
+    except Exception:
+        # table ou colonne absente → on retombe sur la logique historique
+        pass
+
+    # --- 1) Base de départ ---
     base = 500.0
 
     # --- PPP actifs financés depuis le solde ---
@@ -932,7 +949,6 @@ def remaining_points(user):
             .scalar()
         ) or 0.0
     except Exception:
-        # fallback si la colonne funded_from_balance n'existe pas
         ppp_active_funded = (
             db.session.query(func.coalesce(func.sum(PPPBet.amount), 0.0))
             .filter(PPPBet.user_id == uid, PPPBet.status == 'ACTIVE')
@@ -951,7 +967,7 @@ def remaining_points(user):
         .scalar()
     ) or 0.0
 
-    # --- Détection table Trade (bet_listing prioritaire, sinon trade_listings) ---
+    # --- Détection table Trade (bet_listing ou trade_listings) ---
     def _table_exists(name: str) -> bool:
         try:
             row = db.session.execute(
@@ -965,9 +981,8 @@ def remaining_points(user):
     tbl = "bet_listing" if _table_exists("bet_listing") else (
           "trade_listings" if _table_exists("trade_listings") else None)
 
-    # --- Sommes Trade (sale_price prioritaire, sinon payload.ask_price) ---
+    # --- Sommes Trade ---
     def _sum_price_generic(table: str, where_sql: str, params: dict) -> float:
-        # 1) colonne sale_price si présente/remplie
         try:
             v = db.session.execute(text(f"""
                 SELECT COALESCE(SUM(sale_price), 0.0)
@@ -979,7 +994,6 @@ def remaining_points(user):
             v = 0.0
         if v > 0:
             return v
-        # 2) fallback JSON: payload.ask_price
         try:
             v2 = db.session.execute(text(f"""
                 SELECT COALESCE(SUM(
@@ -995,7 +1009,6 @@ def remaining_points(user):
     def _sum_trade_spent(uid_int: int) -> float:
         if not tbl:
             return 0.0
-        # condition avec cast pour tolérer des colonnes TEXT
         where = "status = 'SOLD' AND CAST(buyer_id AS INTEGER) = :uid"
         try:
             return _sum_price_generic(tbl, where, {"uid": uid_int})
@@ -1005,7 +1018,6 @@ def remaining_points(user):
     def _sum_trade_earned(uid_int: int) -> float:
         if not tbl:
             return 0.0
-        # d’abord user_id (schéma actuel)
         where_user = "status = 'SOLD' AND CAST(user_id AS INTEGER) = :uid"
         try:
             val = _sum_price_generic(tbl, where_user, {"uid": uid_int})
@@ -1013,7 +1025,6 @@ def remaining_points(user):
                 return val
         except Exception:
             pass
-        # fallback ancien schéma: seller_id
         where_seller = "status = 'SOLD' AND CAST(seller_id AS INTEGER) = :uid"
         try:
             return _sum_price_generic(tbl, where_seller, {"uid": uid_int})
@@ -1023,30 +1034,29 @@ def remaining_points(user):
     trade_spent  = _sum_trade_spent(uid)
     trade_earned = _sum_trade_earned(uid)
 
+    # --- Calcul fallback si user.points absent ---
     left = (
         base
         - float(ppp_active_funded)
         - float(wet_active)
         + float(wet_won)
-        - float(trade_spent)    # prix payés pour les achats
-        + float(trade_earned)   # prix encaissés sur les ventes
+        - float(trade_spent)
+        + float(trade_earned)
     )
-    return max(0.0, round(left, 6))
 
-    # --- Art bets (dessin) : on ajoute le net (gains - mises) ---
+    # --- Art bets (dessin) ---
     try:
         art_net = float(db.session.execute(text("""
-            SELECT COALESCE(SUM(payout - amount), 0.0) FROM art_bets WHERE user_id = :uid
+            SELECT COALESCE(SUM(payout - amount), 0.0)
+            FROM art_bets
+            WHERE user_id = :uid
         """), {"uid": uid}).scalar() or 0.0)
     except Exception:
         art_net = 0.0
 
-    # tout à la fin du calcul (retour)
-    return base \
-           - ppp_active_funded + ppp_won \
-           - wet_active        + wet_won \
-           - trade_spent       + trade_resale_gain \
-           + art_net
+    left += art_net
+
+    return max(0.0, round(left, 6))
 
 # --- helper défensif: garantit user.bolts ---
 from sqlalchemy import text
@@ -6457,15 +6467,15 @@ def _compose_with_limit(base_text: str, verdict: str, limit: int = 268) -> str:
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from flask_login import current_user
 
 @app.post("/api/comment")
 def api_comment():
     DEBUG = os.environ.get("DEBUG_COMMENTS") == "1"
     try:
-        # ---- 1) Récup image (JSON ou multipart) ----
+        # ---- 1) Récup image et mise ----
         image_data_url = None
         stake = 0.0
-
         if request.is_json:
             payload = request.get_json(silent=True) or {}
             image_data_url = (payload.get("imageDataUrl") or "").strip()
@@ -6479,9 +6489,7 @@ def api_comment():
             image_data_url = _jpeg_dataurl_small(raw)
 
         if not image_data_url:
-            res = jsonify({"error": "image manquante"})
-            res.headers["Cache-Control"] = "no-store"
-            return res, 400
+            return jsonify({"error": "image manquante"}), 400
 
         m = DATAURL_RE.match(image_data_url)
         if not m:
@@ -6494,16 +6502,12 @@ def api_comment():
                 except Exception:
                     pass
             if not m:
-                res = jsonify({"error": "imageDataUrl invalide"})
-                res.headers["Cache-Control"] = "no-store"
-                return res, 400
+                return jsonify({"error": "imageDataUrl invalide"}), 400
 
         if len(image_data_url) > MAX_DATAURL_LEN:
-            res = jsonify({"error": "image trop grande"})
-            res.headers["Cache-Control"] = "no-store"
-            return res, 413
+            return jsonify({"error": "image trop grande"}), 413
 
-        # ---- 2) OpenAI: chat.completions avec image_url (Data URL) ----
+        # ---- 2) OpenAI ----
         client = _openai_client()
         model_name = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -6524,116 +6528,97 @@ def api_comment():
         ]
 
         resp = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            max_tokens=120,
-            temperature=0.9,
+            model=model_name, messages=messages, max_tokens=120, temperature=0.9
         )
 
         base_comment = (resp.choices[0].message.content or "").strip() or \
                        "Par les nuages sacrés, ton art rayonne !"
 
-        verdict = _pick_verdict()  # "Beau dessin." / "Je déteste."
+        verdict = _pick_verdict()
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
-        # ---- 3) Gestion mise / gain / perte / éclairs ----
-        from flask_login import current_user
-
-        # Normaliser la mise (entier >=1)
+        # ---- 3) Gestion mise/gain/perte/boosts ----
         stake = max(1, int(stake))
-
-        # 👉 Calculer TOUJOURS les extras pour l'affichage (même hors login)
-        if verdict == "Beau dessin.":
-            multiplier = int(random.randint(7, 14))
-            payout = int(stake * multiplier)     # gain brut
-        else:
-            multiplier = 0
-            payout = 0
-
+        multiplier = 0
+        payout = 0
         balance = None
-        bolts_now = None
+        boosts_now = None
 
-        # 👉 Si connecté, appliquer réellement la variation et renvoyer balance/bolts
         if getattr(current_user, "is_authenticated", False) and stake >= 1:
             try:
                 uid = int(current_user.id)
-                with db.session.begin():  # transaction atomique
-                    # NOTE: si SQLite, FOR UPDATE n'est pas supporté → retire-le si besoin
-                    row = db.session.execute(
-                        text("SELECT points, COALESCE(bolts,0) AS bolts FROM user WHERE id = :uid FOR UPDATE"),
-                        {"uid": uid}
-                    ).mappings().first()
+                with db.session.begin():
+                    # Lecture du solde
+                    row = db.session.execute(text(
+                        "SELECT points, COALESCE(boosts,0) AS boosts FROM user WHERE id = :uid"
+                    ), {"uid": uid}).mappings().first()
                     if not row:
                         raise ValueError("Utilisateur introuvable")
 
                     points_now = int(row["points"] or 0)
-                    bolts_now = int(row["bolts"] or 0)
+                    boosts_now = int(row["boosts"] or 0)
 
                     if points_now < stake:
-                        res = jsonify({"error": "solde insuffisant", "balance": points_now})
-                        res.headers["Cache-Control"] = "no-store"
-                        return res, 400
+                        return jsonify({"error": "solde insuffisant", "balance": points_now}), 400
 
-                    if multiplier > 0:  # WIN
+                    if verdict == "Beau dessin.":
+                        multiplier = random.randint(7, 14)
+                        payout = stake * multiplier
                         net = payout - stake
+                        boosts_now += 1
                         verdict_tag = "WIN"
-                        bolts_now += 1
-                        db.session.execute(
-                            text("UPDATE user SET bolts = :bolts WHERE id = :uid"),
-                            {"uid": uid, "bolts": bolts_now}
-                        )
-                    else:               # LOSE
+                    else:
                         net = -stake
                         verdict_tag = "LOSE"
 
                     new_points = points_now + net
-                    db.session.execute(
-                        text("UPDATE user SET points = :p WHERE id = :uid"),
-                        {"p": new_points, "uid": uid}
-                    )
+
+                    db.session.execute(text("""
+                        UPDATE user 
+                        SET points = :p, boosts = :b 
+                        WHERE id = :uid
+                    """), {"p": new_points, "b": boosts_now, "uid": uid})
 
                     db.session.add(ArtBet(
                         user_id=uid,
                         amount=stake,
                         verdict=verdict_tag,
                         multiplier=multiplier,
-                        payout=payout,         # gain brut pour l’historique
+                        payout=payout
                     ))
 
                     balance = int(new_points)
 
             except SQLAlchemyError as e:
                 db.session.rollback()
-                print("[/api/comment] artbet SQL ERROR:", repr(e), file=sys.stderr)
+                print("[/api/comment] SQL ERROR:", repr(e), file=sys.stderr)
             except Exception as e:
                 db.session.rollback()
-                print("[/api/comment] artbet ERROR:", repr(e), file=sys.stderr)
+                print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
 
-        # ---- 4) Retour JSON ----
+        # ---- 4) Réponse ----
         payload = {
             "comment": comment,
             "verdict": verdict,
-            "multiplier": int(multiplier),
-            "payout":     int(payout),
+            "multiplier": multiplier,
+            "payout": int(payout),
         }
         if balance is not None:
-            payload["balance"] = int(balance)
-        if bolts_now is not None:
-            payload["bolts"] = int(bolts_now)
+            payload["balance"] = balance
+        if boosts_now is not None:
+            payload["boosts"] = boosts_now
 
         res = jsonify(payload)
         res.headers["Cache-Control"] = "no-store"
         return res
 
     except Exception as e:
-        print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
+        print("[/api/comment] FATAL:", repr(e), file=sys.stderr)
         traceback.print_exc()
         body = {"error": "serveur"}
         if DEBUG:
-            body["why"] = f"{e.__class__.__name__}: {e}"
-        res = jsonify(body)
-        res.headers["Cache-Control"] = "no-store"
-        return res, 500
+            body["why"] = f"{e.__class__.__name__}: {e}"        
+        return jsonify(body), 500
 
 @app.post("/api/comment/echo")
 def comment_echo():
