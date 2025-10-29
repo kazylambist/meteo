@@ -2667,8 +2667,8 @@ PPP_HTML = """
         <div>
           <label for="mChoice">Choix</label>
           <select name="choice" id="mChoice" required>
-            <option value="PLUIE">Pluie</option>
-            <option value="PAS_PLUIE">Pas Pluie</option>
+            <option value="PLUIE">💧</option>
+            <option value="PAS_PLUIE">☀️</option>
           </select>
         </div>
 
