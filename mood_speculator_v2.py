@@ -1534,6 +1534,13 @@ def publish_today_if_pending():
         r.published_at = dt_paris_now()
     db.session.commit()
 
+from flask import current_app
+
+def settle_maturities_job():
+    # wrapper programmé dans APScheduler
+    with current_app.app_context():
+        settle_maturities_core() 
+
 
 def settle_maturities():
     """Règle les positions dont l'échéance est aujourd'hui ou déjà passée,
@@ -1569,6 +1576,7 @@ def settle_maturities():
 
 
 scheduler.add_job(publish_today_if_pending, CronTrigger(hour=10, minute=0, timezone=str(APP_TZ)), id='publish10', replace_existing=True)
+scheduler.add_job(settle_maturities_job, 'cron', hour=10, minute=5)
 scheduler.add_job(settle_maturities, CronTrigger(hour=10, minute=5, timezone=str(APP_TZ)), id='settle1005', replace_existing=True)
 scheduler.start()
 
@@ -6546,56 +6554,102 @@ def api_comment():
         boosts_now = None
 
         if getattr(current_user, "is_authenticated", False) and stake >= 1:
+            uid = int(current_user.id)
+
             try:
-                uid = int(current_user.id)
-                with db.session.begin():
-                    # Lecture du solde
-                    row = db.session.execute(text(
-                        "SELECT points, COALESCE(boosts,0) AS boosts FROM user WHERE id = :uid"
-                    ), {"uid": uid}).mappings().first()
-                    if not row:
-                        raise ValueError("Utilisateur introuvable")
+                # Lecture du solde/boosts actuels
+                row = db.session.execute(text(
+                    "SELECT points, COALESCE(boosts,0) AS boosts FROM user WHERE id = :uid"
+                ), {"uid": uid}).mappings().first()
+                if not row:
+                    raise ValueError("Utilisateur introuvable")
 
-                    points_now = int(row["points"] or 0)
-                    boosts_now = int(row["boosts"] or 0)
+                points_now = int(row["points"] or 0)
+                boosts_now = int(row["boosts"] or 0)
 
-                    if points_now < stake:
-                        return jsonify({"error": "solde insuffisant", "balance": points_now}), 400
+                # Solde insuffisant → pas de modif DB, renvoyer balance connue
+                if points_now < stake:
+                    return jsonify({
+                        "error": "solde insuffisant",
+                        "balance": points_now,
+                        "boosts": boosts_now,
+                        "comment": comment,
+                        "verdict": verdict,
+                        "multiplier": multiplier,
+                        "payout": int(payout),
+                    }), 400
 
-                    if verdict == "Beau dessin.":
-                        multiplier = random.randint(7, 14)
-                        payout = stake * multiplier
-                        net = payout - stake
-                        boosts_now += 1
-                        verdict_tag = "WIN"
-                    else:
-                        net = -stake
-                        verdict_tag = "LOSE"
+                # Calcul du net / payout / boosts
+                if verdict == "Beau dessin.":
+                    multiplier = random.randint(7, 14)
+                    payout = stake * multiplier
+                    net = payout - stake
+                    boosts_now += 1
+                    verdict_tag = "WIN"
+                else:
+                    net = -stake
+                    verdict_tag = "LOSE"
 
-                    new_points = points_now + net
+                new_points = points_now + net
 
-                    db.session.execute(text("""
-                        UPDATE user 
-                        SET points = :p, boosts = :b 
-                        WHERE id = :uid
-                    """), {"p": new_points, "b": boosts_now, "uid": uid})
+                # Écriture atomique (update + insert)
+                db.session.execute(text("""
+                    UPDATE user 
+                    SET points = :p, boosts = :b 
+                    WHERE id = :uid
+                """), {"p": new_points, "b": boosts_now, "uid": uid})
 
-                    db.session.add(ArtBet(
-                        user_id=uid,
-                        amount=stake,
-                        verdict=verdict_tag,
-                        multiplier=multiplier,
-                        payout=payout
-                    ))
+                db.session.add(ArtBet(
+                    user_id=uid,
+                    amount=stake,
+                    verdict=verdict_tag,
+                    multiplier=multiplier,
+                    payout=payout
+                ))
 
-                    balance = int(new_points)
+                db.session.commit()  # ✅ commit unique
+                balance = int(new_points)
 
             except SQLAlchemyError as e:
                 db.session.rollback()
                 print("[/api/comment] SQL ERROR:", repr(e), file=sys.stderr)
+                # on renvoie le plus d'infos sûres possible
+                safe_balance = None
+                safe_boosts = None
+                try:
+                    # Relecture best-effort du solde/boosts
+                    row = db.session.execute(text(
+                        "SELECT points, COALESCE(boosts,0) AS boosts FROM user WHERE id = :uid"
+                    ), {"uid": uid}).mappings().first()
+                    if row:
+                        safe_balance = int(row["points"] or 0)
+                        safe_boosts = int(row["boosts"] or 0)
+                except Exception:
+                    pass
+                return jsonify({
+                    "error": "server_error",
+                    "message": "database_error",
+                    "balance": safe_balance,
+                    "boosts": safe_boosts,
+                    "comment": comment,
+                    "verdict": verdict,
+                    "multiplier": multiplier,
+                    "payout": int(payout),
+                }), 500
+
             except Exception as e:
                 db.session.rollback()
                 print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
+                return jsonify({
+                    "error": "server_error",
+                    "message": str(e),
+                    "balance": balance,
+                    "boosts": boosts_now,
+                    "comment": comment,
+                    "verdict": verdict,
+                    "multiplier": multiplier,
+                    "payout": int(payout),
+                }), 500
 
         # ---- 4) Réponse ----
         payload = {
@@ -6618,7 +6672,7 @@ def api_comment():
         traceback.print_exc()
         body = {"error": "serveur"}
         if DEBUG:
-            body["why"] = f"{e.__class__.__name__}: {e}"        
+            body["why"] = f"{e.__class__.__name__}: {e}"
         return jsonify(body), 500
 
 @app.post("/api/comment/echo")
