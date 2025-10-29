@@ -399,17 +399,17 @@ async function handleComment(){
     if (data.multiplier !== undefined && data.payout !== undefined) {
       if (data.multiplier > 0) {
         extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} pts (mise × ${data.multiplier}).`;
-        extra += `\n⚡ Bonus: +1 boost.`;
+        extra += `\n Bonus: +1 ⚡.`;
       } else {
         extra += `\n\n❌ Perte: -${stake.toLocaleString('fr-FR')} pts.`;
       }
     }
     if (data.balance !== undefined && data.balance !== null) {
-      extra += `\n💼 Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
+      extra += `\n Nouveau solde: ${Math.round(data.balance).toLocaleString('fr-FR')} pts.`;
     }
     const boostsValForText = (data.boosts ?? data.bolts);
     if (boostsValForText !== undefined && boostsValForText !== null) {
-      extra += `\n⚡ Boosts : ${boostsValForText}`;
+      extra += `\n⚡ : ${boostsValForText}`;
     }
 
     const fullText = comment + (extra || "");
