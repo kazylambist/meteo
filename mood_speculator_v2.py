@@ -229,6 +229,14 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            # PPP : nouvelle colonne pour la date/heure cible du pari (ex: "2025-11-15T15:00:00")
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE ppp_bet ADD COLUMN target_dt TEXT"
+                ))
+            except Exception:
+                pass
+
             # Index PPP pour accélérer la page
             try:
                 db.session.execute(text(
@@ -2555,6 +2563,8 @@ PPP_HTML = """
   background: radial-gradient(100% 120% at 50% 0%, rgba(7,25,46,.35) 0%, rgba(7,25,46,.75) 100%);
   pointer-events:none;
   }
+  .time-row{ margin-top:12px; }
+  .time-row label{ display:block; font-size:12px; opacity:.8; margin-bottom:6px; }
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -2644,13 +2654,24 @@ PPP_HTML = """
       <strong>Cote:</strong> x<span id="mOdds"></span>
     </p>
     <div id="mHistory" class="m-history" style="margin-bottom:10px; font-size:14px; color:#ccc; display:none;"></div>
+
     <form method="post"
           action="{{ url_for('ppp', station_id=station_id) if station_id else url_for('ppp') }}"
           id="pppForm">
       <input type="hidden" name="date" id="mDateInput">
+      <input type="hidden" name="time" id="mTimeHidden">
       {% if station_id is not none %}
       <input type="hidden" name="station_id" value="{{ station_id }}">
       {% endif %}
+
+      <!-- Choix de l'heure -->
+      <div class="time-row" style="margin:8px 0 12px;">
+        <label for="mTimeInput" style="display:block;font-size:12px;opacity:.8;margin-bottom:6px;">
+          Heure (Europe/Paris)
+        </label>
+        <input id="mTimeInput" type="time" step="3600" value="15:00" />
+      </div>
+
       <div class="grid cols-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div>
           <label>Choix</label>
@@ -2664,6 +2685,7 @@ PPP_HTML = """
           <input type="number" name="amount" id="mAmount" min="0" step="0.1" value="1.0" required>
         </div>
       </div>
+
       <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
         <button type="button" class="btn" id="mCancel">Annuler</button>
         <button class="btn primary">Miser</button>
@@ -2744,10 +2766,15 @@ PPP_HTML = """
   // Submit guard
   if (form) {
     form.addEventListener('submit', function (e) {
-      if (!mDateInput.value) {
+      const hasDate = !!(mDateInput && mDateInput.value);
+      const hhmm = clampTimeToHour(mTimeInput ? mTimeInput.value : '15:00');
+      if (!hasDate) {
         e.preventDefault();
         alert("Cliquez d'abord sur un jour du calendrier pour choisir la date.");
+        return;
       }
+      if (mTimeHidden) mTimeHidden.value = hhmm; // pour submit classique
+      // Si tu POSTes en fetch ailleurs, ajoute simplement { date: mDateInput.value, time: hhmm }
     });
   }
 
@@ -2808,15 +2835,20 @@ PPP_HTML = """
     // Clic → modal (logique inchangée mais delta au lieu de i)
     el.addEventListener('click', () => {
       const hasBetNow = hasBetFor(key);
+
       // jours passés : pas de clic
       if (delta < 0) return;
+
+      // on n'autorise pas à miser avant J+3 (mais on peut consulter si déjà une mise)
       if (delta <= 3 && !hasBetNow) return;
 
-      const titleEl  = document.getElementById('mTitle');
-      const oddsWrap = document.getElementById('mOddsWrap');
-      const histWrap = document.getElementById('mHistory');
+      const titleEl   = document.getElementById('mTitle');
+      const oddsWrap  = document.getElementById('mOddsWrap');
+      const histWrap  = document.getElementById('mHistory');
+      const mTimeInput  = document.getElementById('mTimeInput');
+      const mTimeHidden = document.getElementById('mTimeHidden');
 
-      if (titleEl) titleEl.textContent = (delta <= 5 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
+      if (titleEl) titleEl.textContent = (delta <= 3 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
 
       let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
       const txt = (oddsEl.textContent || '').trim();
@@ -2825,6 +2857,7 @@ PPP_HTML = """
         if (!isNaN(num)) shownOdds = num;
       }
 
+      // Historique
       if (histWrap) {
         histWrap.innerHTML = '';
         if (hasBetNow) {
@@ -2853,8 +2886,15 @@ PPP_HTML = """
             const frWhen = whenDate.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
             const amt = fmtPts(b.amount);
             const o   = Number(b.odds);
-            const odd = (Number.isFinite(o) && o > 0 ? o : baseOdds).toFixed(1).replace('.', ',');
-            lines.push(`Mise du ${frWhen} : ${amt} pts — (x${odd})`);
+            const odd = (Number.isFinite(o) && o > 0 ? o : initialOdds).toFixed(1).replace('.', ',');
+            // heure cible affichée si disponible (b.target_time / b.time)
+            const targetTime = (b.target_time || b.time || '').slice(0,5);
+            const timeNote = targetTime ? ` — ${targetTime}` : '';
+            lines.push(`Mise du ${frWhen}${timeNote} : ${amt} pts — (x${odd})`);
+            const targetTime = (b.target_time || b.time || '').slice(0,5); // ex: "15:00"
+            if (targetTime) {
+              lines.push(`• Heure ciblée : ${targetTime}`);
+            }
           }
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
@@ -2866,19 +2906,30 @@ PPP_HTML = """
         }
       }
 
-      if (delta <= 5 && hasBetNow) {
+      // Préremplir la date & l'heure dans la modale
+      if (mDateInput) mDateInput.value = key;
+      if (mTimeInput) {
+        const prev = mTimeInput.value;
+        mTimeInput.value = clampTimeToHour(prev || '15:00');
+      }
+      if (mTimeHidden) {
+        // sera mis à jour au submit ; on le nettoie ici pour éviter un vieux résidu
+        mTimeHidden.value = '';
+      }
+
+      // Form et cotes visibles uniquement si pari autorisé (ou consultation si déjà une mise)
+      if (delta <= 3 && hasBetNow) {
         if (form) form.style.display = 'none';
         if (oddsWrap) oddsWrap.style.display = 'none';
       } else {
         if (form) form.style.display = 'block';
         if (oddsWrap) oddsWrap.style.display = 'block';
         if (mOddsEl) mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
-        if (mDateInput) mDateInput.value = key;
       }
 
       if (modal) modal.classList.add('open');
     });
-
+    
     grid.appendChild(el);
   }
 
@@ -2916,6 +2967,15 @@ PPP_HTML = """
       timeZone:'Europe/Paris',
       weekday:'short', day:'2-digit', month:'short'
     });
+  }
+  function clampTimeToHour(hhmm){
+    // Normalise "15" -> "15:00", "15:7" -> "15:07"
+    const s = String(hhmm || '').trim();
+    if (!s) return '15:00';
+    const parts = s.split(':');
+    const h = Math.max(0, Math.min(23, parseInt(parts[0]||'0',10)));
+    const m = Math.max(0, Math.min(59, parseInt(parts[1]||'0',10)));
+    return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
   }
 
   (function loadTodayIcon(){
