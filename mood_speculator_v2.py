@@ -2659,29 +2659,33 @@ PPP_HTML = """
           action="{{ url_for('ppp', station_id=station_id) if station_id else url_for('ppp') }}"
           id="pppForm">
       <input type="hidden" name="date" id="mDateInput">
-      <input type="hidden" name="time" id="mTimeHidden">
       {% if station_id is not none %}
       <input type="hidden" name="station_id" value="{{ station_id }}">
       {% endif %}
 
-      <!-- Choix de l'heure -->
-      <div class="time-row" style="margin:8px 0 12px;">
-        <label for="mTimeInput" style="display:block;font-size:12px;opacity:.8;margin-bottom:6px;">
-          Heure (Europe/Paris)
-        </label>
-        <input id="mTimeInput" type="time" step="3600" value="15:00" />
-      </div>
-
-      <div class="grid cols-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="grid cols-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
         <div>
-          <label>Choix</label>
+          <label for="mChoice">Choix</label>
           <select name="choice" id="mChoice" required>
             <option value="PLUIE">Pluie</option>
             <option value="PAS_PLUIE">Pas Pluie</option>
           </select>
         </div>
+
         <div>
-          <label>Montant (points)</label>
+          <label for="mHour">Heure</label>
+          <select name="target_time" id="mHour" required>
+            <!-- valeurs HH:00 — 00..23 ; 15:00 sélectionnée par défaut -->
+            {% for h in range(0,24) %}
+            <option value="{{ "%02d:00" % h }}" {% if h==15 %}selected{% endif %}>
+              {{ "%02d" % h }}h
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="mAmount">Montant (points)</label>
           <input type="number" name="amount" id="mAmount" min="0" step="0.1" value="1.0" required>
         </div>
       </div>
@@ -2884,18 +2888,19 @@ PPP_HTML = """
           for (const b of list) {
             const whenDate = new Date(b.when);
             const frWhen = whenDate.toLocaleDateString('fr-FR', {
-              weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
+              weekday:'short', day:'2-digit', month:'short', year:'numeric'
             });
 
             const amt = fmtPts(b.amount);
             const o   = Number(b.odds);
             const odd = (Number.isFinite(o) && o > 0 ? o : initialOdds)
-                          .toFixed(1)
-                          .replace('.', ',');
+                          .toFixed(1).replace('.', ',');
 
-            // heure cible si disponible
-            const targetTimeStr = String(b.target_time || b.time || '').slice(0, 5);
-            const timeNote = targetTimeStr ? ` — ${targetTimeStr}` : '';
+            // heure cible : fallback 15:00 si non fournie
+            const rawTime = String(b.target_time || b.time || '15:00');
+            const hhmm = rawTime.slice(0,5);      // "HH:MM"
+            const hh   = hhmm.split(':')[0] || '15';
+            const timeNote = ` — ${hh}h`;
 
             lines.push(`Mise du ${frWhen}${timeNote} : ${amt} pts — (x${odd})`);
           }
@@ -2911,9 +2916,11 @@ PPP_HTML = """
 
       // Préremplir la date & l'heure dans la modale
       if (mDateInput) mDateInput.value = key;
-      if (mTimeInput) {
-        const prev = mTimeInput.value;
-        mTimeInput.value = clampTimeToHour(prev || '15:00');
+
+      // Sélection de l'heure (menu déroulant)
+      const hourSel = document.getElementById('mHour');
+      if (hourSel && !hourSel.value) {
+        hourSel.value = '15:00'; // valeur par défaut
       }
       if (mTimeHidden) {
         // sera mis à jour au submit ; on le nettoie ici pour éviter un vieux résidu
