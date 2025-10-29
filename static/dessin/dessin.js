@@ -321,19 +321,57 @@ async function handleComment(){
     });
 
     if (!res.ok) {
-      // Essaye d'extraire un message + un solde/boosts éventuels (ex: solde insuffisant)
-      let serverMsg = "";
+      // Essaye d'extraire un JSON pour récupérer balance/boosts/comment
+      let raw = "";
+      let j = null;
       try {
-        const txt = await res.text();
-        try {
-          const j = JSON.parse(txt);
-          if (j && j.balance != null) setBalance(j.balance);
-          if (j && (j.boosts != null || j.bolts != null)) setBoosts(j.boosts ?? j.bolts);
-          serverMsg = j && j.error ? String(j.error) : (txt || "");
-        } catch {
-          serverMsg = txt || "";
-        }
+        raw = await res.text();
+        try { j = JSON.parse(raw); } catch { /* pas du JSON */ }
       } catch {}
+
+      // Si le serveur a renvoyé balance/boosts, on met à jour l'UI même en erreur
+      if (j && j.balance != null) setBalance(j.balance);
+      if (j && (j.boosts != null || j.bolts != null)) setBoosts(j.boosts ?? j.bolts);
+
+      // ✅ Afficher le commentaire même en 400/500 si on l'a
+      const commentErr = j && j.comment ? String(j.comment).trim() : "";
+      const verdictErr = j && j.verdict ? String(j.verdict) : "";
+
+      // Construire un "extra" semblable au chemin success si on a des infos
+      let extraErr = "";
+      const multErr = j && Number.isFinite(j.multiplier) ? Number(j.multiplier) : undefined;
+      const payoutErr = j && Number.isFinite(j.payout) ? Number(j.payout) : undefined;
+      if (multErr !== undefined && payoutErr !== undefined) {
+        if (multErr > 0) {
+          extraErr += `\n\n💰 Gain: +${payoutErr.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} pts (mise × ${multErr}).`;
+          extraErr += `\n⚡ Bonus: +1 boost.`;
+        } else {
+          // on n'a pas la mise ici, mais tu l'as dans 'stake'
+          extraErr += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
+        }
+      }
+      if (j && j.balance != null) {
+        extraErr += `\n💼 Nouveau solde: ${Math.round(j.balance).toLocaleString('fr-FR')} pts.`;
+      }
+      const boostsShow = j && (j.boosts ?? j.bolts);
+      if (boostsShow !== undefined && boostsShow !== null) {
+        extraErr += `\n⚡ Boosts : ${boostsShow}`;
+      }
+
+      // Si on a un commentaire → on l'affiche et on arrête là (on ne masque pas l'info utile)
+      if (commentErr) {
+        const full = verdictErr ? `${commentErr}${extraErr}` : commentErr + (extraErr || "");
+        result.classList.remove("hidden");
+        if (prefersReducedMotion()) {
+          result.textContent = full;
+        } else {
+          await typeInto(result, full);
+        }
+        return;
+      }
+
+      // Sinon, message d'erreur lisible
+      const serverMsg = (j && (j.message || j.error)) || raw || "";
       const msg = `Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`;
       if (prefersReducedMotion()) {
         show(msg);
