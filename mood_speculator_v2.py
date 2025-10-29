@@ -6474,8 +6474,11 @@ def _compose_with_limit(base_text: str, verdict: str, limit: int = 268) -> str:
     trimmed = base[:max(0, keep - 1)].rstrip() + "…"
     return trimmed + sep + v
 
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from flask import jsonify, request
 from flask_login import current_user
+import os, sys, base64, traceback, random
 
 @app.post("/api/comment")
 def api_comment():
@@ -6545,7 +6548,7 @@ def api_comment():
         verdict = _pick_verdict()
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
-        # ---- 3) Gestion mise/gain/perte/boosts — sans toucher user.points (ledger only) ----
+        # ---- 3) Gestion mise/gain/perte/boosts — ledger only (ne touche pas user.points) ----
         stake = max(1, int(stake))
         multiplier = 0
         payout = 0
@@ -6559,9 +6562,8 @@ def api_comment():
                 # 3.1 Solde courant via ledger
                 points_now = float(remaining_points(current_user) or 0.0)
 
-                # Solde insuffisant → pas d'écriture, on renvoie ce qu'il faut pour l'UI
                 if points_now < stake:
-                    # essaie de lire les bolts pour l'affichage (optionnel)
+                    # Lire les boosts si possible (optionnel)
                     try:
                         ensure_bolts_column()
                         boosts_now = db.session.execute(
@@ -6582,17 +6584,16 @@ def api_comment():
                         "boosts": boosts_now,
                     }), 400
 
-                # 3.2 Calcul du résultat
+                # 3.2 Résultat
                 if verdict == "Beau dessin.":
                     multiplier = random.randint(7, 14)
                     payout = stake * multiplier
-                    net = payout - stake
                     verdict_tag = "WIN"
                 else:
-                    net = -stake
+                    payout = 0
                     verdict_tag = "LOSE"
 
-                # 3.3 Écritures: 1) ArtBet (impacte le ledger)  2) bolts(+1) si win
+                # 3.3 Écritures: ArtBet + (bonus bolt si win)
                 db.session.add(ArtBet(
                     user_id=uid,
                     amount=stake,
@@ -6604,7 +6605,7 @@ def api_comment():
                 boosts_now = None
                 if verdict_tag == "WIN":
                     try:
-                        ensure_bolts_column()  # ajoute la colonne si besoin (avec backfill doux)
+                        ensure_bolts_column()
                         db.session.execute(
                             text('UPDATE "user" SET bolts = COALESCE(bolts,0) + 1 WHERE id = :uid'),
                             {"uid": uid}
@@ -6615,18 +6616,16 @@ def api_comment():
                         ).scalar()
                         boosts_now = int(boosts_now or 0)
                     except Exception:
-                        # si la colonne n'existe pas et qu'on n'a pas les droits ALTER, on ignore juste le bonus
                         boosts_now = None
 
                 db.session.commit()
 
-                # 3.4 Recalcule le solde via ledger après écriture de l'ArtBet
+                # 3.4 Recalcul du solde via ledger
                 balance = float(remaining_points(current_user) or 0.0)
 
             except SQLAlchemyError as e:
                 db.session.rollback()
                 print("[/api/comment] SQL ERROR:", repr(e), file=sys.stderr)
-                # Renvoie ce qu'on peut (inclut le commentaire pour l'UI)
                 safe_balance = None
                 try:
                     safe_balance = float(remaining_points(current_user) or 0.0)
@@ -6662,11 +6661,38 @@ def api_comment():
                     "boosts": boosts_now,
                 }), 500
 
+        # ---- 4) Réponse ----
+        payload = {
+            "comment": comment,
+            "verdict": verdict,
+            "multiplier": multiplier,
+            "payout": int(payout),
+        }
+        if balance is not None:
+            payload["balance"] = balance
+        if boosts_now is not None:
+            payload["boosts"] = boosts_now
+
+        res = jsonify(payload)
+        res.headers["Cache-Control"] = "no-store"
+        return res
+
+    except Exception as e:
+        print("[/api/comment] FATAL:", repr(e), file=sys.stderr)
+        traceback.print_exc()
+        body = {"error": "serveur"}
+        if DEBUG:
+            body["why"] = f"{e.__class__.__name__}: {e}"
+        return jsonify(body), 500
+
 @app.post("/api/comment/echo")
-def comment_echo():
-    payload = request.get_json(silent=True) or {}
-    data = (payload.get("imageDataUrl") or "")
-    return {"len": len(data), "head": data[:32]}, 200
+def api_comment_echo():
+    # Petit endpoint pour valider rapidement que le worker démarre
+    try:
+        j = request.get_json(silent=True) or {}
+        return jsonify({"ok": True, "echo": j}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.get("/api/users/bolts")
 @login_required
