@@ -2883,18 +2883,21 @@ PPP_HTML = """
           const lines = [];
           for (const b of list) {
             const whenDate = new Date(b.when);
-            const frWhen = whenDate.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
+            const frWhen = whenDate.toLocaleDateString('fr-FR', {
+              weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
+            });
+
             const amt = fmtPts(b.amount);
             const o   = Number(b.odds);
-            const odd = (Number.isFinite(o) && o > 0 ? o : initialOdds).toFixed(1).replace('.', ',');
-            // heure cible affichée si disponible (b.target_time / b.time)
-            const targetTime = (b.target_time || b.time || '').slice(0,5);
-            const timeNote = targetTime ? ` — ${targetTime}` : '';
+            const odd = (Number.isFinite(o) && o > 0 ? o : initialOdds)
+                          .toFixed(1)
+                          .replace('.', ',');
+
+            // heure cible si disponible
+            const targetTimeStr = String(b.target_time || b.time || '').slice(0, 5);
+            const timeNote = targetTimeStr ? ` — ${targetTimeStr}` : '';
+
             lines.push(`Mise du ${frWhen}${timeNote} : ${amt} pts — (x${odd})`);
-            const targetTime = (b.target_time || b.time || '').slice(0,5); // ex: "15:00"
-            if (targetTime) {
-              lines.push(`• Heure ciblée : ${targetTime}`);
-            }
           }
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
