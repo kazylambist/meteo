@@ -2491,7 +2491,11 @@ PPP_HTML = """
   /* Feedback drop */
   .ppp-day.drop-ok   { outline:2px dashed rgba(255,215,0,.65); outline-offset:3px; }
   .ppp-day.drop-nope { outline:2px dashed rgba(220,20,60,.5); outline-offset:3px; }
-
+  .ppp-day.is-past{
+    opacity: .55;
+    filter: grayscale(100%);
+    pointer-events: none; /* pas cliquable */
+  }
   /* Cote boostée */
   .odds.boosted::before { content:"⚡"; margin-right:4px; }
 
@@ -2754,26 +2758,32 @@ PPP_HTML = """
   });
   const BOOSTS_SAFE = (BOOSTS && typeof BOOSTS === 'object') ? BOOSTS : {};
 
-  // --- Grille de 31 jours ---
+  // --- Grille de 31 jours (démarre à J-3) ---
+  const START_SHIFT = -3; // ← clé : on commence 3 jours avant aujourd’hui
+
   for (let i = 0; i <= 30; i++) {
-    const d   = addDaysLocal(today, i);
-    const key = ymdParis(d);
+    const delta = i + START_SHIFT;         // -3 … +27 vs today
+    const d     = addDaysLocal(today, delta);
+    const key   = ymdParis(d);
 
     const el = document.createElement('div');
-    el.className = 'ppp-day' + (i === 0 ? ' today' : '');
+    el.className = 'ppp-day' + (delta === 0 ? ' today' : '');
     el.setAttribute('data-key', key);
-    el.setAttribute('data-idx', i);
+    el.setAttribute('data-idx', String(delta)); // idx relatif à aujourd’hui (peut être négatif)
 
     const betInfo = (MY_BETS && MY_BETS[key]) ? MY_BETS[key] : null;
     const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
     const choice  = betInfo ? betInfo.choice : null;
 
-    if (i <= 5 && !hasBetFor(key)) el.classList.add('disabled');
+    // Jours passés : griser et désactiver le clic
+    if (delta < 0) el.classList.add('is-past');
+
+    // On conserve ta règle d’interdiction “proche” mais relative à aujourd’hui
+    if (delta <= 5 && !hasBetFor(key)) el.classList.add('disabled');
 
     let stakeBlock = '';
     if (amount > 0) {
       const icon = (choice === 'PLUIE') ? svgDrop : (choice === 'PAS_PLUIE') ? svgSun : '';
-
       stakeBlock = `
         <div class="stake-wrap">
           ${icon}
@@ -2787,21 +2797,25 @@ PPP_HTML = """
       <div class="odds"></div>
     `;
 
-    const oddsEl      = el.querySelector('.odds');
-    const baseOdds    = ODDS_SAFE[i];
+    const oddsEl   = el.querySelector('.odds');
+    // Les cotes client sont définies pour des deltas >= 0 → clamp sur [0..30]
+    const baseIdx  = Math.max(0, Math.min(30, delta));
+    const baseOdds = ODDS_SAFE[baseIdx];
     const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key])) ? Number(BOOSTS_SAFE[key]) : 0;
     renderOdds(oddsEl, baseOdds, boostForDay);
 
-    // Clic → modal
+    // Clic → modal (logique inchangée mais delta au lieu de i)
     el.addEventListener('click', () => {
       const hasBetNow = hasBetFor(key);
-      if (i <= 5 && !hasBetNow) return;
+      // jours passés : pas de clic
+      if (delta < 0) return;
+      if (delta <= 5 && !hasBetNow) return;
 
       const titleEl  = document.getElementById('mTitle');
       const oddsWrap = document.getElementById('mOddsWrap');
       const histWrap = document.getElementById('mHistory');
 
-      if (titleEl) titleEl.textContent = (i <= 5 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
+      if (titleEl) titleEl.textContent = (delta <= 5 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
 
       let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
       const txt = (oddsEl.textContent || '').trim();
@@ -2816,54 +2830,32 @@ PPP_HTML = """
           const list = (betInfo && Array.isArray(betInfo.bets)) ? betInfo.bets : [];
           const totalAmount = Math.round(list.reduce((acc, b) => acc + (Number(b.amount) || 0), 0) * 100) / 100;
 
-          // Somme pondérée des cotes stockées au moment des mises (SANS boosts)
           let weightedSum = 0;
           for (const b of list) {
             const a = Number(b.amount) || 0;
             const o = Number(b.odds);
-            const odd0 = (Number.isFinite(o) && o > 0) ? o : baseOdds; // fallback propre
+            const odd0 = (Number.isFinite(o) && o > 0) ? o : baseOdds;
             weightedSum += a * odd0;
           }
 
-          // Cote initiale (sans boosts) = moyenne pondérée des cotes des mises
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
             : baseOdds;
 
-          // Boosts actuels du jour
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
-
-          // 💰 Gains potentiels totaux = Σ(amount_i * odds_i_initiale) + (boostTotal * Σ amount_i)
-          // = weightedSum + boostTotal * totalAmount
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
 
           const lines = [];
-
-          // === Chaque mise avec la DATE DE CRÉATION réelle (b.when) ===
           for (const b of list) {
             const whenDate = new Date(b.when);
-            const frWhen = whenDate.toLocaleDateString('fr-FR', { 
-              weekday: 'short', 
-              day: '2-digit', 
-              month: 'short', 
-              year: 'numeric' 
-            });
-
-            // Arrondi à deux décimales et supprime un éventuel zéro final
-           const amt = fmtPts(b.amount);
-
-           const o   = Number(b.odds);
-           const odd = (Number.isFinite(o) && o > 0 ? o : baseOdds)
-                         .toFixed(1)
-                         .replace('.', ',');
-
+            const frWhen = whenDate.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
+            const amt = fmtPts(b.amount);
+            const o   = Number(b.odds);
+            const odd = (Number.isFinite(o) && o > 0 ? o : baseOdds).toFixed(1).replace('.', ',');
             lines.push(`Mise du ${frWhen} : ${amt} pts — (x${odd})`);
           }
-          if (boltCount > 0) {
-            lines.push(`Éclairs : ${boltCount} — (x5)`);
-          }
-          // Ligne de synthèse : gains potentiels totaux (AVEC boosts)
+          if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
 
           histWrap.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
@@ -2873,7 +2865,7 @@ PPP_HTML = """
         }
       }
 
-      if (i <= 5 && hasBetNow) {
+      if (delta <= 5 && hasBetNow) {
         if (form) form.style.display = 'none';
         if (oddsWrap) oddsWrap.style.display = 'none';
       } else {
