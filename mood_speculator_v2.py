@@ -2760,8 +2760,9 @@ PPP_HTML = """
 
   // --- Grille de 31 jours (démarre à J-3) ---
   const START_SHIFT = -3; // ← clé : on commence 3 jours avant aujourd’hui
+  const TOTAL_DAYS  = 34;
 
-  for (let i = 0; i <= 30; i++) {
+  for (let i = 0; i <= TOTAL_DAYS; i++) {
     const delta = i + START_SHIFT;         // -3 … +27 vs today
     const d     = addDaysLocal(today, delta);
     const key   = ymdParis(d);
@@ -2779,7 +2780,7 @@ PPP_HTML = """
     if (delta < 0) el.classList.add('is-past');
 
     // On conserve ta règle d’interdiction “proche” mais relative à aujourd’hui
-    if (delta <= 5 && !hasBetFor(key)) el.classList.add('disabled');
+    if (delta <= 3 && !hasBetFor(key)) el.classList.add('disabled');
 
     let stakeBlock = '';
     if (amount > 0) {
@@ -2809,7 +2810,7 @@ PPP_HTML = """
       const hasBetNow = hasBetFor(key);
       // jours passés : pas de clic
       if (delta < 0) return;
-      if (delta <= 5 && !hasBetNow) return;
+      if (delta <= 3 && !hasBetNow) return;
 
       const titleEl  = document.getElementById('mTitle');
       const oddsWrap = document.getElementById('mOddsWrap');
