@@ -6474,7 +6474,6 @@ def _compose_with_limit(base_text: str, verdict: str, limit: int = 268) -> str:
     trimmed = base[:max(0, keep - 1)].rstrip() + "…"
     return trimmed + sep + v
 
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from flask_login import current_user
 
@@ -6546,45 +6545,62 @@ def api_comment():
         verdict = _pick_verdict()
         comment = _compose_with_limit(base_comment, verdict, limit=268)
 
-        # ---- 3) Gestion mise/gain/perte/boosts ----
+        # ---- 3) Gestion mise/gain/perte/boosts (via ORM, champs auto-détectés) ----
         stake = max(1, int(stake))
         multiplier = 0
         payout = 0
         balance = None
         boosts_now = None
 
+        # Helper champs dynamiques
+        def _field_name(obj, *candidates):
+            for c in candidates:
+                if hasattr(obj, c):
+                    return c
+            return None
+
         if getattr(current_user, "is_authenticated", False) and stake >= 1:
-            uid = int(current_user.id)
+            # Détecte noms des champs (points/solde et boosts/bolts)
+            points_field = _field_name(current_user, "points", "solde", "balance")
+            boosts_field = _field_name(current_user, "boosts", "bolts")
+
+            if not points_field:
+                # Impossible de trouver le champ solde → on renvoie tout de même le commentaire
+                return jsonify({
+                    "error": "server_error",
+                    "message": "user points field not found",
+                    "comment": comment,
+                    "verdict": verdict,
+                    "multiplier": multiplier,
+                    "payout": int(payout),
+                }), 500
 
             try:
-                # Lecture du solde/boosts actuels
-                row = db.session.execute(text(
-                    "SELECT points, COALESCE(boosts,0) AS boosts FROM user WHERE id = :uid"
-                ), {"uid": uid}).mappings().first()
-                if not row:
-                    raise ValueError("Utilisateur introuvable")
+                points_now = int(getattr(current_user, points_field) or 0)
+                if boosts_field:
+                    boosts_now = int(getattr(current_user, boosts_field) or 0)
 
-                points_now = int(row["points"] or 0)
-                boosts_now = int(row["boosts"] or 0)
-
-                # Solde insuffisant → pas de modif DB, renvoyer balance connue
+                # Solde insuffisant → pas d'écriture
                 if points_now < stake:
-                    return jsonify({
+                    payload = {
                         "error": "solde insuffisant",
                         "balance": points_now,
-                        "boosts": boosts_now,
                         "comment": comment,
                         "verdict": verdict,
                         "multiplier": multiplier,
                         "payout": int(payout),
-                    }), 400
+                    }
+                    if boosts_field:
+                        payload["boosts"] = boosts_now
+                    return jsonify(payload), 400
 
-                # Calcul du net / payout / boosts
+                # Calculs
                 if verdict == "Beau dessin.":
                     multiplier = random.randint(7, 14)
                     payout = stake * multiplier
                     net = payout - stake
-                    boosts_now += 1
+                    if boosts_field:
+                        boosts_now += 1
                     verdict_tag = "WIN"
                 else:
                     net = -stake
@@ -6592,64 +6608,64 @@ def api_comment():
 
                 new_points = points_now + net
 
-                # Écriture atomique (update + insert)
-                db.session.execute(text("""
-                    UPDATE user 
-                    SET points = :p, boosts = :b 
-                    WHERE id = :uid
-                """), {"p": new_points, "b": boosts_now, "uid": uid})
+                # Écritures ORM
+                setattr(current_user, points_field, new_points)
+                if boosts_field:
+                    setattr(current_user, boosts_field, boosts_now)
 
                 db.session.add(ArtBet(
-                    user_id=uid,
+                    user_id=int(current_user.id),
                     amount=stake,
                     verdict=verdict_tag,
                     multiplier=multiplier,
                     payout=payout
                 ))
 
-                db.session.commit()  # ✅ commit unique
+                db.session.commit()
                 balance = int(new_points)
 
             except SQLAlchemyError as e:
                 db.session.rollback()
                 print("[/api/comment] SQL ERROR:", repr(e), file=sys.stderr)
-                # on renvoie le plus d'infos sûres possible
-                safe_balance = None
+                # Renvoie ce qu'on peut lire proprement
+                safe_points = None
                 safe_boosts = None
                 try:
-                    # Relecture best-effort du solde/boosts
-                    row = db.session.execute(text(
-                        "SELECT points, COALESCE(boosts,0) AS boosts FROM user WHERE id = :uid"
-                    ), {"uid": uid}).mappings().first()
-                    if row:
-                        safe_balance = int(row["points"] or 0)
-                        safe_boosts = int(row["boosts"] or 0)
+                    # Recharge l'utilisateur depuis la session
+                    db.session.refresh(current_user)
+                    safe_points = int(getattr(current_user, points_field) or 0)
+                    if boosts_field:
+                        safe_boosts = int(getattr(current_user, boosts_field) or 0)
                 except Exception:
                     pass
-                return jsonify({
+                payload = {
                     "error": "server_error",
                     "message": "database_error",
-                    "balance": safe_balance,
-                    "boosts": safe_boosts,
                     "comment": comment,
                     "verdict": verdict,
                     "multiplier": multiplier,
                     "payout": int(payout),
-                }), 500
+                    "balance": safe_points,
+                }
+                if boosts_field:
+                    payload["boosts"] = safe_boosts
+                return jsonify(payload), 500
 
             except Exception as e:
                 db.session.rollback()
                 print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
-                return jsonify({
+                payload = {
                     "error": "server_error",
                     "message": str(e),
-                    "balance": balance,
-                    "boosts": boosts_now,
                     "comment": comment,
                     "verdict": verdict,
                     "multiplier": multiplier,
                     "payout": int(payout),
-                }), 500
+                    "balance": balance,
+                }
+                if boosts_field:
+                    payload["boosts"] = boosts_now
+                return jsonify(payload), 500
 
         # ---- 4) Réponse ----
         payload = {
@@ -6661,6 +6677,7 @@ def api_comment():
         if balance is not None:
             payload["balance"] = balance
         if boosts_now is not None:
+            # on renvoie la clé moderne "boosts" mais ton front gère déjà boosts/bolts
             payload["boosts"] = boosts_now
 
         res = jsonify(payload)
