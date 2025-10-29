@@ -401,7 +401,7 @@ async function handleComment(){
         extra += `\n\n💰 Gain: +${(data.payout).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} pts (mise × ${data.multiplier}).`;
         extra += `\n⚡ Bonus: +1 boost.`;
       } else {
-        extra += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
+        extra += `\n\n❌ Perte: -${stake.toLocaleString('fr-FR')} pts.`;
       }
     }
     if (data.balance !== undefined && data.balance !== null) {
