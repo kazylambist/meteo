@@ -275,7 +275,28 @@
     }
     #pad{ background:#000 !important; }
   </style>
-  <script src="/dessin/dessin.js" defer></script>
+  <script>
+    window.updateBalanceUI = function (newBalance) {
+      if (newBalance == null || isNaN(newBalance)) return;
+      const text = Math.round(Number(newBalance)).toLocaleString('fr-FR');
+      document.querySelectorAll(
+        '.solde-box .solde-value, .solde-value, ' +
+        '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value'
+      ).forEach(el => {
+        if (el.tagName === 'INPUT') el.value = text;
+        else el.textContent = text;
+      });
+    };
+
+    document.addEventListener('balance:update', (e) => {
+      if (e && e.detail && e.detail.balance != null) {
+        window.updateBalanceUI(e.detail.balance);
+      }
+    });
+  </script>
+
+  <!-- 🖌️ Script principal du module Dessin -->
+  <script src="/static/dessin/dessin.js" defer></script>
   <script>
   (function () {
     const locked = typeof lockdown === 'function' ||

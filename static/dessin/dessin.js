@@ -37,27 +37,12 @@ function setupDPR() {
 }
 window.addEventListener("resize", setupDPR);
 
-// Utilitaire : met à jour toutes les zones "solde"
+// Utilitaire : met à jour toutes les zones "solde" via la fonction globale du layout
 function setBalance(newBalance) {
   if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
-
-  const n = Math.max(0, Math.round(Number(newBalance)));
-  const text = n.toLocaleString('fr-FR');
-
-  // 1) Tous les sélecteurs déjà gérés
-  document.querySelectorAll(
-    '[data-role="balance"], [data-balance], #balance, .js-balance, .balance-value'
-  ).forEach(el => {
-    if (el.tagName === 'INPUT') el.value = text;
-    else el.textContent = text;
-  });
-
-  // 2) 🔧 Ajout indispensable pour la topbar PPP
-  document.querySelectorAll('.solde-box .solde-value, .solde-value').forEach(el => {
-    el.textContent = text;
-  });
-
-  // 3) (optionnel) Notifier le reste de l’app
+  const n = Math.round(Number(newBalance));
+  if (window.updateBalanceUI) window.updateBalanceUI(n);
+  // notifier éventuellement d'autres widgets
   document.dispatchEvent(new CustomEvent('balance:update', { detail: { balance: n } }));
 }
 
@@ -320,8 +305,8 @@ async function handleComment(){
       body: JSON.stringify({ imageDataUrl: dataUrl, stake })
     });
 
+    // --- Chemin erreur : on affiche quand même le commentaire et on met à jour solde/boosts si fournis
     if (!res.ok) {
-      // Essaye d'extraire un JSON pour récupérer balance/boosts/comment
       let raw = "";
       let j = null;
       try {
@@ -329,15 +314,12 @@ async function handleComment(){
         try { j = JSON.parse(raw); } catch { /* pas du JSON */ }
       } catch {}
 
-      // Si le serveur a renvoyé balance/boosts, on met à jour l'UI même en erreur
       if (j && j.balance != null) setBalance(j.balance);
       if (j && (j.boosts != null || j.bolts != null)) setBoosts(j.boosts ?? j.bolts);
 
-      // ✅ Afficher le commentaire même en 400/500 si on l'a
       const commentErr = j && j.comment ? String(j.comment).trim() : "";
       const verdictErr = j && j.verdict ? String(j.verdict) : "";
 
-      // Construire un "extra" semblable au chemin success si on a des infos
       let extraErr = "";
       const multErr = j && Number.isFinite(j.multiplier) ? Number(j.multiplier) : undefined;
       const payoutErr = j && Number.isFinite(j.payout) ? Number(j.payout) : undefined;
@@ -346,7 +328,6 @@ async function handleComment(){
           extraErr += `\n\n💰 Gain: +${payoutErr.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} pts (mise × ${multErr}).`;
           extraErr += `\n⚡ Bonus: +1 boost.`;
         } else {
-          // on n'a pas la mise ici, mais tu l'as dans 'stake'
           extraErr += `\n\n💥 Perte: -${stake.toLocaleString('fr-FR')} pts.`;
         }
       }
@@ -358,65 +339,44 @@ async function handleComment(){
         extraErr += `\n⚡ Boosts : ${boostsShow}`;
       }
 
-      // Si on a un commentaire → on l'affiche et on arrête là (on ne masque pas l'info utile)
       if (commentErr) {
         const full = verdictErr ? `${commentErr}${extraErr}` : commentErr + (extraErr || "");
         result.classList.remove("hidden");
-        if (prefersReducedMotion()) {
-          result.textContent = full;
-        } else {
-          await typeInto(result, full);
-        }
+        if (prefersReducedMotion()) result.textContent = full;
+        else await typeInto(result, full);
         return;
       }
 
-      // Sinon, message d'erreur lisible
       const serverMsg = (j && (j.message || j.error)) || raw || "";
       const msg = `Oups (${res.status}). ${serverMsg || "Le serveur a refusé la requête."}`;
-      if (prefersReducedMotion()) {
-        show(msg);
-      } else {
-        await typeInto(result, msg);
-      }
+      if (prefersReducedMotion()) show(msg);
+      else await typeInto(result, msg);
       return;
     }
 
+    // --- Chemin succès
     const data = await res.json().catch(() => ({}));
     const comment = (data && data.comment ? String(data.comment) : "").trim()
                    || "Par les nuages sacrés, ton art rayonne !";
 
     result.classList.remove("hidden");
 
-    // MAJ solde & boosts si fournis par l'API
-    if (data.balance !== undefined && data.balance !== null) {
-      setBalance(data.balance);
-    }
-    const boostsVal = (data.boosts !== undefined && data.boosts !== null)
-      ? data.boosts
-      : (data.bolts !== undefined && data.bolts !== null)
-        ? data.bolts
-        : null;
-    if (boostsVal !== null) {
-      setBoosts(boostsVal);
-    }
-
-    // MAJ solde & boosts (avec fallback si balance manquant)
+    // MAJ solde (ou fallback local) + boosts
     if (data.balance != null) {
       setBalance(data.balance);
     } else if (typeof stake === 'number' && data && data.verdict) {
-      // Fallback : si l'API n'a pas renvoyé "balance", on ajuste localement
       const delta = (data.verdict === 'Beau dessin.')
         ? (Number(data.payout || 0) - stake)
         : -stake;
 
-      const el = document.querySelector('.solde-box .solde-value, .solde-value');
+      // On lit le solde affiché actuel et on ajuste localement
+      const el = document.querySelector('.solde-box .solde-value, .solde-value, [data-role="balance"], [data-balance], #balance, .js-balance, .balance-value');
       if (el) {
         const current = Number(String(el.textContent).replace(/\D+/g, '') || 0);
         setBalance(current + delta);
       }
     }
 
-    // Boosts (compat bolts)
     {
       const boostsVal = (data.boosts !== undefined && data.boosts !== null)
         ? data.boosts
@@ -429,15 +389,9 @@ async function handleComment(){
     // --- 🔊 Son selon le verdict ---
     if (data && data.verdict) {
       let audioFile = null;
-      if (data.verdict === "Beau dessin.") {
-        audioFile = "/static/audio/oui.mp3";
-      } else if (data.verdict === "Je déteste.") {
-        audioFile = "/static/audio/non.mp3";
-      }
-      if (audioFile) {
-        const audio = new Audio(audioFile);
-        audio.play().catch(err => console.warn("Erreur lecture audio:", err));
-      }
+      if (data.verdict === "Beau dessin.") audioFile = "/static/audio/oui.mp3";
+      else if (data.verdict === "Je déteste.") audioFile = "/static/audio/non.mp3";
+      if (audioFile) new Audio(audioFile).play().catch(err => console.warn("Erreur lecture audio:", err));
     }
 
     // 👉 Construire 'extra' AVANT l'affichage, pour l'avoir aussi en mode "motion réduite"
@@ -459,20 +413,19 @@ async function handleComment(){
     }
 
     const fullText = comment + (extra || "");
-
-    if (prefersReducedMotion()) {
-      result.textContent = fullText;
-    } else {
-      await typeInto(result, fullText);
-    }
+    if (prefersReducedMotion()) result.textContent = fullText;
+    else await typeInto(result, fullText);
 
   } catch (err) {
     console.error(err);
     result.classList.remove("hidden");
     result.textContent = "Oups, impossible d’obtenir le commentaire. Réessaie dans un instant.";
   } finally {
-    btn.disabled = false;
-    btn.textContent = "Solliciter ZEUS";
+    const btn = document.getElementById("commentBtn");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Solliciter ZEUS";
+    }
   }
 }
 
