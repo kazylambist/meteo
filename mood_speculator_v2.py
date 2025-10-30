@@ -794,11 +794,11 @@ with app.app_context():
     add_col_if_missing('ppp_boosts', 'created_at', 'created_at DATETIME')
 
     add_col_if_missing('ppp_bet', 'target_time', 'target_time TEXT')
-    add_col_if_missing('ppp_bets', 'target_time', 'target_time VARCHAR(5)')
-    add_col_if_missing('ppp_bets', 'verdict', 'verdict VARCHAR(8)')
-    add_col_if_missing('ppp_bets', 'outcome', 'outcome VARCHAR(16)')
-    add_col_if_missing('ppp_bets', 'observed_mm', 'observed_mm FLOAT')
-    add_col_if_missing('ppp_bets', 'resolved_at', 'resolved_at DATETIME')
+    add_col_if_missing('ppp_bet', 'target_time', 'target_time VARCHAR(5)')
+    add_col_if_missing('ppp_bet', 'verdict', 'verdict VARCHAR(8)')
+    add_col_if_missing('ppp_bet', 'outcome', 'outcome VARCHAR(16)')
+    add_col_if_missing('ppp_bet', 'observed_mm', 'observed_mm FLOAT')
+    add_col_if_missing('ppp_bet', 'resolved_at', 'resolved_at DATETIME')
 
     # wet_bets: settlement fields used by Wet logic
     add_col_if_missing('wet_bets', 'observed_pct', 'observed_pct FLOAT')
@@ -7644,7 +7644,7 @@ if __name__ == "__main__":
         try:
             ensure_column(PPPBet.__table__.name, "locked_for_trade", "INTEGER DEFAULT 0")
         except Exception as e:
-            app.logger.warning(f"[migrate] ppp_bets.locked_for_trade: {e}")
+            app.logger.warning(f"[migrate] ppp_bet.locked_for_trade: {e}")
         try:
             ensure_column(BetListing.__table__.name, "price", "REAL")
         except Exception as e:
