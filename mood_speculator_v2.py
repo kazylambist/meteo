@@ -7038,11 +7038,15 @@ def trade_create_listing():
         deadline_key = payload.get('deadline_key')  # 'YYYY-MM-DD'
         choice       = payload.get('choice')
 
+        # 🕐 Heure spécifique (facultative)
+        target_time  = payload.get('target_time') or payload.get('time')
+        target_dt    = payload.get('target_dt') or None  # ISO "2025-10-30T15:00"
+
         # Valeurs numériques (helpers supposés existants)
         stake       = _as_float(payload.get('stake') or payload.get('amount'), None)
         base_odds   = _as_float(payload.get('base_odds') or payload.get('odds'), None)
         ask_price   = _as_float(payload.get('ask_price'), None)
-        price       = _as_float(payload.get('price'), None)  # optionnel
+        price       = _as_float(payload.get('price'), None)
         boosts_cnt  = _as_int(payload.get('boosts_count'), None)
         boosts_add  = _as_float(payload.get('boosts_add'), None)
         total_odds  = _as_float(payload.get('total_odds'), None)
@@ -7067,6 +7071,11 @@ def trade_create_listing():
                 stake = _as_float(getattr(bet, "amount", None), None)
             if base_odds is None:
                 base_odds = _as_float(getattr(bet, "odds", None), None)
+            # ⏰ compléter l’heure depuis la mise si absente
+            if not target_time and hasattr(bet, "target_time"):
+                target_time = getattr(bet, "target_time")
+            if not target_dt and hasattr(bet, "target_dt"):
+                target_dt = getattr(bet, "target_dt")
 
         if stake is None or stake <= 0:
             return jsonify(error="invalid_stake"), 400
@@ -7095,19 +7104,23 @@ def trade_create_listing():
         if bet_id:
             dup = BetListing.query.filter(
                 BetListing.status == 'OPEN',
-                (BetListing.payload["bet_id"].as_integer() == int(bet_id))  # JSON path (SQLite)
+                (BetListing.payload["bet_id"].as_integer() == int(bet_id))
             ).first()
             if dup:
                 return jsonify(ok=False, error="already_listed", listing_id=dup.id), 400
 
         # --- Synchroniser le payload côté serveur ---
+        payload.update({
+            "ask_price": float(ask_price),
+            "target_time": target_time,
+            "target_dt": target_dt,
+        })
         if bet_id:
             payload["bet_id"] = int(bet_id)
-        payload["ask_price"] = float(ask_price)
 
         # Créer l'annonce
         row = BetListing(
-            user_id=int(current_user.get_id()),  # si ta colonne est TEXT, str(current_user.id) marche aussi
+            user_id=int(current_user.get_id()),
             kind=kind,
             payload=payload,
             expires_at=expires_at,
@@ -7125,8 +7138,8 @@ def trade_create_listing():
             boosts_add=boosts_add,
             total_odds=total_odds,
             potential_gain=potential,
-            price=price,            # conservé si tu l’exploites ailleurs
-            ask_price=ask_price,    # **prix faisant foi pour la vente**
+            price=price,
+            ask_price=ask_price,
         )
 
         db.session.add(row)
@@ -7136,7 +7149,19 @@ def trade_create_listing():
             bet.locked_for_trade = 1
 
         db.session.commit()
-        return jsonify({"id": row.id, "ok": True}), 200
+
+        # 🕓 on renvoie l’annonce complète incluant heure
+        return jsonify({
+            "ok": True,
+            "id": row.id,
+            "date_label": date_label,
+            "deadline_key": deadline_key,
+            "target_time": target_time,
+            "target_dt": target_dt,
+            "choice": choice,
+            "stake": stake,
+            "ask_price": ask_price,
+        }), 200
 
     except Exception:
         app.logger.exception("trade_create_listing failed")
