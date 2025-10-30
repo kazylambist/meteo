@@ -414,8 +414,22 @@
       wrap.innerHTML = '';
 
       rows.forEach(r=>{
-        const dateTxt = r.date_label || r.deadline_key || '';
-        const timeTag = hourLabelFrom(r, '18:00'); // ← “ — 18h” si rien en base
+        // -- Date + Heure (plusieurs sources possibles) --
+        const baseDate = r.date_label || r.deadline_key || '';             // "mer. 12 nov. 2025" ou "2025-11-12"
+        const hhmmRaw  = (
+            r.target_time                              // "15:00"
+         || r.time                                     // "15:00"
+         || (r.target_dt && String(r.target_dt).slice(11,16)) // "2025-11-12T15:00:00"
+         || (r.payload && (r.payload.target_time || (r.payload.target_dt||'').slice(11,16)))
+         || ''
+        );
+        const hhmm   = (typeof hhmmRaw === 'string' && hhmmRaw.length >= 4) ? hhmmRaw.slice(0,5) : '';
+        const hhOnly = hhmm ? (hhmm.split(':')[0] || '') : '';
+        const hourTxt= hhOnly ? ` — ${hhOnly}h` : '';  // si pas d’heure → rien
+
+        const dateTxt = baseDate + hourTxt;
+
+        // -- Montant / Cotes / Boosts --
         const stakes  = `${fmtPts(r.stake||r.amount||0)} pts`;
         const baseNum = Number(r.base_odds||r.odds||1);
         const base    = baseNum.toFixed(1).replace('.', ',');
@@ -432,9 +446,18 @@
         const gpVal = (Number(r.stake||r.amount||0) * totalOdds);
         const gpTxt = fmtPts(gpVal);
 
-        const lineHtml = r.label
-          ? r.label
-          : `${dateTxt}${timeTag} - ${stakes} (x${base})${boosts} - ${sideIcon} <span class="gp">GP: ${gpTxt} pts</span>`;
+        // Si l’API fournit déjà un label HTML, on l’enrichit avec l’heure si manquante
+        let lineHtml;
+        if (r.label) {
+          // On essaie d’insérer l’heure juste après la date si pas déjà présente
+          const hasHour = /(\d{1,2})h\b/.test(r.label) || /\d{2}:\d{2}/.test(r.label);
+          lineHtml = hasHour ? r.label : r.label.replace(
+            (baseDate || '').trim(),
+            (baseDate || '').trim() + hourTxt
+          );
+        } else {
+          lineHtml = `${dateTxt} - ${stakes} (x${base})${boosts} - ${sideIcon} <span class="gp">GP: ${gpTxt} pts</span>`;
+        }
 
         const askVal  = (r.ask_price != null) ? Number(r.ask_price) : null;
         const askHtml = askVal != null
