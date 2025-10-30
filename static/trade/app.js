@@ -623,13 +623,13 @@
   }    
 
   // ---------- Menu “Mettre en vente” ----------
-  async function openSellMenu(){
+  async function openSellMenu() {
     const panel = $('#sellMenu');
     const btn   = $('#sellBtn');
     if (!panel || !btn) return;
 
-    try{
-      const res = await fetch('/api/trade/my-bets', {credentials:'same-origin'});
+    try {
+      const res = await fetch('/api/trade/my-bets', { credentials: 'same-origin' });
       const items = res.ok ? await res.json() : [];
       const ul = $('#myBetsList');
       ul.innerHTML = '';
@@ -640,23 +640,30 @@
         li.textContent = 'Aucune mise disponible.';
         ul.append(li);
       } else {
-        items.forEach(it=>{
-          // 🔹 Ajout de l’heure
-          const dateTxt = it.date_label || it.deadline_key || '';
-          const timeTag = hourLabelFrom(it, '18:00'); // → " — 18h" par défaut
-          const labelWithHour = it.label
-            ? it.label
-            : `${dateTxt}${timeTag} — ${fmtPts(it.amount || it.stake || 0)} pts`;
-
+        items.forEach(it => {
           const li = document.createElement('li');
           li.className = 'sell-item';
           li.dataset.id = it.id;
           li.dataset.kind = it.kind || 'PPP';
-          li.title = labelWithHour;
-          li.innerHTML = `<div class="sell-line">${wrapGP(labelWithHour)}</div>`;
+          li.title = it.label || '';
 
-          // Ici on n'annonce pas encore : étape “fixer le prix”
-          li.addEventListener('click', ()=>{
+          // --- 🔥 Construction plus claire du label ---
+          const city = it.city || '—';
+          const dateTxt = it.date_label || '';
+          const timeTxt = it.time_label ? ` — ${it.time_label}` : '';
+          const choiceIcon = (String(it.choice || '').toUpperCase() === 'PLUIE') ? '💧' : '☀️';
+          const line = `${city} — ${dateTxt}${timeTxt} - ${fmtPts(it.amount)} pts (x${it.odds.toFixed(1)}) - ${choiceIcon}`;
+
+          const boostsTxt = (it.boosts_count > 0)
+            ? ` - ${it.boosts_count} ⚡️(x${it.boosts_add.toFixed(1)})`
+            : '';
+          const gp = fmtPts(it.potential_gain);
+          const htmlLine = `${wrapGP(line + boostsTxt)} - <span class="gp">GP: ${gp} pts</span>`;
+
+          li.innerHTML = `<div class="sell-line">${htmlLine}</div>`;
+
+          // Action : sélection pour fixer le prix
+          li.addEventListener('click', () => {
             showSelectedForSale(it);
             panel.hidden = true;
           });
@@ -664,7 +671,7 @@
           ul.append(li);
         });
       }
-    }catch(e){
+    } catch (e) {
       console.warn('[trade] my-bets error', e);
     }
 
