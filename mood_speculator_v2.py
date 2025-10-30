@@ -2744,6 +2744,7 @@ PPP_HTML = """
   const mDateInput = document.getElementById('mDateInput');
   const mCancel    = document.getElementById('mCancel');
   const form       = document.getElementById('pppForm');
+  const mTimeHidden = document.getElementById('mTargetDt');
 
   if (!grid) { console.error('[ppp] #pppGrid introuvable'); return; }
 
@@ -2801,7 +2802,6 @@ PPP_HTML = """
       const hhmm = (hourSel && hourSel.value) ? hourSel.value : '15:00';
 
       // alimente le champ caché "target_dt" pour le backend (optionnel si tu lis déjà target_time)
-      const mTimeHidden = document.getElementById('mTargetDt');
       if (mTimeHidden) {
         mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T15:00
       }
@@ -2876,8 +2876,6 @@ PPP_HTML = """
       const titleEl   = document.getElementById('mTitle');
       const oddsWrap  = document.getElementById('mOddsWrap');
       const histWrap  = document.getElementById('mHistory');
-      const mTimeInput  = document.getElementById('mTimeInput');
-      const mTimeHidden = document.getElementById('mTimeHidden');
 
       if (titleEl) titleEl.textContent = (delta <= 3 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
 
@@ -2950,11 +2948,7 @@ PPP_HTML = """
       }
 
       // Champ caché pour la cible complète (YYYY-MM-DDTHH:MM)
-      const mTimeHidden = document.getElementById('mTargetDt');
-      if (mTimeHidden) {
-        // sera mis à jour au submit ; on le nettoie ici pour éviter un vieux résidu
-        mTimeHidden.value = '';
-      }
+      if (mTimeHidden) mTimeHidden.value = '';
 
       // Form et cotes visibles uniquement si pari autorisé (ou consultation si déjà une mise)
       if (delta <= 3 && hasBetNow) {
