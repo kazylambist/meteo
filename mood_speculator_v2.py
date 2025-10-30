@@ -2816,11 +2816,11 @@ PPP_HTML = """
   const BOOSTS_SAFE = (BOOSTS && typeof BOOSTS === 'object') ? BOOSTS : {};
 
   // --- Grille de 31 jours (démarre à J-3) ---
-  const START_SHIFT = -3; // ← clé : on commence 3 jours avant aujourd’hui
+  const START_SHIFT = -3; // ← on commence 3 jours avant aujourd’hui
   const TOTAL_DAYS  = 34;
 
   for (let i = 0; i <= TOTAL_DAYS; i++) {
-    const delta = i + START_SHIFT;         // -3 … +27 vs today
+    const delta = i + START_SHIFT;         // -3 … +31 vs today (34 inclus → +31)
     const d     = addDaysLocal(today, delta);
     const key   = ymdParis(d);
 
@@ -2833,11 +2833,32 @@ PPP_HTML = """
     const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
     const choice  = betInfo ? betInfo.choice : null;
 
-    // Jours passés : griser et désactiver le clic
-    if (delta < 0) el.classList.add('is-past');
+    // --- Jours passés : grisés si aucun pari, sinon verdict visible (priorité rouge) ---
+    if (delta < 0) {
+      if (!hasBetFor(key)) {
+        el.classList.add('is-past');
+      } else {
+        if (betInfo && Array.isArray(betInfo.bets) && betInfo.bets.length > 0) {
+          const results = betInfo.bets
+            .map(b => (b.result || b.verdict || '').toUpperCase())
+            .filter(Boolean);
+          if (results.includes('LOSE')) {
+            el.classList.add('today-loss');   // ❌ priorité rouge
+          } else if (results.includes('WIN')) {
+            el.classList.add('today-win');    // ✅ sinon vert
+          }
+        } else {
+          const result = (betInfo?.result || betInfo?.verdict || '').toUpperCase();
+          if (result === 'LOSE') el.classList.add('today-loss');
+          else if (result === 'WIN') el.classList.add('today-win');
+        }
+      }
+    }
 
-    // On conserve ta règle d’interdiction “proche” mais relative à aujourd’hui
-    if (delta <= 3 && !hasBetFor(key)) el.classList.add('disabled');
+    // Interdiction de mise : J+0..J+3 si aucune mise
+    if (delta <= 3 && delta >= 0 && !hasBetFor(key)) {
+      el.classList.add('disabled');
+    }
 
     let stakeBlock = '';
     if (amount > 0) {
@@ -2862,22 +2883,24 @@ PPP_HTML = """
     const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key])) ? Number(BOOSTS_SAFE[key]) : 0;
     renderOdds(oddsEl, baseOdds, boostForDay);
 
-    // Clic → modal (logique inchangée mais delta au lieu de i)
+    // Clic → modal (jours passés consultables, futur misable selon règles)
     el.addEventListener('click', () => {
       const hasBetNow = hasBetFor(key);
-
-      // jours passés : pas de clic
-      if (delta < 0) return;
-
-      // on n'autorise pas à miser avant J+3 (mais on peut consulter si déjà une mise)
-      if (delta <= 3 && !hasBetNow) return;
 
       const titleEl   = document.getElementById('mTitle');
       const oddsWrap  = document.getElementById('mOddsWrap');
       const histWrap  = document.getElementById('mHistory');
 
-      if (titleEl) titleEl.textContent = (delta <= 3 && hasBetNow) ? fr(d) : ("Miser sur " + fr(d));
+      // Titre
+      if (titleEl) {
+        if (delta < 0 || (delta <= 3 && hasBetNow)) {
+          titleEl.textContent = fr(d);
+        } else {
+          titleEl.textContent = "Miser sur " + fr(d);
+        }
+      }
 
+      // Cote (utile seulement si le formulaire est visible)
       let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
       const txt = (oddsEl.textContent || '').trim();
       if (txt) {
@@ -2885,7 +2908,7 @@ PPP_HTML = """
         if (!isNaN(num)) shownOdds = num;
       }
 
-      // Historique
+      // Historique (toujours visible en lecture/consultation)
       if (histWrap) {
         histWrap.innerHTML = '';
         if (hasBetNow) {
@@ -2923,10 +2946,13 @@ PPP_HTML = """
             // heure cible : fallback 18:00 si non fournie
             const rawTime = String(b.target_time || b.time || '18:00');
             const hhmm = rawTime.slice(0,5);      // "HH:MM"
-            const hh   = hhmm.split(':')[0] || '15';
-            const timeNote = ` — ${hh}h`;
+            const hh   = (hhmm.split(':')[0] || '18').padStart(2,'0');
 
-            lines.push(`Mise du ${frWhen}${timeNote} : ${amt} pts — (x${odd})`);
+            // verdict icône
+            const vr = String(b.result || b.verdict || '').toUpperCase();
+            const verdictIcon = vr === 'WIN' ? ' ✅' : (vr === 'LOSE' ? ' ❌' : '');
+
+            lines.push(`Mise du ${frWhen} — ${hh}h : ${amt} pts — (x${odd})${verdictIcon}`);
           }
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
@@ -2934,41 +2960,43 @@ PPP_HTML = """
           histWrap.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
           histWrap.style.display = 'block';
         } else {
-          histWrap.style.display = 'none';
+          // Aucun pari sur ce jour
+          histWrap.innerHTML = `<div>Aucune mise pour ce jour.</div>`;
+          histWrap.style.display = 'block';
         }
       }
-      // Préremplir la date & l'heure dans la modale
-      if (mDateInput) mDateInput.value = key;
 
-      // Sélection de l'heure (menu déroulant)
-      const hourSel = document.getElementById('mHour');
-      if (hourSel) {
-        const existing = (betInfo && (betInfo.target_time || (betInfo.bets?.[0]?.target_time))) || '';
-        hourSel.value = existing || '18:00';
+      // Affichage du formulaire : masqué pour jours passés, masqué pour J+0..J+3 (s'il n'y a pas déjà une mise)
+      const showForm = !(delta < 0) && !(delta <= 3 && !hasBetNow);
+
+      if (form) form.style.display = showForm ? 'block' : 'none';
+      if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
+      if (showForm && mOddsEl) {
+        mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
       }
 
-      // Champ caché pour la cible complète (YYYY-MM-DDTHH:MM)
-      if (mTimeHidden) mTimeHidden.value = '';
+      // Préremplir date & heure si on peut miser
+      if (showForm) {
+        if (mDateInput) mDateInput.value = key;
 
-      // Form et cotes visibles uniquement si pari autorisé (ou consultation si déjà une mise)
-      if (delta <= 3 && hasBetNow) {
-        if (form) form.style.display = 'none';
-        if (oddsWrap) oddsWrap.style.display = 'none';
-      } else {
-        if (form) form.style.display = 'block';
-        if (oddsWrap) oddsWrap.style.display = 'block';
-        if (mOddsEl) mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
+        const hourSel = document.getElementById('mHour');
+        if (hourSel) {
+          const existing = (betInfo && (betInfo.target_time || (betInfo.bets?.[0]?.target_time))) || '';
+          hourSel.value = existing || '18:00';
+        }
+        if (mTimeHidden) mTimeHidden.value = ''; // nettoie le champ caché
       }
 
       if (modal) modal.classList.add('open');
-      });
+    });
+
     grid.appendChild(el);
   }
 
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
-    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
+    o.textContent = o.textContent.replace(/^[⚡\s]+/g, '').replace(/^x?/, 'x');
   });
 
   // Icônes météo
@@ -3038,7 +3066,7 @@ PPP_HTML = """
         const betInfo = (MY_BETS && MY_BETS[todayKey]) ? MY_BETS[todayKey] : null;
         const hasBet  = (typeof hasBetFor === 'function') ? hasBetFor(todayKey) : !!betInfo;
 
-        // Couleur du liseré (win/lose)
+        // Couleur du liseré (win/lose) — logique "du jour" (conserve ton existant)
         cell.classList.remove('today-win','today-loss');
         if (hasBet) {
           const choice = betInfo ? betInfo.choice : null; // 'PLUIE' ou 'PAS_PLUIE'
@@ -3179,7 +3207,7 @@ PPP_HTML = """
     if (payload !== 'bolt') return;
 
     const oddsEl   = cell.querySelector('.odds');
-    const baseOdds = ODDS_SAFE[idx];
+    const baseOdds = ODDS_SAFE[Math.max(0, Math.min(30, idx))];
 
     try {
       const resp = await fetch('/ppp/boost', {
@@ -3192,14 +3220,14 @@ PPP_HTML = """
         })
       });
 
-    // Même si le serveur ne met pas ok:true, on essaie quand même d'extraire une valeur
+      // Même si le serveur ne met pas ok:true, on essaie quand même d'extraire une valeur
       let total = 0;
       try {
         const json = await resp.json();
         // Met à jour le stock d'éclairs si fourni par le backend
         if (json && typeof json.bolts_left !== 'undefined') {
           setBoltCount(json.bolts_left);
-        }        
+        }
         // Liste de clés possibles renvoyées par l'API
         const candidates = [
           'total','new_total','boost_total','total_boost','boost','value','newTotal','cumul'
@@ -3210,13 +3238,12 @@ PPP_HTML = """
             if (!Number.isNaN(v)) { total = v; break; }
           }
         }
-        // Certains backends renvoient { ok:true, total:.. } → on log pour debug
         console.debug('[ppp] boost resp:', json, '→ total=', total);
       } catch (e) {
         console.warn('[ppp] boost: réponse non-JSON ou vide, fallback +5', e);
       }
 
-       // Filet de sécurité : si on n'a rien pu lire, on incrémente localement de +5
+      // Filet de sécurité : si on n'a rien pu lire, on incrémente localement de +5
       if (!Number.isFinite(total) || total <= 0) {
         const prev = Number(BOOSTS_SAFE[key] || 0);
         total = prev + 5;
@@ -5117,6 +5144,7 @@ def ppp(station_id=None):
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
             "target_time": ttime,   # <-- pour le modal (lignes d’historique)
+            "result": getattr(r, "result", None) or getattr(r, "verdict", None),
         })
         bets_map[key] = entry
 
