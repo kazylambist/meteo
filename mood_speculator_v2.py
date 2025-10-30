@@ -864,25 +864,23 @@ def wet_odds_for_offset(hours_ahead: int) -> float | None:
 
 # Map offset → odds (per your spec). Offset d ∈ [0..30]
 PPP_ODDS = {
-    0: None, 1:1.0, 2:1.0, 3:1.0, 4:1.1, 5:1.1,
-    6:1.2, 7:1.3, 8:1.4, 9:1.5, 10:1.6, 11:1.7,
-    12:1.8, 13:1.9, 14:2.0, 15:2.0, 16:2.0, 17:2.0, 18:2.0, 19:2.5,
-    20:2.5, 21:2.5, 22:2.5, 23:2.5, 24:2.5, 25:2.5, 26:2.5,
-    27:2.7, 28:2.7, 29:2.7, 30:2.7
+    0:None,1:1.0,2:1.0,3:1.1,4:1.2,5:1.3,6:1.4,7:1.5,8:1.6,9:1.7,10:1.8,
+    11:2.0,12:2.0,13:2.0,14:2.0,15:2.0,16:2.0,17:2.0,18:2.0,19:2.5,20:2.5,
+    21:2.4,22:2.3,23:2.2,24:2.2,25:2.0,26:2.1,27:2.4,28:2.7,29:2.8,30:2.9,31:3.0
 }
 
 def ppp_odds_for_offset(d: int):
     return PPP_ODDS.get(d, None)
 
 def ppp_validate_can_bet(target: date, today: date) -> tuple[bool,str|None,int|None,float|None]:
-    """Return (ok, msg, offset, odds). First 5 days disabled; allow from +6..+30."""
+    """Return (ok, msg, offset, odds). First 3 days disabled; allow from +3..+31."""
     if target < today:
         return False, "Jour passé.", None, None
     offset = (target - today).days
     if offset <= 3:
-        return False, "Mise interdite sur les 5 prochains jours.", offset, None
-    if offset > 30:
-        return False, "Calendrier limité à 30 jours.", offset, None
+        return False, "Mise interdite sur les 3 prochains jours.", offset, None
+    if offset > 31:
+        return False, "Calendrier limité à 31 jours.", offset, None
     odds = ppp_odds_for_offset(offset)
     if odds is None:
         return False, "Aucun taux disponible.", offset, None
@@ -2732,9 +2730,9 @@ PPP_HTML = """
 
   // Cotes de base côté client
   const ODDS = {
-    0:null,1:1.0,2:1.0,3:1.0,4:1.0,5:1.0,6:1.1,7:1.2,8:1.2,9:1.3,10:1.3,
-    11:1.4,12:1.5,13:1.6,14:1.8,15:1.9,16:2.0,17:2.0,18:2.0,19:2.0,20:2.5,
-    21:2.0,22:2.0,23:2.0,24:2.0,25:2.0,26:2.0,27:2.7,28:2.0,29:2.0,30:2.0
+    0:null,1:1.0,2:1.0,3:1.1,4:1.2,5:1.3,6:1.4,7:1.5,8:1.6,9:1.7,10:1.8,
+    11:2.0,12:2.0,13:2.0,14:2.0,15:2.0,16:2.0,17:2.0,18:2.0,19:2.5,20:2.5,
+    21:2.4,22:2.3,23:2.2,24:2.2,25:2.0,26:2.1,27:2.4,28:2.7,29:2.8,30:2.9,31:3.0
   };
 
   // Refs DOM
