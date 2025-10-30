@@ -229,7 +229,7 @@ if RUN_MIG:
             except Exception:
                 pass
 
-            # PPP : nouvelle colonne pour la date/heure cible du pari (ex: "2025-11-15T15:00:00")
+            # PPP : nouvelle colonne pour la date/heure cible du pari (ex: "2025-11-15T18:00:00")
             try:
                 db.session.execute(text(
                     "ALTER TABLE ppp_bet ADD COLUMN target_dt TEXT"
@@ -628,7 +628,7 @@ class PPPBet(db.Model):
     station_id = db.Column(db.String(64), index=True, nullable=True)
     locked_for_trade = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     funded_from_balance = db.Column(db.Integer, nullable=False, default=1, server_default='1')
-
+    target_time = db.Column(db.String(5), nullable=True)
 
 class WetBet(db.Model):
     __tablename__ = 'wet_bets'
@@ -765,8 +765,7 @@ class PPPBoost(db.Model):
 
 # --- Ensure tables + columns exist (idempotent, SQLite-safe) ---
 with app.app_context():
-    with app.app_context():
-        db.create_all()
+    db.create_all()
 
     from sqlalchemy import inspect, text
 
@@ -789,6 +788,8 @@ with app.app_context():
     add_col_if_missing('ppp_boosts', 'bet_date',   'bet_date DATE')
     add_col_if_missing('ppp_boosts', 'value',      'value FLOAT DEFAULT 0.0')
     add_col_if_missing('ppp_boosts', 'created_at', 'created_at DATETIME')
+
+    add_col_if_missing('ppp_bet', 'target_time', 'target_time TEXT')
 
     # wet_bets: settlement fields used by Wet logic
     add_col_if_missing('wet_bets', 'observed_pct', 'observed_pct FLOAT')
@@ -2797,11 +2798,11 @@ PPP_HTML = """
 
       // heure choisie (menu déroulant)
       const hourSel = document.getElementById('mHour');
-      const hhmm = (hourSel && hourSel.value) ? hourSel.value : '15:00';
+      const hhmm = (hourSel && hourSel.value) ? hourSel.value : '18:00';
 
       // alimente le champ caché "target_dt" pour le backend (optionnel si tu lis déjà target_time)
       if (mTimeHidden) {
-        mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T15:00
+        mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T18:00
       }
       // Le select <select name="target_time" id="mHour"> soumettra aussi target_time=HH:MM.
     });
@@ -2919,8 +2920,8 @@ PPP_HTML = """
             const odd = (Number.isFinite(o) && o > 0 ? o : initialOdds)
                           .toFixed(1).replace('.', ',');
 
-            // heure cible : fallback 15:00 si non fournie
-            const rawTime = String(b.target_time || b.time || '15:00');
+            // heure cible : fallback 18:00 si non fournie
+            const rawTime = String(b.target_time || b.time || '18:00');
             const hhmm = rawTime.slice(0,5);      // "HH:MM"
             const hh   = hhmm.split(':')[0] || '15';
             const timeNote = ` — ${hh}h`;
@@ -2941,8 +2942,9 @@ PPP_HTML = """
 
       // Sélection de l'heure (menu déroulant)
       const hourSel = document.getElementById('mHour');
-      if (hourSel && !hourSel.value) {
-        hourSel.value = '15:00'; // valeur par défaut
+      if (hourSel) {
+        const existing = (betInfo && (betInfo.target_time || (betInfo.bets?.[0]?.target_time))) || '';
+        hourSel.value = existing || '18:00';
       }
 
       // Champ caché pour la cible complète (YYYY-MM-DDTHH:MM)
@@ -2999,9 +3001,9 @@ PPP_HTML = """
     });
   }
   function clampTimeToHour(hhmm){
-    // Normalise "15" -> "15:00", "15:7" -> "15:07"
+    // Normalise "18" -> "18:00", "18:7" -> "18:07"
     const s = String(hhmm || '').trim();
-    if (!s) return '15:00';
+    if (!s) return '18:00';
     const parts = s.split(':');
     const h = Math.max(0, Math.min(23, parseInt(parts[0]||'0',10)));
     const m = Math.max(0, Math.min(59, parseInt(parts[1]||'0',10)));
@@ -4986,17 +4988,20 @@ def ppp(station_id=None):
             target_str = (request.form.get('date') or '').strip()
             choice     = (request.form.get('choice') or '').strip().upper()
             amount     = round(float(request.form.get('amount') or 0), 2)
+
+            # heure ciblée HH:MM (ex: "18:00"), défaut 18:00 si vide
+            raw_hhmm   = (request.form.get('target_time') or '').strip() or '18:00'
         except Exception:
             flash("Entrées invalides.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
         if not target_str:
             flash("Cliquez sur une case du calendrier pour choisir la date.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
         if choice not in ('PLUIE', 'PAS_PLUIE') or amount <= 0:
             flash("Choix ou montant invalides.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
         # parse date choisie
         try:
@@ -5004,14 +5009,26 @@ def ppp(station_id=None):
             target = date(y, m, d)
         except Exception:
             flash("Date invalide.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
-        # validations métier
+        # clamp/valide l'heure HH:MM
+        def clamp_hhmm(s: str) -> str:
+            try:
+                parts = str(s).split(':')
+                h = max(0, min(23, int(parts[0])))
+                m = max(0, min(59, int(parts[1]) if len(parts) > 1 else 0))
+                return f"{h:02d}:{m:02d}"
+            except Exception:
+                return "18:00"
+
+        hhmm = clamp_hhmm(raw_hhmm)
+
+        # validations métier (J+3..J+31)
         today = today_paris_date()
         ok, msg, offset, odds = ppp_validate_can_bet(target, today)
         if not ok:
             flash(msg or "Mise impossible pour ce jour.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
         # empêcher paris contradictoires le même jour pour le même scope
         existing = (
@@ -5027,16 +5044,16 @@ def ppp(station_id=None):
         )
         if existing and existing[0].choice != choice:
             flash(f"Vous avez déjà misé « {existing[0].choice.replace('_',' ')} » pour ce jour.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
         # budget
         grem = remaining_points(current_user)
         if amount > grem + 1e-6:
             flash(f"Budget insuffisant. Points restants : {grem:.3f}.")
-            return redirect(url_for('ppp', station_id=station_id) if station_id else url_for('ppp'))
+            return redirect(_ppp_url())
 
-        # insertion
-        db.session.add(PPPBet(
+        # insertion (inclut target_time)
+        bet = PPPBet(
             user_id=current_user.id,
             bet_date=target,
             choice=choice,
@@ -5045,16 +5062,24 @@ def ppp(station_id=None):
             status='ACTIVE',
             station_id=scope_station_id,
             funded_from_balance=1
-        ))
+        )
+        # colonne ajoutée par migration idempotente
+        try:
+            setattr(bet, "target_time", hhmm)
+        except Exception:
+            # si jamais la colonne n'existe pas (ancien schéma), on ignore
+            pass
+
+        db.session.add(bet)
         db.session.commit()
 
-        flash(f"Mise enregistrée pour le {target.isoformat()} — {choice.replace('_',' ')} à x{odds:.1f}.")
+        flash(f"Mise enregistrée pour le {target.isoformat()} à {hhmm} — {choice.replace('_',' ')} à x{odds:.1f}.")
 
         # support AJAX si tu l'utilises
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({"ok": True})
+            return jsonify({"ok": True, "target_time": hhmm})
 
-        return redirect(url_for('you_bet', back=url_for('ppp', station_id=station_id) if station_id else url_for('ppp')))
+        return redirect(url_for('you_bet', back=_ppp_url()))
 
     # ------------------ GET: afficher la page ------------------
     solde_str = format_points_fr(remaining_points(current_user))
@@ -5080,10 +5105,18 @@ def ppp(station_id=None):
             when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
         except Exception:
             when_iso = key + "T00:00:00"
+
+        # heure affichable (fallback 18:00 si absente)
+        try:
+            ttime = getattr(r, "target_time", None) or "18:00"
+        except Exception:
+            ttime = "18:00"
+
         entry["bets"].append({
             "when": when_iso,
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
+            "target_time": ttime,   # <-- pour le modal (lignes d’historique)
         })
         bets_map[key] = entry
 
@@ -5101,7 +5134,6 @@ def ppp(station_id=None):
         {"uid": current_user.id, "sid": sid_norm}
     )
     for d, total in res:
-        # d peut être un objet date ou une str selon le driver
         key = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
         boosts_map[key] = float(total or 0.0)
 
