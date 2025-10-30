@@ -2649,44 +2649,63 @@ PPP_HTML = """
 <div id="pppModal" class="ppp-modal">
   <div class="ppp-card">
     <h3 style="margin:0 0 8px;" id="mTitle"></h3>
+
     <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
+
     <p id="mOddsWrap" style="margin:0 0 8px;">
       <strong>Cote:</strong> x<span id="mOdds"></span>
     </p>
-    <div id="mHistory" class="m-history" style="margin-bottom:10px; font-size:14px; color:#ccc; display:none;"></div>
+
+    <div id="mHistory"
+         class="m-history"
+         style="margin-bottom:10px; font-size:14px; color:#ccc; display:none;">
+    </div>
 
     <form method="post"
           action="{{ url_for('ppp', station_id=station_id) if station_id else url_for('ppp') }}"
           id="pppForm">
+
+      <!-- valeurs cachées -->
       <input type="hidden" name="date" id="mDateInput">
+      <input type="hidden" name="target_dt" id="mTargetDt">
       {% if station_id is not none %}
       <input type="hidden" name="station_id" value="{{ station_id }}">
       {% endif %}
 
-      <div class="grid cols-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      <div class="grid cols-3"
+           style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+
+        <!-- Choix pluie / pas pluie -->
         <div>
           <label for="mChoice">Choix</label>
           <select name="choice" id="mChoice" required>
-            <option value="PLUIE">💧</option>
-            <option value="PAS_PLUIE">☀️</option>
+            <option value="PLUIE">💧 Pluie</option>
+            <option value="PAS_PLUIE">☀️ Pas Pluie</option>
           </select>
         </div>
 
+        <!-- Choix de l’heure -->
         <div>
           <label for="mHour">Heure</label>
           <select name="target_time" id="mHour" required>
-            <!-- valeurs HH:00 — 00..23 ; 15:00 sélectionnée par défaut -->
-            {% for h in range(0,24) %}
-            <option value="{{ "%02d:00" % h }}" {% if h==15 %}selected{% endif %}>
+            {% for h in range(0, 24) %}
+            <option value="{{ "%02d:00" % h }}" {% if h == 15 %}selected{% endif %}>
               {{ "%02d" % h }}h
             </option>
             {% endfor %}
           </select>
         </div>
 
+        <!-- Montant -->
         <div>
           <label for="mAmount">Montant (points)</label>
-          <input type="number" name="amount" id="mAmount" min="0" step="0.1" value="1.0" required>
+          <input type="number"
+                 name="amount"
+                 id="mAmount"
+                 min="0"
+                 step="0.1"
+                 value="1.0"
+                 required>
         </div>
       </div>
 
@@ -2771,14 +2790,22 @@ PPP_HTML = """
   if (form) {
     form.addEventListener('submit', function (e) {
       const hasDate = !!(mDateInput && mDateInput.value);
-      const hhmm = clampTimeToHour(mTimeInput ? mTimeInput.value : '15:00');
       if (!hasDate) {
         e.preventDefault();
         alert("Cliquez d'abord sur un jour du calendrier pour choisir la date.");
         return;
       }
-      if (mTimeHidden) mTimeHidden.value = hhmm; // pour submit classique
-      // Si tu POSTes en fetch ailleurs, ajoute simplement { date: mDateInput.value, time: hhmm }
+
+      // heure choisie (menu déroulant)
+      const hourSel = document.getElementById('mHour');
+      const hhmm = (hourSel && hourSel.value) ? hourSel.value : '15:00';
+
+      // alimente le champ caché "target_dt" pour le backend (optionnel si tu lis déjà target_time)
+      const mTimeHidden = document.getElementById('mTargetDt');
+      if (mTimeHidden) {
+        mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T15:00
+      }
+      // Le select <select name="target_time" id="mHour"> soumettra aussi target_time=HH:MM.
     });
   }
 
@@ -2913,7 +2940,6 @@ PPP_HTML = """
           histWrap.style.display = 'none';
         }
       }
-
       // Préremplir la date & l'heure dans la modale
       if (mDateInput) mDateInput.value = key;
 
@@ -2922,6 +2948,9 @@ PPP_HTML = """
       if (hourSel && !hourSel.value) {
         hourSel.value = '15:00'; // valeur par défaut
       }
+
+      // Champ caché pour la cible complète (YYYY-MM-DDTHH:MM)
+      const mTimeHidden = document.getElementById('mTargetDt');
       if (mTimeHidden) {
         // sera mis à jour au submit ; on le nettoie ici pour éviter un vieux résidu
         mTimeHidden.value = '';
@@ -2938,8 +2967,7 @@ PPP_HTML = """
       }
 
       if (modal) modal.classList.add('open');
-    });
-    
+      });
     grid.appendChild(el);
   }
 
