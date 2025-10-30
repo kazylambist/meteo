@@ -43,6 +43,26 @@
     });
   }
 
+  // ---- heures (PPP) ----
+  function extractHHmm(x){
+    if (!x) return null;
+    // "15:00" → 15:00
+    if (/^\d{2}:\d{2}$/.test(x)) return x;
+    // "2025-11-15T15:00" → 15:00
+    const m = String(x).match(/T(\d{2}:\d{2})/);
+    return m ? m[1] : null;
+  }
+  function hourLabelFrom(obj, fallback='18:00'){
+    // essaye dans cet ordre : target_time, target_dt, payload.target_time, payload.target_dt
+    const src =
+      obj?.target_time || obj?.target_dt ||
+      obj?.payload?.target_time || obj?.payload?.target_dt || '';
+
+    const hhmm = extractHHmm(src) || fallback;
+    const hh = hhmm.slice(0,2);
+    return ` — ${hh}h`;
+  }
+
   // ---------- “Moi” : pseudo & solde depuis la topbar PPP ----------
   function fillMeBoxFromTopbar() {
     const nameEl  = document.querySelector('.user-menu .user-trigger strong');
@@ -395,6 +415,7 @@
 
       rows.forEach(r=>{
         const dateTxt = r.date_label || r.deadline_key || '';
+        const timeTag = hourLabelFrom(r, '18:00'); // ← “ — 18h” si rien en base
         const stakes  = `${fmtPts(r.stake||r.amount||0)} pts`;
         const baseNum = Number(r.base_odds||r.odds||1);
         const base    = baseNum.toFixed(1).replace('.', ',');
@@ -413,7 +434,7 @@
 
         const lineHtml = r.label
           ? r.label
-          : `${dateTxt} - ${stakes} (x${base})${boosts} - ${sideIcon} <span class="gp">GP: ${gpTxt} pts</span>`;
+          : `${dateTxt}${timeTag} - ${stakes} (x${base})${boosts} - ${sideIcon} <span class="gp">GP: ${gpTxt} pts</span>`;
 
         const askVal  = (r.ask_price != null) ? Number(r.ask_price) : null;
         const askHtml = askVal != null
@@ -597,12 +618,19 @@
         ul.append(li);
       } else {
         items.forEach(it=>{
+          // 🔹 Ajout de l’heure
+          const dateTxt = it.date_label || it.deadline_key || '';
+          const timeTag = hourLabelFrom(it, '18:00'); // → " — 18h" par défaut
+          const labelWithHour = it.label
+            ? it.label
+            : `${dateTxt}${timeTag} — ${fmtPts(it.amount || it.stake || 0)} pts`;
+
           const li = document.createElement('li');
           li.className = 'sell-item';
           li.dataset.id = it.id;
           li.dataset.kind = it.kind || 'PPP';
-          li.title = it.label || '';
-          li.innerHTML = `<div class="sell-line">${wrapGP(it.label || '')}</div>`;
+          li.title = labelWithHour;
+          li.innerHTML = `<div class="sell-line">${wrapGP(labelWithHour)}</div>`;
 
           // Ici on n'annonce pas encore : étape “fixer le prix”
           li.addEventListener('click', ()=>{

@@ -7526,3 +7526,102 @@ if __name__ == "__main__":
             app.logger.warning(f"[migrate] users.last_seen: {e}")    
 
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8080")), debug=True)
+
+  // ---------- Listings publics ----------
+  async function loadListings(){
+    try{
+      const res = await fetch('/api/trade/listings', {credentials:'same-origin'});
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      const rows = await res.json();
+      const wrap = $('#listings');
+      if (!wrap) return;
+      wrap.innerHTML = '';
+
+      rows.forEach(r=>{
+        const dateTxt = r.date_label || r.deadline_key || '';
+        const timeTag = hourLabelFrom(r, '18:00'); // ← “ — 18h” si rien en base
+        const stakes  = `${fmtPts(r.stake||r.amount||0)} pts`;
+        const baseNum = Number(r.base_odds||r.odds||1);
+        const base    = baseNum.toFixed(1).replace('.', ',');
+        let boosts = '';
+        if (r.boosts_count) {
+          const addNum = Number(r.boosts_add||0);
+          const addTxt = addNum.toFixed(1).replace('.', ',');
+          boosts = ` - ${r.boosts_count} ⚡️(x${addTxt})`;
+        }
+        const sideRaw = String(r.side || r.choice || '').toUpperCase();
+        const isRain  = (sideRaw === 'PLUIE' || sideRaw === 'RAIN' || sideRaw === 'RAINY');
+        const sideIcon = isRain ? '💧' : '☀️';
+        const totalOdds = Number(r.total_odds || (baseNum + Number(r.boosts_add||0)) || baseNum);
+        const gpVal = (Number(r.stake||r.amount||0) * totalOdds);
+        const gpTxt = fmtPts(gpVal);
+
+        const lineHtml = r.label
+          ? r.label
+          : `${dateTxt}${timeTag} - ${stakes} (x${base})${boosts} - ${sideIcon} <span class="gp">GP: ${gpTxt} pts</span>`;
+
+        const askVal  = (r.ask_price != null) ? Number(r.ask_price) : null;
+        const askHtml = askVal != null
+          ? `<span class="ask-price">${fmtPts(askVal)} pts</span>`
+          : `<span class="ask-price muted">Prix non défini</span>`;
+
+        const row = document.createElement('div');
+        row.className = 'listing';
+        row.innerHTML = `
+          <div class="meta">
+            <div class="title">${askHtml}</div>
+            <div class="line">${wrapGP(lineHtml)}</div>
+          </div>
+          <div class="actions"></div>
+        `;
+
+        // Actions : Retirer (si c’est mon annonce) / Acheter (sinon)
+        const actions = row.querySelector('.actions');
+        if (r.is_mine) {
+          const btnCancel = document.createElement('button');
+          btnCancel.className = 'btn btn-retire';
+          btnCancel.type = 'button';
+          btnCancel.textContent = 'Retirer';
+          btnCancel.addEventListener('click', async ()=>{
+            if (!confirm('Retirer cette annonce ?')) return;
+            const resp = await fetch(`/api/trade/listings/${r.id}/cancel`, {
+              method:'POST',
+              credentials:'same-origin'
+            });
+            if (!resp.ok) { alert('Impossible de retirer.'); return; }
+            await loadListings();
+          });
+          actions.append(btnCancel);
+        } else {
+          const btnBuy = document.createElement('button');
+          btnBuy.className = 'btn btn-buy';
+          btnBuy.type = 'button';
+          btnBuy.textContent = 'Acheter';
+          btnBuy.addEventListener('click', async ()=>{
+            if (r.ask_price != null) {
+              const ok = confirm(`Acheter cette mise pour ${fmtPts(r.ask_price)} pts ?`);
+              if (!ok) return;
+            }
+            const resp = await fetch(`/api/trade/listings/${r.id}/buy`, {
+              method:'POST',
+              credentials:'same-origin'
+            });
+            if (!resp.ok) {
+              let msg = 'Achat impossible.';
+              try { const j = await resp.json(); if (j && j.error) msg += '\n' + j.error; } catch {}
+              alert(msg);
+              return;
+            }
+            alert('Achat réussi !');
+            await loadListings();
+          });
+          actions.append(btnBuy);
+        }
+
+        wrap.append(row);
+        colorizeGPIn(row);
+      });
+    }catch(e){
+      console.error('[trade] listings error', e);
+    }
+  }
