@@ -628,7 +628,11 @@ class PPPBet(db.Model):
     station_id = db.Column(db.String(64), index=True, nullable=True)
     locked_for_trade = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     funded_from_balance = db.Column(db.Integer, nullable=False, default=1, server_default='1')
-    target_time = db.Column(db.String(5), nullable=True)
+    target_time = db.Column(db.String(5), default="18:00")
+    verdict = db.Column(db.String(8))
+    outcome = db.Column(db.String(16))
+    observed_mm = db.Column(db.Float)
+    resolved_at = db.Column(db.DateTime)
 
 class WetBet(db.Model):
     __tablename__ = 'wet_bets'
@@ -790,6 +794,11 @@ with app.app_context():
     add_col_if_missing('ppp_boosts', 'created_at', 'created_at DATETIME')
 
     add_col_if_missing('ppp_bet', 'target_time', 'target_time TEXT')
+    add_col_if_missing('ppp_bets', 'target_time', 'target_time VARCHAR(5)')
+    add_col_if_missing('ppp_bets', 'verdict', 'verdict VARCHAR(8)')
+    add_col_if_missing('ppp_bets', 'outcome', 'outcome VARCHAR(16)')
+    add_col_if_missing('ppp_bets', 'observed_mm', 'observed_mm FLOAT')
+    add_col_if_missing('ppp_bets', 'resolved_at', 'resolved_at DATETIME')
 
     # wet_bets: settlement fields used by Wet logic
     add_col_if_missing('wet_bets', 'observed_pct', 'observed_pct FLOAT')
@@ -916,6 +925,35 @@ def remaining_weather_points(u: User) -> float:
         .filter(WeatherPosition.user_id == u.id, WeatherPosition.status == 'ACTIVE').scalar() or 0.0
     rem = 1.0 - float(active)
     return max(0.0, round(rem, 6))
+
+from datetime import datetime, timedelta
+from sqlalchemy import text
+
+def observed_rain_between(station_id, date_obj, target_time, window_minutes=60):
+    """
+    Retourne la pluie observée (mm) dans la fenêtre centrée sur `target_time`
+    pour la station donnée.
+    - station_id: int ou None
+    - date_obj: date
+    - target_time: 'HH:MM' string
+    """
+    try:
+        hour, minute = map(int, target_time.split(':'))
+    except Exception:
+        hour, minute = 15, 0
+
+    # Créer le timestamp début/fin
+    dt0 = datetime.combine(date_obj, datetime.min.time()) + timedelta(hours=hour, minutes=minute)
+    dt1 = dt0 + timedelta(minutes=window_minutes)
+
+    sql = """
+        SELECT SUM(rain_mm)
+        FROM rain_obs
+        WHERE obs_time >= :start AND obs_time < :end
+          AND (:sid IS NULL OR station_id = :sid)
+    """
+    val = db.session.execute(text(sql), {"sid": station_id, "start": dt0, "end": dt1}).scalar()
+    return float(val or 0.0)
 
 BUDGET_INITIAL = 500.0
 
@@ -1065,6 +1103,39 @@ def remaining_points(user):
 
     # 3) Sinon, fallback: ledger
     return ledger_points
+
+from datetime import datetime, date, timedelta
+
+@app.cli.command("ppp_resolve")
+def ppp_resolve():
+    """Règle les PPP bets selon la pluie observée horaire."""
+    today = today_paris_date()
+    bets = PPPBet.query.filter(
+        PPPBet.bet_date < today,
+        PPPBet.status == 'ACTIVE',
+        PPPBet.verdict.is_(None)
+    ).all()
+
+    threshold = 0.2  # mm — seuil de pluie
+
+    for b in bets:
+        rain = observed_rain_between(
+            station_id=b.station_id,
+            date_obj=b.bet_date,
+            target_time=getattr(b, "target_time", "15:00") or "15:00"
+        )
+
+        observed_choice = "PLUIE" if rain >= threshold else "PAS_PLUIE"
+        verdict = "WIN" if observed_choice == b.choice else "LOSE"
+
+        b.verdict = verdict
+        b.outcome = observed_choice
+        b.observed_mm = rain
+        b.resolved_at = datetime.utcnow()
+        db.session.add(b)
+
+    db.session.commit()
+    print(f"✅ Résolu {len(bets)} PPP bets.")
 
 # --- helper défensif: garantit user.bolts ---
 from sqlalchemy import text
@@ -2886,6 +2957,7 @@ PPP_HTML = """
     // Clic → modal (jours passés consultables, futur misable selon règles)
     el.addEventListener('click', () => {
       const hasBetNow = hasBetFor(key);
+      const isPast = (delta < 0);
 
       const titleEl   = document.getElementById('mTitle');
       const oddsWrap  = document.getElementById('mOddsWrap');
@@ -2893,7 +2965,7 @@ PPP_HTML = """
 
       // Titre
       if (titleEl) {
-        if (delta < 0 || (delta <= 3 && hasBetNow)) {
+        if (isPast || (delta <= 3 && hasBetNow)) {
           titleEl.textContent = fr(d);
         } else {
           titleEl.textContent = "Miser sur " + fr(d);
@@ -2908,7 +2980,7 @@ PPP_HTML = """
         if (!isNaN(num)) shownOdds = num;
       }
 
-      // Historique (toujours visible en lecture/consultation)
+      // Historique (lecture seule + verdict/pluie)
       if (histWrap) {
         histWrap.innerHTML = '';
         if (hasBetNow) {
@@ -2945,29 +3017,38 @@ PPP_HTML = """
 
             // heure cible : fallback 18:00 si non fournie
             const rawTime = String(b.target_time || b.time || '18:00');
-            const hhmm = rawTime.slice(0,5);      // "HH:MM"
-            const hh   = (hhmm.split(':')[0] || '18').padStart(2,'0');
+            const hhmm = rawTime.slice(0,5);
+            const hh   = hhmm.split(':')[0] || '18';
 
             // verdict icône
-            const vr = String(b.result || b.verdict || '').toUpperCase();
-            const verdictIcon = vr === 'WIN' ? ' ✅' : (vr === 'LOSE' ? ' ❌' : '');
+            const verdict = String(b.verdict || b.result || '').toUpperCase();
+            const badge   = verdict === 'WIN' ? ' ✅' : verdict === 'LOSE' ? ' ❌' : '';
 
-            lines.push(`Mise du ${frWhen} — ${hh}h : ${amt} pts — (x${odd})${verdictIcon}`);
+            // pluie mesurée (mm) si dispo
+            let observedNote = '';
+            if (b.observed_mm != null && b.observed_mm !== '') {
+              const mm = Number(b.observed_mm);
+              if (!Number.isNaN(mm)) {
+                observedNote = ` (${mm.toFixed(1).replace('.', ',')} mm observés à ${hh}h)`;
+              }
+            }
+
+            lines.push(`Mise du ${frWhen} — ${hh}h : ${amt} pts — (x${odd})${badge}${observedNote}`);
           }
+
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
 
           histWrap.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
           histWrap.style.display = 'block';
         } else {
-          // Aucun pari sur ce jour
           histWrap.innerHTML = `<div>Aucune mise pour ce jour.</div>`;
           histWrap.style.display = 'block';
         }
       }
 
       // Affichage du formulaire : masqué pour jours passés, masqué pour J+0..J+3 (s'il n'y a pas déjà une mise)
-      const showForm = !(delta < 0) && !(delta <= 3 && !hasBetNow);
+      const showForm = !isPast && !(delta <= 3 && !hasBetNow);
 
       if (form) form.style.display = showForm ? 'block' : 'none';
       if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
@@ -5144,7 +5225,10 @@ def ppp(station_id=None):
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
             "target_time": ttime,   # <-- pour le modal (lignes d’historique)
+            "verdict":     getattr(r, "verdict", None),  
             "result": getattr(r, "result", None) or getattr(r, "verdict", None),
+            "outcome":     getattr(r, "outcome", None),
+            "observed_mm": getattr(r, "observed_mm", None), 
         })
         bets_map[key] = entry
 
