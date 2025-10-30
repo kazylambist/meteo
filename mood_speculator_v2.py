@@ -6214,6 +6214,22 @@ def trade_my_bets():
         daykey = b.bet_date.isoformat()           # "YYYY-MM-DD"
         date_label = _fmt_date_fr_daykey(daykey)  # Lundi 27 novembre
 
+        # --- heure ciblée (si dispo) ---
+        target_time = getattr(b, "target_time", None)
+        target_dt   = getattr(b, "target_dt", None)
+
+        # Format lisible de l’heure
+        time_label = ""
+        if target_time:
+            # support "15:00:00" ou "15:00"
+            time_label = str(target_time)[:5]
+        elif target_dt:
+            try:
+                t = datetime.fromisoformat(str(target_dt))
+                time_label = t.strftime("%H:%M")
+            except Exception:
+                pass
+
         # --- ville (scope PPP) ---
         if b.station_id is None:
             city = "Paris"
@@ -6229,9 +6245,7 @@ def trade_my_bets():
         odds   = float(b.odds   or 1.0)
 
         # --- boosts du jour (additifs à la cote), pour CE scope ---
-        # même logique SQL que dans /ppp pour construire boosts_map
         params = {"uid": uid, "sid": b.station_id, "d": daykey}
-        # station NULL <-> station NULL
         sql = text("""
           SELECT SUM(COALESCE(value,0)) AS total
           FROM ppp_boosts
@@ -6250,11 +6264,14 @@ def trade_my_bets():
         gp = amount * total_odds
 
         icon = "💧" if (choice or "").upper() == "PLUIE" else "☀️"
+
         # ---- étiquette lisible pour Trade (HTML OK) ----
-        label = f"{city} — {date_label} - {fmt_fr(amount)} pts (x{fmt_fr(odds)})"
+        label = f"{city} — {date_label}"
+        if time_label:
+            label += f" — {time_label}"
+        label += f" - {fmt_fr(amount)} pts (x{fmt_fr(odds)})"
         if boosts_count > 0:
             label += f" - {boosts_count} ⚡️(x{fmt_fr(boosts_add)})"
-        # ⬇️ GP en vert via CSS .gp
         label += f" - {icon} <span class=\"gp\">GP: {fmt_fr(gp)} pts</span>"
 
         out.append({
@@ -6263,6 +6280,9 @@ def trade_my_bets():
             "city": city,
             "deadline_key": daykey,
             "date_label": date_label,
+            "time_label": time_label,
+            "target_time": target_time,
+            "target_dt": target_dt,
             "choice": choice,
             "amount": amount,
             "odds": odds,
