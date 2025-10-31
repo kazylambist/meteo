@@ -5008,6 +5008,13 @@ def delete_account():
         db.session.execute(text("DELETE FROM ppp_boosts WHERE user_id = :uid"), {"uid": uid})
         db.session.execute(text("DELETE FROM ppp_bet WHERE user_id = :uid"), {"uid": uid})
 
+        # --- Supprime toutes les tables qui référencent user.id ---
+        for t in ["wallet_transactions", "notifications", "mood_entries", "daily_moods"]:
+            try:
+                db.session.execute(text(f"DELETE FROM {t} WHERE user_id = :uid"), {"uid": uid})
+            except Exception as e:
+                app.logger.warning(f"Table ignorée lors de la suppression du user : {t} ({e})")
+
         # --- Enfin, l’utilisateur ---
         u = db.session.get(User, uid)
         if u:
