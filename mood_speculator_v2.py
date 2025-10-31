@@ -4966,13 +4966,13 @@ import os
 def delete_account():
     uid = current_user.id  # capture avant logout
 
-    # Déconnexion d’abord
+    # 1) Déconnexion d’abord
     try:
         logout_user()
     except Exception:
         pass
 
-    # Suppression avatar
+    # 2) Supprime l’avatar disque (best-effort)
     try:
         avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
         if os.path.exists(avatar_path):
@@ -4980,42 +4980,42 @@ def delete_account():
     except Exception:
         pass
 
-    # Purge base
+    # 3) Purge base dans une transaction
     try:
-        db.session.rollback()
+        db.session.rollback()  # nettoie une éventuelle transaction en cours
     except Exception:
         pass
 
     try:
-        # --- Trade listings ---
-        try:
-            # Nouveau nom de table probable
-            db.session.execute(text("DELETE FROM bet_listing WHERE user_id = :uid"), {"uid": str(uid)})
-        except Exception:
-            # Si bet_listing n’existe pas, on tente l’ancien nom
+        # -- Tables qui ont un FK vers user(id) (d’après ton dump)
+        child_tables_fk_user = [
+            "position",
+            "weather_position",
+            "ppp_bet",
+            "wet_bets",
+            "ppp_boosts",
+            "user_station",
+            "art_bets",
+        ]
+
+        for t in child_tables_fk_user:
+            db.session.execute(text(f"DELETE FROM {t} WHERE user_id = :uid"), {"uid": uid})
+
+        # -- Autres tables optionnelles (sans FK) si présentes (best-effort)
+        optional_tables = {
+            # table : clause
+            "bet_listing": "user_id = :uid",  # ta table Trade (si elle existe ici)
+            "chat_messages": "from_user_id = :uid OR to_user_id = :uid",
+            # ajoute ici d’autres tables non-FK si besoin
+        }
+        for t, clause in optional_tables.items():
             try:
-                db.session.execute(text("DELETE FROM trade_listing WHERE user_id = :uid"), {"uid": str(uid)})
+                db.session.execute(text(f"DELETE FROM {t} WHERE {clause}"), {"uid": uid})
             except Exception:
-                app.logger.warning("Aucune table trade/bet_listing trouvée — skip.")
+                # on ignore si la table n'existe pas dans ce déploiement
+                pass
 
-        # --- Chat ---
-        db.session.execute(
-            text("DELETE FROM chat_messages WHERE from_user_id = :uid OR to_user_id = :uid"),
-            {"uid": uid}
-        )
-
-        # --- PPP boosts & bets ---
-        db.session.execute(text("DELETE FROM ppp_boosts WHERE user_id = :uid"), {"uid": uid})
-        db.session.execute(text("DELETE FROM ppp_bet WHERE user_id = :uid"), {"uid": uid})
-
-        # --- Supprime toutes les tables qui référencent user.id ---
-        for t in ["wallet_transactions", "notifications", "mood_entries", "daily_moods"]:
-            try:
-                db.session.execute(text(f"DELETE FROM {t} WHERE user_id = :uid"), {"uid": uid})
-            except Exception as e:
-                app.logger.warning(f"Table ignorée lors de la suppression du user : {t} ({e})")
-
-        # --- Enfin, l’utilisateur ---
+        # -- Enfin, l’utilisateur
         u = db.session.get(User, uid)
         if u:
             db.session.delete(u)
