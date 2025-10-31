@@ -4966,13 +4966,13 @@ import os
 def delete_account():
     uid = current_user.id  # capture avant logout
 
-    # 1) Déconnecter d’abord (évite d'accéder à current_user ensuite)
+    # 1️⃣ Déconnexion propre
     try:
         logout_user()
     except Exception:
         pass
 
-    # 2) Supprimer l’avatar disque (best-effort)
+    # 2️⃣ Supprimer l’avatar disque
     try:
         avatar_path = os.path.join(app.static_folder, "avatars", f"{uid}.png")
         if os.path.exists(avatar_path):
@@ -4980,50 +4980,39 @@ def delete_account():
     except Exception:
         pass
 
-    # 3) Purge base (sans with .begin(), commit/rollback explicites)
-    #    On rollback d’abord si une transaction précédente est en cours.
+    # 3️⃣ Annule toute transaction en cours
     try:
         db.session.rollback()
     except Exception:
         pass
 
     try:
-        # --- Trade listings ---
-        try:
-            # BetListing.user_id est un STRING → comparer avec str(uid)
-            BetListing.query.filter(BetListing.user_id == str(uid)).delete(synchronize_session=False)
-        except NameError:
-            # Fallback SQL si le modèle n'est pas importé dans ce scope
-            try:
-                db.session.execute(text("DELETE FROM bet_listing WHERE user_id = :uid"), {"uid": str(uid)})
-            except Exception:
-                # ancien nom éventuel
-                db.session.execute(text("DELETE FROM trade_listing WHERE user_id = :uid"), {"uid": str(uid)})
-
-        # --- Chat ---
-        db.session.execute(
-            text("DELETE FROM chat_messages WHERE from_user_id = :uid OR to_user_id = :uid"),
-            {"uid": uid}
-        )
-
-        # --- PPP boosts & bets ---
+        # --- Supprimer d’abord les tables dépendantes ---
+        # (important pour éviter les contraintes FOREIGN KEY)
+        db.session.execute(text("DELETE FROM chat_messages WHERE from_user_id = :uid OR to_user_id = :uid"), {"uid": uid})
         db.session.execute(text("DELETE FROM ppp_boosts WHERE user_id = :uid"), {"uid": uid})
-        db.session.execute(text("DELETE FROM ppp_bet    WHERE user_id = :uid"), {"uid": uid})
+        db.session.execute(text("DELETE FROM ppp_bet WHERE user_id = :uid"), {"uid": uid})
 
-        # --- Enfin, l’utilisateur ---
-        u = db.session.get(User, uid)
-        if u:
-            db.session.delete(u)
+        # Certains modèles peuvent stocker user_id sous forme de texte :
+        db.session.execute(text("DELETE FROM bet_listing WHERE user_id = :uid"), {"uid": str(uid)})
+        db.session.execute(text("DELETE FROM trade_listing WHERE user_id = :uid"), {"uid": str(uid)})
+
+        # Nettoyage complémentaire si tu as d’autres dépendances (logs, messages, votes, etc.)
+        # Exemple :
+        # db.session.execute(text("DELETE FROM notifications WHERE user_id = :uid"), {"uid": uid})
+
+        # --- Enfin, supprimer l’utilisateur ---
+        db.session.execute(text("DELETE FROM user WHERE id = :uid"), {"uid": uid})
 
         db.session.commit()
 
-    except Exception:
+    except Exception as e:
         db.session.rollback()
         app.logger.exception("Erreur suppression compte %s", uid)
         flash("Suppression impossible pour le moment. Réessaie dans un instant.", "error")
         return redirect(url_for("ppp"))
 
-    flash("Votre compte a été supprimé.", "success")
+    flash("Votre compte a été supprimé avec succès.", "success")
     return redirect(url_for("login"))
 
 # -----------------------------------------------------------------------------
