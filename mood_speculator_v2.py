@@ -6298,7 +6298,68 @@ def chat_list():
 @app.post("/api/chat/messages")
 @login_required
 def chat_send():
-    """Crée un message privé."""
+    """Crée un message privé (avec commandes secrètes toyou🎁N / tome🎁N)."""
+    import re
+    from sqlalchemy import text
+
+    def _parse_gift(s: str):
+        """
+        Renvoie (cmd, amount_float) si le message est du type:
+          - 'toyou🎁100'  → cmd='toyou'
+          - 'tome🎁100'    → cmd='tome'
+        Tolère espaces et virgules décimales.
+        """
+        if not s:
+            return None, None
+        s = s.strip()
+        m = re.match(r'^(toyou|tome)\s*🎁\s*([0-9]+(?:[.,][0-9]+)?)\s*$', s, flags=re.IGNORECASE)
+        if not m:
+            return None, None
+        cmd = m.group(1).lower()
+        raw = m.group(2).replace(',', '.')
+        try:
+            amt = float(raw)
+            if amt > 0:
+                return cmd, amt
+        except Exception:
+            pass
+        return None, None
+
+    def _credit_bonus_points(user_id: int, amount: float):
+        """
+        Crédite le solde 'bonus_points' du user (fallback sur 'points' si colonne absente).
+        Best-effort: ne lève pas si la colonne n'existe pas.
+        """
+        # 1) Tente via ORM si attribut présent
+        u = db.session.get(User, user_id)
+        if u is not None:
+            try:
+                cur = float(getattr(u, "bonus_points", 0.0) or 0.0)
+                setattr(u, "bonus_points", cur + float(amount))
+                db.session.add(u)
+                return
+            except Exception:
+                pass
+
+        # 2) Fallback SQL brut: tente bonus_points puis points
+        try:
+            db.session.execute(
+                text('UPDATE "user" SET bonus_points = COALESCE(bonus_points, 0) + :a WHERE id = :uid'),
+                {"a": float(amount), "uid": int(user_id)}
+            )
+            return
+        except Exception:
+            pass
+        try:
+            db.session.execute(
+                text('UPDATE "user" SET points = COALESCE(points, 0) + :a WHERE id = :uid'),
+                {"a": float(amount), "uid": int(user_id)}
+            )
+            return
+        except Exception:
+            # on laisse tomber silencieusement si aucune colonne viable
+            pass
+
     data = request.get_json(silent=True) or {}
     try:
         to_id = int(data.get("to", 0))
@@ -6309,19 +6370,34 @@ def chat_send():
     if not to_id or not body:
         return jsonify({"ok": False, "error": "Message vide ou destinataire manquant."}), 400
 
-    # optionnel: empêcher d'envoyer à soi-même
     frm_id = int(current_user.get_id())
     if to_id == frm_id:
+        # On garde l’interdiction d’auto-message pour éviter les boucles de chat.
+        # (Le code 'tome🎁N' crédite l’expéditeur même si le message est envoyé dans une
+        #  conversation avec quelqu’un d’autre.)
         return jsonify({"ok": False, "error": "Destinataire invalide."}), 400
 
     other = User.query.get(to_id)
     if not other:
         return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
 
-    msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=body)
+    # --- Commandes secrètes ---
+    cmd, amt = _parse_gift(body)
+    masked_body = body  # par défaut on garde le corps tel quel
+
     try:
+        if cmd == "toyou" and amt:
+            # Créditer le destinataire, masquer le préfixe dans le message sauvegardé
+            _credit_bonus_points(to_id, amt)
+            masked_body = f"🎁{int(amt) if amt.is_integer() else amt}"
+        elif cmd == "tome" and amt:
+            # Créditer l'expéditeur, NE PAS masquer (le message reste 'tome🎁N')
+            _credit_bonus_points(frm_id, amt)
+
+        msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
         db.session.add(msg)
         db.session.commit()
+
     except Exception as e:
         db.session.rollback()
         return jsonify({"ok": False, "error": str(e)}), 500
