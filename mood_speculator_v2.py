@@ -962,8 +962,8 @@ import os
 
 def remaining_points(user):
     """
-    1) Essaie d'abord de lire user.points (source de vérité).
-    2) Sinon, retombe sur un calcul 'ledger' à partir des tables PPP/Wet/Trade/ArtBet.
+    1) Essaie d'abord de lire user.points (source de vérité) + bonus_points si présent.
+    2) Sinon, retombe sur un calcul 'ledger' à partir des tables PPP/Wet/Trade/ArtBet (+ bonus_points).
     3) Optionnel: si POINTS_RECONCILE=1 et divergence détectée, retourne le ledger.
     """
     if not user or not getattr(user, "id", None):
@@ -972,6 +972,7 @@ def remaining_points(user):
 
     # --- (A) Lecture directe du solde ---
     points_now = None
+    bonus_now  = 0.0
     try:
         points_now = db.session.execute(
             text('SELECT points FROM "user" WHERE id = :uid'),
@@ -980,8 +981,17 @@ def remaining_points(user):
         if points_now is not None:
             points_now = float(points_now)
     except Exception:
-        # table ou colonne absente → on passera en ledger
         pass
+
+    # Bonus (colonne facultative)
+    try:
+        bonus_now = db.session.execute(
+            text('SELECT bonus_points FROM "user" WHERE id = :uid'),
+            {"uid": uid}
+        ).scalar()
+        bonus_now = float(bonus_now or 0.0)
+    except Exception:
+        bonus_now = 0.0  # colonne absente → ignore
 
     # --- (B) Calcul "ledger" de secours ---
     base = 500.0
@@ -1088,20 +1098,21 @@ def remaining_points(user):
         - float(trade_spent)
         + float(trade_earned)
         + float(art_net)
+        + float(bonus_now)   # ✅ intègre le bonus dans le ledger
     )
     ledger_points = max(0.0, round(ledger_points, 6))
 
     # --- (C) Choix de la valeur retournée ---
-    # 1) Si user.points est lisible → on le retourne par défaut (source de vérité).
+    # 1) Si user.points est lisible → on le retourne par défaut (source de vérité) + bonus
     if points_now is not None:
-        # 2) Réconciliation optionnelle (activable par env pour debug/fiabilisation)
+        points_with_bonus = float(points_now) + float(bonus_now)
+        # 2) Réconciliation optionnelle
         if os.environ.get("POINTS_RECONCILE", "0") == "1":
-            # Si divergence franche, préfère le ledger (tu peux journaliser ici).
-            if abs(points_now - ledger_points) > 0.5:  # seuil tolérance
+            if abs(points_with_bonus - ledger_points) > 0.5:  # seuil tolérance
                 return ledger_points
-        return points_now
+        return points_with_bonus
 
-    # 3) Sinon, fallback: ledger
+    # 3) Sinon, fallback: ledger (incluant bonus)
     return ledger_points
 
 from datetime import datetime, date, timedelta
@@ -6174,6 +6185,74 @@ def _clip_text(s: str, max_len=2000) -> str:
     if len(s) > max_len:
         s = s[:max_len]
     return s
+
+import re
+from sqlalchemy import text
+
+GIFT_RE = re.compile(r'^(toyou|tome)\s*🎁\s*([0-9]+(?:[.,][0-9]+)?)\s*$', re.IGNORECASE)
+
+def _ensure_bonus_points_column():
+    """Ajoute user.bonus_points si absent (SQLite safe). Appelé au boot."""
+    try:
+        res = db.session.execute(text("PRAGMA table_info(user)")).fetchall()
+        cols = {r[1] for r in res}
+        if "bonus_points" not in cols:
+            db.session.execute(text("ALTER TABLE user ADD COLUMN bonus_points FLOAT DEFAULT 0.0"))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+def credit_bonus_points(user_id: int, amount: float, reason: str = "gift"):
+    """Crédite le champ user.bonus_points (ledger minimal)."""
+    if amount <= 0:
+        return
+    # UPDATE direct pour éviter races (moins d’objets en mémoire)
+    db.session.execute(
+        text("UPDATE user SET bonus_points = COALESCE(bonus_points, 0) + :amt WHERE id = :uid"),
+        {"amt": float(amount), "uid": int(user_id)}
+    )
+
+def parse_gift(body: str):
+    """Retourne ('toyou'|'tome', amount) ou None si pas un cadeau."""
+    if not body:
+        return None
+    m = GIFT_RE.match(body.strip())
+    if not m:
+        return None
+    kind = m.group(1).lower()
+    amt_str = m.group(2).replace(',', '.')
+    try:
+        amt = float(amt_str)
+    except Exception:
+        return None
+    return (kind, amt)
+
+def process_gift_if_any(body: str, from_uid: int, to_uid: int):
+    """
+    Si body est un code cadeau, applique le crédit et renvoie le body final à stocker.
+    - toyou🎁N  -> crédite to_uid, body affiché = '🎁N'
+    - tome🎁N    -> crédite from_uid, body affiché = 'tome🎁N'
+    """
+    parsed = parse_gift(body)
+    if not parsed:
+        return body  # pas un cadeau
+
+    kind, amt = parsed
+
+    # Garde-fous
+    if not (amt > 0):
+        return body
+    if amt > 100000:  # plafond anti-typo/abus
+        amt = 100000
+
+    if kind == "toyou":
+        credit_bonus_points(to_uid, amt, reason="gift_toyou")
+        final_body = f"🎁{int(amt) if amt.is_integer() else amt}"
+    else:  # "tome"
+        credit_bonus_points(from_uid, amt, reason="gift_tome")
+        final_body = body  # on laisse visible "tome🎁N"
+
+    return final_body
 
 @app.get("/api/chat/messages")
 @login_required
