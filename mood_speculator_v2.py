@@ -3077,7 +3077,7 @@ PPP_HTML = """
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
-    o.textContent = o.textContent.replace(/^[⚡\s]+/g, '').replace(/^x?/, 'x');
+    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
   });
 
   // Icônes météo
@@ -5096,7 +5096,6 @@ def ppp(station_id=None):
             target_str = (request.form.get('date') or '').strip()
             choice     = (request.form.get('choice') or '').strip().upper()
             amount     = round(float(request.form.get('amount') or 0), 2)
-
             # heure ciblée HH:MM (ex: "18:00"), défaut 18:00 si vide
             raw_hhmm   = (request.form.get('target_time') or '').strip() or '18:00'
         except Exception:
@@ -5175,7 +5174,6 @@ def ppp(station_id=None):
         try:
             setattr(bet, "target_time", hhmm)
         except Exception:
-            # si jamais la colonne n'existe pas (ancien schéma), on ignore
             pass
 
         db.session.add(bet)
@@ -5190,27 +5188,49 @@ def ppp(station_id=None):
         return redirect(url_for('you_bet', back=_ppp_url()))
 
     # ------------------ GET: afficher la page ------------------
-    solde_str = format_points_fr(remaining_points(current_user))
-    bets_map = {}
+    from datetime import timedelta
 
-    rows_q = PPPBet.query.filter(
+    solde_str = format_points_fr(remaining_points(current_user))
+    bets_map: dict[str, dict] = {}
+
+    # borne temps (pour inclure J-3 même si status != ACTIVE)
+    today = today_paris_date()
+    past3 = today - timedelta(days=3)
+
+    # FUTUR (>= aujourd’hui) : seulement ACTIVE & non verrouillées
+    rows_future_q = PPPBet.query.filter(
         PPPBet.user_id == current_user.id,
+        PPPBet.station_id == scope_station_id,
+        PPPBet.bet_date >= today,
         PPPBet.status == 'ACTIVE',
-        PPPBet.station_id == scope_station_id
+    )
+    if hasattr(PPPBet, "locked_for_trade"):
+        rows_future_q = rows_future_q.filter(PPPBet.locked_for_trade == False)
+    rows_future = rows_future_q.all()
+
+    # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (pour afficher verdict)
+    rows_past = (
+        PPPBet.query
+        .filter(
+            PPPBet.user_id == current_user.id,
+            PPPBet.station_id == scope_station_id,
+            PPPBet.bet_date >= past3,
+            PPPBet.bet_date < today,
+        )
+        .all()
     )
 
-    # PPP doit ignorer les bets verrouillés (mis en vente)
-    if hasattr(PPPBet, "locked_for_trade"):
-        rows_q = rows_q.filter(PPPBet.locked_for_trade == False)
+    # Fusion triée
+    rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, r.id))
 
-    rows = rows_q.order_by(PPPBet.bet_date.asc(), PPPBet.id.asc()).all()
-    
     for r in rows:
         key = r.bet_date.isoformat()
         entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
-        
+
         entry["amount"] += float(r.amount or 0.0)
-        entry["choice"] = r.choice
+        if r.choice:
+            entry["choice"] = r.choice
+
         try:
             when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
         except Exception:
@@ -5221,17 +5241,20 @@ def ppp(station_id=None):
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
 
-            # nouveaux champs envoyés au front
+            # champs verdict/heure pour l’UI
             "target_time": getattr(r, "target_time", None) or "18:00",
             "verdict": (getattr(r, "verdict", None) or getattr(r, "result", None)),
             "result": (getattr(r, "result", None) or getattr(r, "verdict", None)),  # compat
             "outcome": getattr(r, "outcome", None),
-            "observed_mm": (float(getattr(r, "observed_mm", 0.0)) 
-                            if getattr(r, "observed_mm", None) not in (None, "") else None),
+            "observed_mm": (
+                float(getattr(r, "observed_mm", 0.0))
+                if getattr(r, "observed_mm", None) not in (None, "")
+                else None
+            ),
         }
-        entry["bets"].append(bet_dict)    
+        entry["bets"].append(bet_dict)
 
-        # 🎯 verdict agrégé du jour (priorité au rouge) — utile pour colorer la case rapidement
+        # 🎯 verdict agrégé du jour (priorité au rouge)
         results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
         if "LOSE" in results_upper:
             entry["verdict"] = "LOSE"
