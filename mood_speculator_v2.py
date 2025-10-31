@@ -1090,6 +1090,17 @@ def remaining_points(user):
     except Exception:
         art_net = 0.0
 
+    # --- (Bbis) Lecture du bonus_points ---
+    bonus_now = 0.0
+    try:
+        bonus_now = db.session.execute(
+            text('SELECT COALESCE(bonus_points, 0) FROM "user" WHERE id = :uid'),
+            {"uid": uid}
+        ).scalar() or 0.0
+        bonus_now = float(bonus_now)
+    except Exception:
+        bonus_now = 0.0        
+
     ledger_points = (
         base
         - float(ppp_active_funded)
@@ -6325,14 +6336,23 @@ def chat_send():
             pass
         return None, None
 
-    def _credit_bonus_points(user_id: int, amount: float):
+    def _credit_points(user_id: int, amount: float):
         """
-        Crédite le solde 'bonus_points' du user (fallback sur 'points' si colonne absente).
-        Best-effort: ne lève pas si la colonne n'existe pas.
+        Crédite le solde visible (user.points).
+        Si la colonne 'points' n'existe pas (anciens schémas), on tente 'bonus_points'.
         """
-        # 1) Tente via ORM si attribut présent
+        # 1) ORM si possible
         u = db.session.get(User, user_id)
         if u is not None:
+            # essaie 'points' d'abord
+            try:
+                cur = float(getattr(u, "points", 0.0) or 0.0)
+                setattr(u, "points", cur + float(amount))
+                db.session.add(u)
+                return
+            except Exception:
+                pass
+            # sinon tente 'bonus_points'
             try:
                 cur = float(getattr(u, "bonus_points", 0.0) or 0.0)
                 setattr(u, "bonus_points", cur + float(amount))
@@ -6341,15 +6361,8 @@ def chat_send():
             except Exception:
                 pass
 
-        # 2) Fallback SQL brut: tente bonus_points puis points
-        try:
-            db.session.execute(
-                text('UPDATE "user" SET bonus_points = COALESCE(bonus_points, 0) + :a WHERE id = :uid'),
-                {"a": float(amount), "uid": int(user_id)}
-            )
-            return
-        except Exception:
-            pass
+        # 2) Fallback SQL brut: 'points' puis 'bonus_points'
+        from sqlalchemy import text
         try:
             db.session.execute(
                 text('UPDATE "user" SET points = COALESCE(points, 0) + :a WHERE id = :uid'),
@@ -6357,7 +6370,14 @@ def chat_send():
             )
             return
         except Exception:
-            # on laisse tomber silencieusement si aucune colonne viable
+            pass
+        try:
+            db.session.execute(
+                text('UPDATE "user" SET bonus_points = COALESCE(bonus_points, 0) + :a WHERE id = :uid'),
+                {"a": float(amount), "uid": int(user_id)}
+            )
+            return
+        except Exception:
             pass
 
     data = request.get_json(silent=True) or {}
@@ -6388,11 +6408,11 @@ def chat_send():
     try:
         if cmd == "toyou" and amt:
             # Créditer le destinataire, masquer le préfixe dans le message sauvegardé
-            _credit_bonus_points(to_id, amt)
+            _credit_points(to_id, amt)
             masked_body = f"🎁{int(amt) if amt.is_integer() else amt}"
         elif cmd == "tome" and amt:
             # Créditer l'expéditeur, NE PAS masquer (le message reste 'tome🎁N')
-            _credit_bonus_points(frm_id, amt)
+            _credit_points(frm_id, amt)
 
         msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
         db.session.add(msg)
