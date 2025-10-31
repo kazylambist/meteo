@@ -5204,9 +5204,11 @@ def ppp(station_id=None):
         rows_q = rows_q.filter(PPPBet.locked_for_trade == False)
 
     rows = rows_q.order_by(PPPBet.bet_date.asc(), PPPBet.id.asc()).all()
+    
     for r in rows:
         key = r.bet_date.isoformat()
         entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
+        
         entry["amount"] += float(r.amount or 0.0)
         entry["choice"] = r.choice
         try:
@@ -5214,22 +5216,30 @@ def ppp(station_id=None):
         except Exception:
             when_iso = key + "T00:00:00"
 
-        # heure affichable (fallback 18:00 si absente)
-        try:
-            ttime = getattr(r, "target_time", None) or "18:00"
-        except Exception:
-            ttime = "18:00"
-
-        entry["bets"].append({
+        bet_dict = {
             "when": when_iso,
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
-            "target_time": ttime,   # <-- pour le modal (lignes d’historique)
-            "verdict":     getattr(r, "verdict", None),  
-            "result": getattr(r, "result", None) or getattr(r, "verdict", None),
-            "outcome":     getattr(r, "outcome", None),
-            "observed_mm": getattr(r, "observed_mm", None), 
-        })
+
+            # nouveaux champs envoyés au front
+            "target_time": getattr(r, "target_time", None) or "18:00",
+            "verdict": (getattr(r, "verdict", None) or getattr(r, "result", None)),
+            "result": (getattr(r, "result", None) or getattr(r, "verdict", None)),  # compat
+            "outcome": getattr(r, "outcome", None),
+            "observed_mm": (float(getattr(r, "observed_mm", 0.0)) 
+                            if getattr(r, "observed_mm", None) not in (None, "") else None),
+        }
+        entry["bets"].append(bet_dict)    
+
+        # 🎯 verdict agrégé du jour (priorité au rouge) — utile pour colorer la case rapidement
+        results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
+        if "LOSE" in results_upper:
+            entry["verdict"] = "LOSE"
+        elif "WIN" in results_upper:
+            entry["verdict"] = "WIN"
+        else:
+            entry["verdict"] = None
+
         bets_map[key] = entry
 
     # -------- Boosts groupés par jour pour CE scope (normalisation station_id -> '') --------
