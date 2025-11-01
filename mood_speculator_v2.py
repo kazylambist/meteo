@@ -5338,6 +5338,26 @@ def api_chat_mark_all_read():
     db.session.commit()
     return jsonify({"ok": True})
 
+# --- Route /api/users/me : renvoie le solde et le pseudo de l'utilisateur connecté ---
+from flask_login import login_required, current_user
+from flask import jsonify
+
+@app.get("/api/users/me")
+@login_required
+def api_user_me():
+    """Renvoie les infos essentielles de l'utilisateur connecté (solde, pseudo)."""
+    try:
+        solde = user_solde(current_user)
+        return jsonify({
+            "ok": True,
+            "id": current_user.id,
+            "username": current_user.username,
+            "points": round(float(solde), 2)
+        })
+    except Exception as e:
+        app.logger.exception("Erreur /api/users/me : %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # --- WET: 48h humidity betting ----------------------------------------------
 @app.route('/wet', methods=['GET', 'POST'])
 @login_required

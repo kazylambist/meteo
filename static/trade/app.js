@@ -364,6 +364,20 @@
     const timer = setInterval(async () => {
       await refresh();
       await markThreadRead(user.id);
+
+    // 🧩 rafraîchir le solde affiché si un bonus a été envoyé
+      if (/🎁\s*\d+/i.test(txt)) {
+        try {
+          const res = await fetch('/api/users/me', { credentials: 'same-origin' });
+          if (res.ok) {
+            const me = await res.json();
+            const el = document.querySelector('.solde-box .solde-value');
+            if (el && me && me.points != null) {
+              el.textContent = `${me.points.toFixed(1)} pts`;
+            }
+          }
+        } catch (e) { console.warn('refresh solde', e); }
+      }
       // UI immédiate : enlève le halo + le badge 💬
       {
         const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
