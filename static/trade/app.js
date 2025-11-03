@@ -81,6 +81,23 @@
     }
   }
 
+  // ======================================================================
+  // Rafraîchit le solde affiché dans la topbar (et #me-points)
+  // ======================================================================
+  async function refreshTopbarSolde(){
+    try{
+      const res = await fetch('/api/users/me', { credentials: 'same-origin' });
+      if(!res.ok) return;
+      const me = await res.json();
+      const top = document.querySelector('.solde-box .solde-value');
+      if (top && me && me.points != null) top.textContent = `${fmtPts(me.points)} pts`;
+      const mePts = document.querySelector('#me-points');
+      if (mePts && me && me.points != null) mePts.textContent = `${fmtPts(me.points)} ⛃`;
+    }catch(e){
+      console.warn('refreshTopbarSolde', e);
+    }
+  }
+
   // ---------- Roster (joueurs connectés) ----------
   function isOnlineFrom(u){
     if (typeof u.is_online === 'boolean') return u.is_online;
@@ -130,18 +147,6 @@
     }catch(e){
       console.warn('[trade] roster error', e);
     }
-  }
-
-  async function markThreadRead(otherUserId){
-    // marque tous les messages de other->me comme lus côté serveur
-    try{
-      await fetch('/api/chat/mark-read?user='+encodeURIComponent(otherUserId), {
-        method:'POST',
-        credentials:'same-origin'
-      });
-      const card = document.querySelector(`.user-card[data-uid="${otherUserId}"]`);
-      if (card) card.classList.remove('has-unread');
-    }catch(e){}
   }
 
   async function markThreadRead(userId){
@@ -343,6 +348,11 @@
         // reconcile with server state (timestamps/ordre)
         await refresh();
         await markThreadRead(user.id);
+
+        // Si c'est un self-gift "tome🎁N", rafraîchir la topbar immédiatement
+        if (/^\s*tome\s*🎁\s*\d+(?:[.,]\d+)?\s*$/i.test(txt)) {
+          await refreshTopbarSolde();
+        }
         // UI immédiate : enlève le halo + le badge 💬
         {
           const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
@@ -365,17 +375,11 @@
       await refresh();
       await markThreadRead(user.id);
 
-    // 🧩 rafraîchir le solde affiché si un bonus a été envoyé
-      if (/🎁\s*\d+/i.test(txt)) {
-        try {
-          const res = await fetch('/api/users/me', { credentials: 'same-origin' });
-          const me = await res.json();
-          const el = document.querySelector('.solde-box .solde-value');
-          if (el && me && me.points != null) {
-            el.textContent = `${me.points.toFixed(1)} pts`;
-          }
-        } catch (e) { console.warn('refresh solde', e); }
-      }
+    // Rafraîchissement périodique du solde (filet de sécurité)
+      try {
+        const top = document.querySelector('.solde-box .solde-value');
+        if (top) await refreshTopbarSolde();
+      } catch (e) { console.warn('refresh solde', e); }
       // UI immédiate : enlève le halo + le badge 💬
       {
         const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
@@ -385,7 +389,7 @@
           if (badge) badge.remove();
         }
       }
-    }, 5000);
+    }, 60000);
 
     // Premier passage : refresh puis marquer lu + MAJ UI
     refresh().then(async () => {
