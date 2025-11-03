@@ -6267,8 +6267,6 @@ def _clip_text(s: str, max_len=2000) -> str:
 import re
 from sqlalchemy import text
 
-GIFT_RE = re.compile(r'^(toyou|tome)\s*🎁\s*([0-9]+(?:[.,][0-9]+)?)\s*$', re.IGNORECASE)
-
 def _ensure_bonus_points_column():
     """Ajoute user.bonus_points si absent (SQLite safe). Appelé au boot."""
     try:
@@ -6397,10 +6395,7 @@ def chat_send():
         if not m:
             return None, None
         cmd = m.group(1).lower()
-        try:
-            amt = float(m.group(2).replace(",", "."))
-        except Exception:
-            return None, None
+        amt = float(m.group(2).replace(",", "."))
         return (cmd, amt) if amt > 0 else (None, None)
 
     # Crédit exact via ORM (évite les soucis de nom de table/quotage)
@@ -6437,11 +6432,13 @@ def chat_send():
     if not other:
         return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
 
-    # -------- logique cadeau --------
     cmd, amt = parse_gift(raw_body)
-    log.info("chat_send: frm=%s to=%s cmd=%r amt=%r raw=%r", frm_id, to_id, cmd, amt, raw_body)
+    masked_body = body  # corps éventuellement filtré ou nettoyé
+    log.info(
+        "chat_send: frm=%s to=%s cmd=%r amt=%r raw=%r masked=%r",
+        frm_id, to_id, cmd, amt, raw_body, masked_body
+    )
 
-    masked_body = body
     try:
         if cmd == "toyou" and amt:
             credit_points_exact(to_id, amt)
