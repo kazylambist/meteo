@@ -4,6 +4,12 @@ primary_region = "cdg"
 
 [build]
 
+[env]
+  PYTHONUNBUFFERED = "1"                   # imprime sans buffer
+  GUNICORN_CMD_ARGS = "--access-logfile - --error-logfile - --log-level info"
+  # Si tu es en uvicorn à la place, commente la ligne ci-dessus et mets :
+  # UVICORN_LOG_LEVEL = "info"
+
 [http_service]
   internal_port = 8080
   force_https = true
@@ -11,7 +17,6 @@ primary_region = "cdg"
   auto_start_machines = true
   min_machines_running = 1
 
-# Health check HTTP simple (assure-toi d'avoir une route /health qui renvoie 200)
 [[http_service.checks]]
   path         = "/health"
   grace_period = "30s"

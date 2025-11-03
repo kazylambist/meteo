@@ -103,6 +103,23 @@ DB_PATH = os.environ.get("DATABASE_URL", "sqlite:///moodspec.db")
 # -----------------------------------------------------------------------------
 app = Flask(__name__)
 
+import sys, logging
+
+app.logger.setLevel(logging.INFO)
+
+h = logging.StreamHandler(sys.stdout)   # stdout OK car --capture-output est activé
+h.setLevel(logging.INFO)
+h.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+
+# évite doublons si déjà configuré
+if not any(isinstance(x, logging.StreamHandler) for x in app.logger.handlers):
+    app.logger.addHandler(h)
+
+# (facultatif) logs de requêtes Werkzeug
+logging.getLogger('werkzeug').setLevel(logging.INFO)
+
+app.logger.info("Flask boot OK (logger prêt)")
+
 # --- HEALTHCHECK minimal, sans DB ni auth, sans réponse anticipée ---
 from flask import Response, request
 
@@ -5944,6 +5961,12 @@ def wet_observations():
             out[slot_iso] = None
 
     return jsonify(out), 200
+
+@app.get("/debug/log")
+def debug_log():
+    app.logger.info("DEBUG_LOG: route touchée ✔")
+    print("PRINT: coucou stdout")  # sera visible grâce à --capture-output + PYTHONUNBUFFERED=1
+    return {"ok": True}
 
 @app.get('/admin/wet/debug')
 @login_required
