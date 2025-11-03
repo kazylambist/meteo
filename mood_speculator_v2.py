@@ -6420,8 +6420,8 @@ def chat_send():
 
     frm_id = int(current_user.get_id())
 
-    # 🔧 On autorise 'tome🎁N' même si to_id == frm_id
-    if to_id == frm_id and not body.lower().startswith("tome🎁"):
+    # Autoriser un self-DM uniquement pour 'tome🎁N' (tolère espaces/casse)
+    if to_id == frm_id and not re.match(r'^\s*tome\s*🎁', body, flags=re.IGNORECASE):
         return jsonify({"ok": False, "error": "Destinataire invalide."}), 400
 
     other = User.query.get(to_id)
@@ -6432,19 +6432,27 @@ def chat_send():
     masked_body = body
 
     try:
+        # Créditer si commande reconnue
         if cmd == "toyou" and amt:
             _credit_points(to_id, amt)
+            # on masque la valeur exacte dans le corps stocké
             masked_body = f"🎁{int(amt) if amt.is_integer() else amt}"
         elif cmd == "tome" and amt:
             _credit_points(frm_id, amt)
 
+        # Créer le message + commit (inclut aussi la maj de solde)
         msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
         db.session.add(msg)
         db.session.commit()
-
     except Exception as e:
         db.session.rollback()
         return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Renvoyer le nouveau solde côté serveur pour MAJ instantanée du front
+    try:
+        new_balance = user_solde(current_user)
+    except Exception:
+        new_balance = None
 
     return jsonify({
         "ok": True,
@@ -6452,7 +6460,8 @@ def chat_send():
         "from": msg.from_user_id,
         "to": msg.to_user_id,
         "body": msg.body,
-        "created_at": (msg.created_at.isoformat() if msg.created_at else None)
+        "created_at": (msg.created_at.isoformat() if msg.created_at else None),
+        "new_points": new_balance,
     }), 200
 
 # --- modèles supposés ---

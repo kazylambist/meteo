@@ -339,20 +339,39 @@
       btn.disabled = true;
 
       try{
-        await fetch('/api/chat/messages', {
+        const resp = await fetch('/api/chat/messages', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           credentials:'same-origin',
           body: JSON.stringify({to:user.id, body:txt})
         });
+
+        let payload = null;
+        try { payload = await resp.json(); } catch(_) {}
+
+        if (!resp.ok) {
+          // rollback UI si échec (optionnel)
+          div.textContent = `(échec) ${txt}`;
+          throw new Error((payload && payload.error) || 'Envoi échoué');
+        }
+
+        // ➕ MAJ instantanée du solde si le back l’a renvoyé
+        if (payload && typeof payload.new_points === 'number') {
+          const top = document.querySelector('.solde-box .solde-value');
+          if (top) top.textContent = `${fmtPts(payload.new_points)} pts`;
+          const mePts = document.querySelector('#me-points');
+          if (mePts) mePts.textContent = `${fmtPts(payload.new_points)} ⛃`;
+        }
+
         // reconcile with server state (timestamps/ordre)
         await refresh();
         await markThreadRead(user.id);
 
-        // Si c'est un self-gift "tome🎁N", rafraîchir la topbar immédiatement
-        if (/^\s*tome\s*🎁\s*\d+(?:[.,]\d+)?\s*$/i.test(txt)) {
+        // Filet si pas de new_points mais que c'était un self-gift
+        if (!payload?.new_points && /^\s*tome\s*🎁\s*\d+(?:[.,]\d+)?\s*$/i.test(txt)) {
           await refreshTopbarSolde();
         }
+
         // UI immédiate : enlève le halo + le badge 💬
         {
           const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
@@ -363,8 +382,7 @@
           }
         }
       }catch(e){
-        // rollback UI si échec (optionnel)
-        div.textContent = `(échec) ${txt}`;
+        // déjà géré ci-dessus, on remet juste le focus
       }finally{
         btn.disabled = false;
         input.focus();
@@ -375,11 +393,12 @@
       await refresh();
       await markThreadRead(user.id);
 
-    // Rafraîchissement périodique du solde (filet de sécurité)
+      // Rafraîchissement périodique du solde (filet de sécurité)
       try {
         const top = document.querySelector('.solde-box .solde-value');
         if (top) await refreshTopbarSolde();
       } catch (e) { console.warn('refresh solde', e); }
+
       // UI immédiate : enlève le halo + le badge 💬
       {
         const card = document.querySelector(`.user-card[data-uid="${user.id}"]`);
