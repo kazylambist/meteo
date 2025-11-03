@@ -6378,11 +6378,12 @@ def chat_list():
 def chat_send():
     """
     Crée un message privé (toyou🎁N / tome🎁N).
-    Créditer UNIQUEMENT la colonne user.points (source que lit remaining_points),
-    puis renvoyer new_points = remaining_points(current_user).
+    Créditer UNIQUEMENT User.points via ORM, puis renvoyer new_points = remaining_points(current_user).
     """
     import re
-    from sqlalchemy import text as _text
+    import logging
+
+    log = getattr(app, "logger", logging.getLogger(__name__))
 
     # --- Regex tolérant : 🎁 (avec/sans VS16) ou :gift:, espaces optionnels, décimales . ou , ---
     GIFT_RE = re.compile(
@@ -6396,14 +6397,21 @@ def chat_send():
         if not m:
             return None, None
         cmd = m.group(1).lower()
-        amt = float(m.group(2).replace(",", "."))
+        try:
+            amt = float(m.group(2).replace(",", "."))
+        except Exception:
+            return None, None
         return (cmd, amt) if amt > 0 else (None, None)
 
-    # 🔒 Créditer exactement la colonne que remaining_points lit: "user".points
+    # Crédit exact via ORM (évite les soucis de nom de table/quotage)
     def credit_points_exact(user_id: int, amount: float):
-        db.session.execute(
-            _text('UPDATE "user" SET points = COALESCE(points, 0) + :a WHERE id = :uid'),
-            {"a": float(amount), "uid": int(user_id)}
+        col = getattr(User, "points", None)
+        if col is None:
+            raise RuntimeError("Colonne 'points' introuvable sur le modèle User.")
+        # UPDATE users SET points = COALESCE(points,0) + :amount WHERE id=:uid
+        db.session.query(User).filter(User.id == int(user_id)).update(
+            {col: db.func.coalesce(col, 0) + float(amount)},
+            synchronize_session=False,
         )
 
     # -------- entrée --------
@@ -6431,8 +6439,9 @@ def chat_send():
 
     # -------- logique cadeau --------
     cmd, amt = parse_gift(raw_body)
-    masked_body = body
+    log.info("chat_send: frm=%s to=%s cmd=%r amt=%r raw=%r", frm_id, to_id, cmd, amt, raw_body)
 
+    masked_body = body
     try:
         if cmd == "toyou" and amt:
             credit_points_exact(to_id, amt)
@@ -6441,19 +6450,20 @@ def chat_send():
             credit_points_exact(frm_id, amt)
             masked_body = f"🎁{int(amt) if float(amt).is_integer() else amt}"
 
-        # Créer le message ; le commit validera la MAJ de points
+        # Créer le message ; le commit valide aussi le crédit
         msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
         db.session.add(msg)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        log.exception("chat_send: échec crédit/insert")
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    # -------- renvoyer le solde PPP (la même source que la topbar) --------
+    # -------- renvoyer le solde PPP (même source que la topbar) --------
     try:
-        # user_solde(u) → remaining_points(u)
         new_points = float(remaining_points(current_user) or 0.0)
-    except Exception:
+    except Exception as e:
+        log.exception("chat_send: remaining_points failed")
         new_points = None
 
     return jsonify({
@@ -6463,7 +6473,7 @@ def chat_send():
         "to": msg.to_user_id,
         "body": msg.body,
         "created_at": (msg.created_at.isoformat() if msg.created_at else None),
-        "new_points": new_points,                   # ← float (PPP)
+        "new_points": new_points,                   # float (PPP)
         "gift": {"cmd": cmd, "amount": amt} if cmd and amt else None,
     }), 200
 

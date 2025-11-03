@@ -350,9 +350,10 @@
         try { payload = await resp.json(); } catch(_) {}
 
         if (!resp.ok) {
-          // rollback UI si échec (optionnel)
+          const msg = (payload && payload.error) ? payload.error : 'Envoi échoué';
+	  alert(msg);
           div.textContent = `(échec) ${txt}`;
-          throw new Error((payload && payload.error) || 'Envoi échoué');
+          throw new Error(msg);
         }
 
         // ➕ MAJ instantanée du solde si le back l’a renvoyé
