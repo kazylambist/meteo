@@ -5247,7 +5247,7 @@ def ppp(station_id=None):
         .all()
     )
 
-    # Fusion triée
+    # Fusion triée (date + id)
     rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, r.id))
 
     for r in rows:
@@ -5263,15 +5263,24 @@ def ppp(station_id=None):
         except Exception:
             when_iso = key + "T00:00:00"
 
+        # ---- Déduction du verdict si manquant ----
+        v = (getattr(r, "verdict", None) or getattr(r, "result", None))
+        if not v:
+            try:
+                outcome = (getattr(r, "outcome", None) or "").upper()
+                choice  = (getattr(r, "choice",  None) or "").upper()
+                if outcome and choice:
+                    v = "WIN" if outcome == choice else "LOSE"
+            except Exception:
+                v = None
+
         bet_dict = {
             "when": when_iso,
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
-
-            # champs verdict/heure pour l’UI
             "target_time": getattr(r, "target_time", None) or "18:00",
-            "verdict": (getattr(r, "verdict", None) or getattr(r, "result", None)),
-            "result": (getattr(r, "result", None) or getattr(r, "verdict", None)),  # compat
+            "verdict": v,
+            "result": v,  # compatibilité anciens templates
             "outcome": getattr(r, "outcome", None),
             "observed_mm": (
                 float(getattr(r, "observed_mm", 0.0))
