@@ -315,7 +315,7 @@ if RUN_MIG:
             # 1) Ajouter la colonne si elle n'existe pas (idempotent via try/except)
             try:
                 db.session.execute(text(
-                    "ALTER TABLE user ADD COLUMN points REAL NOT NULL DEFAULT 0"
+                    'ALTER TABLE "user" ADD COLUMN points REAL NOT NULL DEFAULT 0'
                 ))
             except Exception:
                 # colonne déjà présente → on ignore
@@ -323,7 +323,7 @@ if RUN_MIG:
 
             # 2) Normaliser défensivement (éviter NULL)
             try:
-                db.session.execute(text("UPDATE user SET points = COALESCE(points, 0)"))
+                db.session.execute(text('UPDATE "user" SET points = COALESCE(points, 0)'))
             except Exception:
                 pass
 
