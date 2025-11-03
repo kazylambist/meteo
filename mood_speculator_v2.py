@@ -6380,22 +6380,25 @@ def chat_send():
     import re
     from sqlalchemy import text
 
-    def _parse_gift(s: str):
+    # Regex tolérant : '🎁' (avec ou sans VS16) ou ':gift:' ; espaces optionnels ; décimals . ou ,
+    GIFT_RE = re.compile(
+        r'^(toyou|tome)\s*(?:🎁\ufe0f?|\:gift\:)\s*([0-9]+(?:[.,][0-9]+)?)\s*$',
+        flags=re.IGNORECASE
+    )
+
+    def _parse_gift_raw(s: str):
         if not s:
             return None, None
-        s = s.strip()
-        m = re.match(r'^(toyou|tome)\s*🎁\s*([0-9]+(?:[.,][0-9]+)?)\s*$', s, flags=re.IGNORECASE)
+        m = GIFT_RE.match(s.strip())
         if not m:
             return None, None
         cmd = m.group(1).lower()
         raw = m.group(2).replace(',', '.')
         try:
             amt = float(raw)
-            if amt > 0:
-                return cmd, amt
+            return (cmd, amt) if amt > 0 else (None, None)
         except Exception:
-            pass
-        return None, None
+            return None, None
 
     def _credit_points(user_id: int, amount: float):
         u = db.session.get(User, user_id)
@@ -6432,36 +6435,44 @@ def chat_send():
             pass
 
     data = request.get_json(silent=True) or {}
+
+    # ⚠️ Conserver le body brut pour le parse des commandes
+    raw_body = (data.get("body") or "")
+    body     = _clip_text(raw_body)  # version stockée/affichée
+
     try:
         to_id = int(data.get("to", 0))
     except Exception:
         to_id = 0
-    body = _clip_text(data.get("body", ""))
 
-    if not to_id or not body:
+    if not to_id or not raw_body.strip():
         return jsonify({"ok": False, "error": "Message vide ou destinataire manquant."}), 400
 
     frm_id = int(current_user.get_id())
 
-    # Autoriser un self-DM uniquement pour 'tome🎁N' (tolère espaces/casse)
-    if to_id == frm_id and not re.match(r'^\s*tome\s*🎁', body, flags=re.IGNORECASE):
+    # Autoriser un self-DM uniquement pour 'tome🎁N' (tolère espaces, casse et VS16)
+    if to_id == frm_id and not re.match(r'^\s*tome\s*(?:🎁\ufe0f?|\:gift\:)', raw_body, flags=re.IGNORECASE):
         return jsonify({"ok": False, "error": "Destinataire invalide."}), 400
 
     other = User.query.get(to_id)
     if not other:
         return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
 
-    cmd, amt = _parse_gift(body)
+    # Parse sur le TEXTE BRUT (avant _clip_text)
+    cmd, amt = _parse_gift_raw(raw_body)
+
+    # Par défaut on stocke le body "propre" (clippé)
     masked_body = body
 
     try:
         # Créditer si commande reconnue
         if cmd == "toyou" and amt:
             _credit_points(to_id, amt)
-            # on masque la valeur exacte dans le corps stocké
-            masked_body = f"🎁{int(amt) if amt.is_integer() else amt}"
+            # on masque la valeur exacte dans le message stocké
+            masked_body = f"🎁{int(amt) if float(amt).is_integer() else amt}"
         elif cmd == "tome" and amt:
             _credit_points(frm_id, amt)
+            masked_body = f"🎁{int(amt) if float(amt).is_integer() else amt}"
 
         # Créer le message + commit (inclut aussi la maj de solde)
         msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
@@ -6471,7 +6482,7 @@ def chat_send():
         db.session.rollback()
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    # Renvoyer le nouveau solde côté serveur pour MAJ instantanée du front
+    # Renvoyer le nouveau solde pour MAJ immédiate du front
     try:
         new_balance = user_solde(current_user)
     except Exception:
