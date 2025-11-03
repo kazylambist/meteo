@@ -187,35 +187,6 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 
 db = SQLAlchemy(app)
 
-# --- BOOT SELF-HEAL: ensure user.points exists, and log DB in use ---
-import os
-from sqlalchemy import text
-
-with app.app_context():
-    try:
-        # Log de la DB réellement utilisée (utile si plusieurs fichiers SQLite / volumes)
-        try:
-            dblist = db.session.execute(text('PRAGMA database_list')).fetchall()
-            print('[BOOT] database_list =', dblist)
-        except Exception as e:
-            print('[BOOT] WARN: PRAGMA database_list failed:', repr(e))
-
-        # Vérifie la présence de la colonne
-        cols = [r[1] for r in db.session.execute(text('PRAGMA table_info("user")')).fetchall()]
-        print('[BOOT] user columns =', cols)
-
-        if "points" not in cols:
-            print('[BOOT] Adding missing column user.points ...')
-            db.session.execute(text('ALTER TABLE "user" ADD COLUMN points REAL NOT NULL DEFAULT 0'))
-            db.session.execute(text('UPDATE "user" SET points = COALESCE(points, 0)'))
-            db.session.commit()
-            print('[BOOT] user.points added.')
-        else:
-            print('[BOOT] user.points OK.')
-    except Exception as e:
-        db.session.rollback()
-        print('[BOOT] ERROR ensuring user.points:', repr(e))
-
 # --- Flask-Migrate (migrations Alembic automatiques) ---
 from flask_migrate import Migrate
 migrate = Migrate(app, db)
@@ -336,30 +307,6 @@ if RUN_MIG:
             try:
                 db.session.execute(text(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON user(lower(email))"
-                ))
-            except Exception:
-                pass
-
-            # --- USER : solde en points ---
-            # 1) Ajouter la colonne si elle n'existe pas (idempotent via try/except)
-            try:
-                db.session.execute(text(
-                    'ALTER TABLE "user" ADD COLUMN points REAL NOT NULL DEFAULT 0'
-                ))
-            except Exception:
-                # colonne déjà présente → on ignore
-                pass
-
-            # 2) Normaliser défensivement (éviter NULL)
-            try:
-                db.session.execute(text('UPDATE "user" SET points = COALESCE(points, 0)'))
-            except Exception:
-                pass
-
-            # 3) (Facultatif) Index si tu requêtes souvent par points
-            try:
-                db.session.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_user_points ON user(points)"
                 ))
             except Exception:
                 pass
@@ -588,7 +535,6 @@ class User(UserMixin, db.Model):
     bal_marie  = db.Column(db.Float, default=0.0)
     bolts = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
-    points = db.Column(db.Float, default=0.0)
 
     @validates("email", "username")
     def _normalize_fields(self, key, value):
@@ -6321,6 +6267,8 @@ def _clip_text(s: str, max_len=2000) -> str:
 import re
 from sqlalchemy import text
 
+GIFT_RE = re.compile(r'^(toyou|tome)\s*🎁\s*([0-9]+(?:[.,][0-9]+)?)\s*$', re.IGNORECASE)
+
 def _ensure_bonus_points_column():
     """Ajoute user.bonus_points si absent (SQLite safe). Appelé au boot."""
     try:
@@ -6449,7 +6397,10 @@ def chat_send():
         if not m:
             return None, None
         cmd = m.group(1).lower()
-        amt = float(m.group(2).replace(",", "."))
+        try:
+            amt = float(m.group(2).replace(",", "."))
+        except Exception:
+            return None, None
         return (cmd, amt) if amt > 0 else (None, None)
 
     # Crédit exact via ORM (évite les soucis de nom de table/quotage)
@@ -6486,13 +6437,11 @@ def chat_send():
     if not other:
         return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
 
+    # -------- logique cadeau --------
     cmd, amt = parse_gift(raw_body)
-    masked_body = body  # corps éventuellement filtré ou nettoyé
-    log.info(
-        "chat_send: frm=%s to=%s cmd=%r amt=%r raw=%r masked=%r",
-        frm_id, to_id, cmd, amt, raw_body, masked_body
-    )
+    log.info("chat_send: frm=%s to=%s cmd=%r amt=%r raw=%r", frm_id, to_id, cmd, amt, raw_body)
 
+    masked_body = body
     try:
         if cmd == "toyou" and amt:
             credit_points_exact(to_id, amt)
