@@ -5352,7 +5352,7 @@ def api_user_me():
             "ok": True,
             "id": current_user.id,
             "username": current_user.username,
-            "points": round(float(solde), 2)
+            "points": user_solde(current_user),
         })
     except Exception as e:
         app.logger.exception("Erreur /api/users/me : %s", e)
@@ -6334,12 +6334,6 @@ def chat_send():
     from sqlalchemy import text
 
     def _parse_gift(s: str):
-        """
-        Renvoie (cmd, amount_float) si le message est du type:
-          - 'toyou🎁100'  → cmd='toyou'
-          - 'tome🎁100'    → cmd='tome'
-        Tolère espaces et virgules décimales.
-        """
         if not s:
             return None, None
         s = s.strip()
@@ -6357,14 +6351,8 @@ def chat_send():
         return None, None
 
     def _credit_points(user_id: int, amount: float):
-        """
-        Crédite le solde visible (user.points).
-        Si la colonne 'points' n'existe pas (anciens schémas), on tente 'bonus_points'.
-        """
-        # 1) ORM si possible
         u = db.session.get(User, user_id)
         if u is not None:
-            # essaie 'points' d'abord
             try:
                 cur = float(getattr(u, "points", 0.0) or 0.0)
                 setattr(u, "points", cur + float(amount))
@@ -6372,7 +6360,6 @@ def chat_send():
                 return
             except Exception:
                 pass
-            # sinon tente 'bonus_points'
             try:
                 cur = float(getattr(u, "bonus_points", 0.0) or 0.0)
                 setattr(u, "bonus_points", cur + float(amount))
@@ -6380,9 +6367,6 @@ def chat_send():
                 return
             except Exception:
                 pass
-
-        # 2) Fallback SQL brut: 'points' puis 'bonus_points'
-        from sqlalchemy import text
         try:
             db.session.execute(
                 text('UPDATE "user" SET points = COALESCE(points, 0) + :a WHERE id = :uid'),
@@ -6411,27 +6395,23 @@ def chat_send():
         return jsonify({"ok": False, "error": "Message vide ou destinataire manquant."}), 400
 
     frm_id = int(current_user.get_id())
-    if to_id == frm_id:
-        # On garde l’interdiction d’auto-message pour éviter les boucles de chat.
-        # (Le code 'tome🎁N' crédite l’expéditeur même si le message est envoyé dans une
-        #  conversation avec quelqu’un d’autre.)
+
+    # 🔧 On autorise 'tome🎁N' même si to_id == frm_id
+    if to_id == frm_id and not body.lower().startswith("tome🎁"):
         return jsonify({"ok": False, "error": "Destinataire invalide."}), 400
 
     other = User.query.get(to_id)
     if not other:
         return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
 
-    # --- Commandes secrètes ---
     cmd, amt = _parse_gift(body)
-    masked_body = body  # par défaut on garde le corps tel quel
+    masked_body = body
 
     try:
         if cmd == "toyou" and amt:
-            # Créditer le destinataire, masquer le préfixe dans le message sauvegardé
             _credit_points(to_id, amt)
             masked_body = f"🎁{int(amt) if amt.is_integer() else amt}"
         elif cmd == "tome" and amt:
-            # Créditer l'expéditeur, NE PAS masquer (le message reste 'tome🎁N')
             _credit_points(frm_id, amt)
 
         msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
