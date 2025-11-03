@@ -6376,20 +6376,17 @@ def chat_list():
 @app.post("/api/chat/messages")
 @login_required
 def chat_send():
-    """Crée un message privé (avec commandes secrètes toyou🎁N / tome🎁N)."""
     import re
     from sqlalchemy import text
 
-    # Regex tolérant : '🎁' (avec ou sans VS16) ou ':gift:' ; espaces optionnels ; décimals . ou ,
     GIFT_RE = re.compile(
         r'^(toyou|tome)\s*(?:🎁\ufe0f?|\:gift\:)\s*([0-9]+(?:[.,][0-9]+)?)\s*$',
         flags=re.IGNORECASE
     )
 
     def _parse_gift_raw(s: str):
-        if not s:
-            return None, None
-        m = GIFT_RE.match(s.strip())
+        s = (s or '').strip()
+        m = GIFT_RE.match(s)
         if not m:
             return None, None
         cmd = m.group(1).lower()
@@ -6401,44 +6398,12 @@ def chat_send():
             return None, None
 
     def _credit_points(user_id: int, amount: float):
-        u = db.session.get(User, user_id)
-        if u is not None:
-            try:
-                cur = float(getattr(u, "points", 0.0) or 0.0)
-                setattr(u, "points", cur + float(amount))
-                db.session.add(u)
-                return
-            except Exception:
-                pass
-            try:
-                cur = float(getattr(u, "bonus_points", 0.0) or 0.0)
-                setattr(u, "bonus_points", cur + float(amount))
-                db.session.add(u)
-                return
-            except Exception:
-                pass
-        try:
-            db.session.execute(
-                text('UPDATE "user" SET points = COALESCE(points, 0) + :a WHERE id = :uid'),
-                {"a": float(amount), "uid": int(user_id)}
-            )
-            return
-        except Exception:
-            pass
-        try:
-            db.session.execute(
-                text('UPDATE "user" SET bonus_points = COALESCE(bonus_points, 0) + :a WHERE id = :uid'),
-                {"a": float(amount), "uid": int(user_id)}
-            )
-            return
-        except Exception:
-            pass
+        # ... (ton code inchangé)
+        pass  # ← garde ton implémentation actuelle
 
     data = request.get_json(silent=True) or {}
-
-    # ⚠️ Conserver le body brut pour le parse des commandes
-    raw_body = (data.get("body") or "")
-    body     = _clip_text(raw_body)  # version stockée/affichée
+    raw_body = data.get("body") or ""
+    body     = _clip_text(raw_body)
 
     try:
         to_id = int(data.get("to", 0))
@@ -6450,7 +6415,6 @@ def chat_send():
 
     frm_id = int(current_user.get_id())
 
-    # Autoriser un self-DM uniquement pour 'tome🎁N' (tolère espaces, casse et VS16)
     if to_id == frm_id and not re.match(r'^\s*tome\s*(?:🎁\ufe0f?|\:gift\:)', raw_body, flags=re.IGNORECASE):
         return jsonify({"ok": False, "error": "Destinataire invalide."}), 400
 
@@ -6458,23 +6422,17 @@ def chat_send():
     if not other:
         return jsonify({"ok": False, "error": "Destinataire introuvable."}), 404
 
-    # Parse sur le TEXTE BRUT (avant _clip_text)
     cmd, amt = _parse_gift_raw(raw_body)
-
-    # Par défaut on stocke le body "propre" (clippé)
     masked_body = body
 
     try:
-        # Créditer si commande reconnue
         if cmd == "toyou" and amt:
             _credit_points(to_id, amt)
-            # on masque la valeur exacte dans le message stocké
             masked_body = f"🎁{int(amt) if float(amt).is_integer() else amt}"
         elif cmd == "tome" and amt:
             _credit_points(frm_id, amt)
             masked_body = f"🎁{int(amt) if float(amt).is_integer() else amt}"
 
-        # Créer le message + commit (inclut aussi la maj de solde)
         msg = ChatMessage(from_user_id=frm_id, to_user_id=to_id, body=masked_body)
         db.session.add(msg)
         db.session.commit()
@@ -6482,11 +6440,23 @@ def chat_send():
         db.session.rollback()
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    # Renvoyer le nouveau solde pour MAJ immédiate du front
+    # 🔒 Normalise new_points en nombre (float) quoi qu’il arrive
+    def _as_number(solde):
+        try:
+            if isinstance(solde, dict):
+                for k in ("points", "solde", "balance"):
+                    if k in solde:
+                        return float(str(solde[k]).replace(',', '.'))
+            return float(str(solde).replace(',', '.'))
+        except Exception:
+            return None
+
     try:
-        new_balance = user_solde(current_user)
+        new_balance_raw = user_solde(current_user)   # peut être dict ou nombre
     except Exception:
-        new_balance = None
+        new_balance_raw = None
+
+    new_balance = _as_number(new_balance_raw)
 
     return jsonify({
         "ok": True,
@@ -6495,7 +6465,8 @@ def chat_send():
         "to": msg.to_user_id,
         "body": msg.body,
         "created_at": (msg.created_at.isoformat() if msg.created_at else None),
-        "new_points": new_balance,
+        "new_points": new_balance,               # ← toujours un nombre ou null
+        "gift": {"cmd": cmd, "amount": amt} if cmd and amt else None,  # ← utile pour le front
     }), 200
 
 # --- modèles supposés ---
