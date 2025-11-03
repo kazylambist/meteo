@@ -369,12 +369,10 @@
       if (/🎁\s*\d+/i.test(txt)) {
         try {
           const res = await fetch('/api/users/me', { credentials: 'same-origin' });
-          if (res.ok) {
-            const me = await res.json();
-            const el = document.querySelector('.solde-box .solde-value');
-            if (el && me && me.points != null) {
-              el.textContent = `${me.points.toFixed(1)} pts`;
-            }
+          const me = await res.json();
+          const el = document.querySelector('.solde-box .solde-value');
+          if (el && me && me.points != null) {
+            el.textContent = `${me.points.toFixed(1)} pts`;
           }
         } catch (e) { console.warn('refresh solde', e); }
       }

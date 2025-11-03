@@ -5347,16 +5347,15 @@ from flask import jsonify
 def api_user_me():
     """Renvoie les infos essentielles de l'utilisateur connecté (solde, pseudo)."""
     try:
-        solde = user_solde(current_user)
+        pts = user_solde(current_user)
         return jsonify({
-            "ok": True,
             "id": current_user.id,
             "username": current_user.username,
-            "points": user_solde(current_user),
-        })
+            "points": pts,
+        }), 200
     except Exception as e:
         app.logger.exception("Erreur /api/users/me : %s", e)
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 # --- WET: 48h humidity betting ----------------------------------------------
 @app.route('/wet', methods=['GET', 'POST'])
