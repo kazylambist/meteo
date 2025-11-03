@@ -311,6 +311,30 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            # --- USER : solde en points ---
+            # 1) Ajouter la colonne si elle n'existe pas (idempotent via try/except)
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE user ADD COLUMN points REAL NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                # colonne déjà présente → on ignore
+                pass
+
+            # 2) Normaliser défensivement (éviter NULL)
+            try:
+                db.session.execute(text("UPDATE user SET points = COALESCE(points, 0)"))
+            except Exception:
+                pass
+
+            # 3) (Facultatif) Index si tu requêtes souvent par points
+            try:
+                db.session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_points ON user(points)"
+                ))
+            except Exception:
+                pass
+
             # --- USER : stock d'éclairs (bolts) ---
             try:
                 db.session.execute(text(
@@ -535,6 +559,7 @@ class User(UserMixin, db.Model):
     bal_marie  = db.Column(db.Float, default=0.0)
     bolts = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
+    points = db.Column(db.Float, default=0.0)
 
     @validates("email", "username")
     def _normalize_fields(self, key, value):
