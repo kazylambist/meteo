@@ -187,6 +187,35 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 
 db = SQLAlchemy(app)
 
+# --- BOOT SELF-HEAL: ensure user.points exists, and log DB in use ---
+import os
+from sqlalchemy import text
+
+with app.app_context():
+    try:
+        # Log de la DB réellement utilisée (utile si plusieurs fichiers SQLite / volumes)
+        try:
+            dblist = db.session.execute(text('PRAGMA database_list')).fetchall()
+            print('[BOOT] database_list =', dblist)
+        except Exception as e:
+            print('[BOOT] WARN: PRAGMA database_list failed:', repr(e))
+
+        # Vérifie la présence de la colonne
+        cols = [r[1] for r in db.session.execute(text('PRAGMA table_info("user")')).fetchall()]
+        print('[BOOT] user columns =', cols)
+
+        if "points" not in cols:
+            print('[BOOT] Adding missing column user.points ...')
+            db.session.execute(text('ALTER TABLE "user" ADD COLUMN points REAL NOT NULL DEFAULT 0'))
+            db.session.execute(text('UPDATE "user" SET points = COALESCE(points, 0)'))
+            db.session.commit()
+            print('[BOOT] user.points added.')
+        else:
+            print('[BOOT] user.points OK.')
+    except Exception as e:
+        db.session.rollback()
+        print('[BOOT] ERROR ensuring user.points:', repr(e))
+
 # --- Flask-Migrate (migrations Alembic automatiques) ---
 from flask_migrate import Migrate
 migrate = Migrate(app, db)
