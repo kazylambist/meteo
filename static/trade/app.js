@@ -356,19 +356,28 @@
         }
 
         // ➕ MAJ instantanée du solde si le back l’a renvoyé
-        if (payload && typeof payload.new_points === 'number') {
+        let pts = null;
+        if (payload) {
+          if (typeof payload.new_points === 'number') {
+            pts = payload.new_points;
+          } else if (payload.new_points && typeof payload.new_points.points === 'number') {
+            // compat si le back renvoie encore un objet { points: ... }
+            pts = payload.new_points.points;
+          }
+        }
+        if (pts != null) {
           const top = document.querySelector('.solde-box .solde-value');
-          if (top) top.textContent = `${fmtPts(payload.new_points)} pts`;
+          if (top) top.textContent = `${fmtPts(pts)} pts`;
           const mePts = document.querySelector('#me-points');
-          if (mePts) mePts.textContent = `${fmtPts(payload.new_points)} ⛃`;
+          if (mePts) mePts.textContent = `${fmtPts(pts)} ⛃`;
         }
 
         // reconcile with server state (timestamps/ordre)
         await refresh();
         await markThreadRead(user.id);
 
-        // Filet si pas de new_points mais que c'était un self-gift
-        if (!payload?.new_points && /^\s*tome\s*🎁\s*\d+(?:[.,]\d+)?\s*$/i.test(txt)) {
+        // Filet : si commande 'tome' confirmée côté back mais pas de new_points exploitable
+        if (pts == null && String(payload?.gift?.cmd || '').toLowerCase() === 'tome') {
           await refreshTopbarSolde();
         }
 
