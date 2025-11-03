@@ -1883,6 +1883,13 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
   position:absolute; inset:auto 6px 6px auto;
   font-size:20px; color:#ff4d4d; text-shadow:0 0 8px rgba(255,77,77,.6);
 }
+/* PPP — halo générique pour passé/futur résolus */
+.ppp-day.win  { box-shadow: 0 0 0 2px #30d158, 0 0 14px rgba(48,209,88,.25); }
+.ppp-day.lose { box-shadow: 0 0 0 2px #ff3b30, 0 0 14px rgba(255,59,48,.25); }
+
+/* Option : ne pas griser un jour résolu même s'il est “disabled” */
+.ppp-day.win.disabled,
+.ppp-day.lose.disabled { opacity: 1; filter: none; }
 
 /* modal */
 .ppp-modal{
@@ -2926,26 +2933,35 @@ PPP_HTML = """
     const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
     const choice  = betInfo ? betInfo.choice : null;
 
-    // --- Jours passés : grisés si aucun pari, sinon verdict visible (priorité rouge) ---
+    // ----- Calcul du verdict (priorité LOSE s'il y a plusieurs mises) -----
+    let verdict = null; // 'WIN' | 'LOSE' | null
+    if (betInfo) {
+      if (Array.isArray(betInfo.bets) && betInfo.bets.length > 0) {
+        const results = betInfo.bets
+          .map(b => String(b.result || b.verdict || '').toUpperCase())
+          .filter(Boolean);
+        if (results.includes('LOSE')) verdict = 'LOSE';
+        else if (results.includes('WIN')) verdict = 'WIN';
+      } else {
+        const r = String(betInfo.result || betInfo.verdict || '').toUpperCase();
+        if (r === 'WIN' || r === 'LOSE') verdict = r;
+      }
+    }
+
+    // --- Jours passés : grisés si aucun pari, sinon halo générique (win/lose) ---
     if (delta < 0) {
       if (!hasBetFor(key)) {
         el.classList.add('is-past');
-      } else {
-        if (betInfo && Array.isArray(betInfo.bets) && betInfo.bets.length > 0) {
-          const results = betInfo.bets
-            .map(b => (b.result || b.verdict || '').toUpperCase())
-            .filter(Boolean);
-          if (results.includes('LOSE')) {
-            el.classList.add('today-loss');   // ❌ priorité rouge
-          } else if (results.includes('WIN')) {
-            el.classList.add('today-win');    // ✅ sinon vert
-          }
-        } else {
-          const result = (betInfo?.result || betInfo?.verdict || '').toUpperCase();
-          if (result === 'LOSE') el.classList.add('today-loss');
-          else if (result === 'WIN') el.classList.add('today-win');
-        }
+      } else if (verdict) {
+        if (verdict === 'LOSE') el.classList.add('lose');   // ❌ rouge générique
+        if (verdict === 'WIN')  el.classList.add('win');    // ✅ vert générique
       }
+    }
+
+    // --- Aujourd’hui : conserver today-win / today-loss ---
+    if (delta === 0 && verdict) {
+      if (verdict === 'LOSE') el.classList.add('today-loss'); // ❌
+      if (verdict === 'WIN')  el.classList.add('today-win');  // ✅
     }
 
     // Interdiction de mise : J+0..J+3 si aucune mise
@@ -3043,8 +3059,8 @@ PPP_HTML = """
             const hh   = hhmm.split(':')[0] || '18';
 
             // verdict icône
-            const verdict = String(b.verdict || b.result || '').toUpperCase();
-            const badge   = verdict === 'WIN' ? ' ✅' : verdict === 'LOSE' ? ' ❌' : '';
+            const v = String(b.verdict || b.result || '').toUpperCase();
+            const badge   = v === 'WIN' ? ' ✅' : v === 'LOSE' ? ' ❌' : '';
 
             // pluie mesurée (mm) si dispo
             let observedNote = '';
