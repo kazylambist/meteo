@@ -14,5 +14,5 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 CMD ["sh","-c","gunicorn -k gthread -w 2 -b 0.0.0.0:${PORT:-8080} \
-  --access-logfile - --error-logfile - --log-level info \
+  --access-logfile - --error-logfile - --log-level info --capture-output \
   mood_speculator_v2:app"]
