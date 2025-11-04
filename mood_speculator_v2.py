@@ -2660,7 +2660,19 @@ PPP_HTML = """
   /* Anti-bogue: même si .disabled global a pointer-events:none */
   .ppp-grid .ppp-day,
   .ppp-grid .ppp-day.disabled { pointer-events:auto; }
-
+  
+  /* --- Animation "ciné" pour une mise PPP --- */
+  @keyframes pppBetFlash {
+    0%   { background-color: rgba(255, 230, 0, 0.95); transform: scale(1); }
+    20%  { background-color: rgba(255, 215, 0, 1);    transform: scale(1.03); }
+    40%  { background-color: rgba(255, 210, 60, 0.9); transform: scale(1.00); }
+    100% { background-color: transparent; transform: scale(1); }
+  }
+  .ppp-bet-flash {
+    animation: pppBetFlash 2.5s ease-out forwards;
+    box-shadow: 0 0 16px rgba(255, 220, 60, 0.6); /* halo lumineux doux */
+    z-index: 1;
+  }
   .user-menu { position: relative; display: inline-block; }
   .user-trigger{
     background: transparent; border: 0; color: #fff; font-weight: 800;
@@ -2955,6 +2967,10 @@ PPP_HTML = """
       if (mTimeHidden) {
         mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T18:00
       }
+      // 🔶 Mémorise la case pariée pour la flasher au retour depuis YOUBET!
+      if (mDateInput && mDateInput.value) {
+        sessionStorage.setItem('pppFlashKey', mDateInput.value);
+      }      
       // Le select <select name="target_time" id="mHour"> soumettra aussi target_time=HH:MM.
     });
   }
@@ -3163,6 +3179,15 @@ PPP_HTML = """
     grid.appendChild(el);
   }
 
+  // 🔶 Si on revient de YOUBET!, flashe la case misée
+  (function flashAfterReturn(){
+    const key = sessionStorage.getItem('pppFlashKey');
+    if (!key) return;
+    const cell = grid.querySelector(`.ppp-day[data-key="${key}"]`);
+    if (cell) setTimeout(() => flashPPPcell(cell), 0);
+    sessionStorage.removeItem('pppFlashKey');
+  })();  
+
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
@@ -3180,6 +3205,16 @@ PPP_HTML = """
     }
     return wrap;
   }
+
+  // 🔶 Effet visuel de mise : flash jaune 0,5s puis fondu 2s
+  function flashPPPcell(cell){
+    if (!cell) return;
+    cell.classList.add('ppp-bet-flash');   // ← passe en jaune
+    setTimeout(() => {
+      cell.classList.remove('ppp-bet-flash'); // ← laisse le CSS gérer le fondu 2s
+    }, 2500); // 0,5s “plein + jaune” + 2s de transition background-color
+  }
+  
   function addDaysLocal(d, n){
     const x = new Date(d.getTime());
     x.setDate(x.getDate() + n); // gère DST correctement
