@@ -3622,6 +3622,11 @@ PPP_HTML = """
       BOOSTS_SAFE[key] = total;           // MAJ locale
       renderOdds(oddsEl, baseOdds, total);
 
+      // 🔊 Joue le son de boost (déclenché par un geste utilisateur: drag/drop)
+      try {
+        const boostAudio = document.getElementById('pppBoostAudio');
+        if (boostAudio) { boostAudio.currentTime = 0; boostAudio.play().catch(()=>{}); }
+      } catch (_) {}
     } catch(e){
       console.error('[ppp] boost error:', e);
     }
@@ -3707,6 +3712,7 @@ PPP_HTML = """
 })();
 </script>
 <audio id="pppYogaAudio" src="/static/audio/yoga.wav" preload="auto"></audio>
+<audio id="pppBoostAudio" src="/static/audio/boost.mp3" preload="auto"></audio>
 </body></html>
 """
 
