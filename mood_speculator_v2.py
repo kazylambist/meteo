@@ -2911,6 +2911,26 @@ PPP_HTML = """
   const form       = document.getElementById('pppForm');
   const mTimeHidden = document.getElementById('mTargetDt');
 
+  // 🔓 Débloque l'audio au premier geste utilisateur (iOS/Safari)
+  (function unlockPPP_AudioOnce(){
+    function unlock() {
+      const a = document.getElementById('pppYogaAudio');
+      if (!a) return done();
+      const p = a.play();
+      if (p && p.then) {
+        p.then(() => { a.pause(); a.currentTime = 0; done(); }).catch(done);
+      } else {
+        done();
+      }
+    }
+    function done(){
+      document.removeEventListener('pointerdown', unlock, true);
+      document.removeEventListener('keydown', unlock, true);
+    }
+    document.addEventListener('pointerdown', unlock, true);
+    document.addEventListener('keydown', unlock, true);
+  })();
+
   if (!grid) { console.error('[ppp] #pppGrid introuvable'); return; }
 
   // Données serveur
@@ -2982,6 +3002,17 @@ PPP_HTML = """
       const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || lastClickedCell);
 
       try {
+        // 🔊 Joue le son immédiatement (même geste utilisateur)
+        try {
+          const audio = document.getElementById('pppYogaAudio');
+          if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
+        } catch(_) {}
+
+        // ✅ Ferme le modal et flashe la case tout de suite
+        if (modal) modal.classList.remove('open');
+        flashPPPcell(cell);
+
+        // 👉 Ensuite seulement on envoie au serveur
         const resp = await fetch(form.action || '/ppp/bet', {
           method: 'POST',
           body: fd,
@@ -2992,16 +3023,6 @@ PPP_HTML = """
         // On tente de lire du JSON si dispo (nouveau solde, etc.)
         let payload = null;
         try { payload = await resp.clone().json(); } catch (_) { /* HTML fallback */ }
-
-        // 🔊 Joue le son (autorisé car déclenché par un geste utilisateur via submit)
-        try {
-          const audio = document.getElementById('pppYogaAudio');
-          if (audio) { audio.currentTime = 0; await audio.play(); }
-        } catch(_) {}
-
-        // ✅ Ferme le modal et flashe la case
-        if (modal) modal.classList.remove('open');
-        flashPPPcell(cell);
 
         // (Optionnel) MAJ du stake affiché dans la cellule si tu as un input "amount"
         try {
