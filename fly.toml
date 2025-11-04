@@ -8,13 +8,11 @@ primary_region = "cdg"
   PYTHONUNBUFFERED = "1"
   GUNICORN_CMD_ARGS = "--access-logfile - --error-logfile - --log-level info"
 
-  # --- Active les migrations idempotentes au boot ---
+  # Laisse ON le temps de valider la DB, puis tu pourras remettre à "0"
   RUN_MIGRATIONS = "1"
 
-  # --- (Optionnel) Sécurité d'affichage des soldes le temps de corriger la DB ---
-  # Si remaining_points détecte une incohérence, il retombe sur le ledger (base 500).
-  # Tu pourras remettre à "0" après vérification.
-  POINTS_RECONCILE = "1"
+  # Désactive la réconciliation qui masquait les crédits
+  POINTS_RECONCILE = "0"
 
 [http_service]
   internal_port = 8080
