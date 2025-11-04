@@ -2882,6 +2882,8 @@ PPP_HTML = """
 
 <script>
 (function(){
+  let lastClickedCell = null;
+  
   function fmtPts(x){
     // arrondi à 1 décimale, puis supprime la décimale inutile (,0)
     const v = Math.round((Number(x) || 0) * 10) / 10;
@@ -2952,10 +2954,11 @@ PPP_HTML = """
 
   // Submit guard
   if (form) {
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault(); // ❌ on bloque la navigation vers YOUBET
+
       const hasDate = !!(mDateInput && mDateInput.value);
       if (!hasDate) {
-        e.preventDefault();
         alert("Cliquez d'abord sur un jour du calendrier pour choisir la date.");
         return;
       }
@@ -2964,15 +2967,88 @@ PPP_HTML = """
       const hourSel = document.getElementById('mHour');
       const hhmm = (hourSel && hourSel.value) ? hourSel.value : '18:00';
 
-      // alimente le champ caché "target_dt" pour le backend (optionnel si tu lis déjà target_time)
+      // alimente le champ caché "target_dt" (si tu l’utilises côté backend)
       if (mTimeHidden) {
         mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T18:00
       }
-      // 🔶 Mémorise la case pariée pour la flasher au retour depuis YOUBET!
-      if (mDateInput && mDateInput.value) {
-        sessionStorage.setItem('pppFlashKey', mDateInput.value);
-      }      
-      // Le select <select name="target_time" id="mHour"> soumettra aussi target_time=HH:MM.
+
+      // Prépare la payload depuis le formulaire
+      const fd = new FormData(form);
+      // Tip: certains backends aiment savoir que c’est une requête AJAX
+      const headers = { 'Accept': 'application/json' };
+
+      // On cible la case à flasher (soit la sélection courante, soit la dernière cliquée)
+      const key = mDateInput.value;
+      const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || lastClickedCell);
+
+      try {
+        const resp = await fetch(form.action || '/ppp/bet', {
+          method: 'POST',
+          body: fd,
+          credentials: 'same-origin',
+          headers
+        });
+
+        // On tente de lire du JSON si dispo (nouveau solde, etc.)
+        let payload = null;
+        try { payload = await resp.clone().json(); } catch (_) { /* HTML fallback */ }
+
+        // 🔊 Joue le son (autorisé car déclenché par un geste utilisateur via submit)
+        try {
+          const audio = document.getElementById('pppYogaAudio');
+          if (audio) { audio.currentTime = 0; await audio.play(); }
+        } catch(_) {}
+
+        // ✅ Ferme le modal et flashe la case
+        if (modal) modal.classList.remove('open');
+        flashPPPcell(cell);
+
+        // (Optionnel) MAJ du stake affiché dans la cellule si tu as un input "amount"
+        try {
+          const amountInput = form.querySelector('[name="amount"]');
+          if (amountInput && cell) {
+            const delta = parseFloat(String(amountInput.value).replace(',', '.')) || 0;
+            if (delta > 0) {
+              let stakeWrap = cell.querySelector('.stake-wrap');
+              if (!stakeWrap) {
+                stakeWrap = document.createElement('div');
+                stakeWrap.className = 'stake-wrap';
+                stakeWrap.innerHTML = `
+                  <div class="stake-amt">+${fmtPts(delta)}</div>
+                `;
+                cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
+              } else {
+                const amtEl = stakeWrap.querySelector('.stake-amt');
+                const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
+                if (amtEl) amtEl.textContent = '+' + fmtPts(cur + delta);
+              }
+            }
+          }
+        } catch(_) {}
+
+        // (Optionnel) Rafraîchis le solde topbar si ton backend renvoie new_points
+        try {
+          if (payload && typeof payload.new_points !== 'undefined') {
+            if (window.updateTopbarSolde) {
+              window.updateTopbarSolde(payload.new_points);
+            } else if (window.refreshTopbarSolde) {
+              window.refreshTopbarSolde();
+            }
+          } else if (window.refreshTopbarSolde) {
+            window.refreshTopbarSolde();
+          }
+        } catch(_) {}
+
+        // (Optionnel) tu peux aussi marquer localement que ce jour a une mise :
+        // MY_BETS[key] = (MY_BETS[key] || {bets:[], amount:0});
+        // MY_BETS[key].amount = (Number(MY_BETS[key].amount)||0) + (parseFloat(fd.get('amount')||'0')||0);
+
+      } catch (e2) {
+        console.error('[ppp] submit bet error:', e2);
+        // 🔁 Fallback : si l’AJAX échoue, on tente le submit normal
+        form.removeEventListener('submit', arguments.callee);
+        form.submit();
+      }
     });
   }
 
@@ -3062,6 +3138,7 @@ PPP_HTML = """
 
     // Clic → modal (jours passés consultables, futur misable selon règles)
     el.addEventListener('click', () => {
+      lastClickedCell = el;
       const hasBetNow = hasBetFor(key);
       const isPast = (delta < 0);
 
@@ -3179,15 +3256,6 @@ PPP_HTML = """
 
     grid.appendChild(el);
   }
-
-  // 🔶 Si on revient de YOUBET!, flashe la case misée
-  (function flashAfterReturn(){
-    const key = sessionStorage.getItem('pppFlashKey');
-    if (!key) return;
-    const cell = grid.querySelector(`.ppp-day[data-key="${key}"]`);
-    if (cell) setTimeout(() => flashPPPcell(cell), 0);
-    sessionStorage.removeItem('pppFlashKey');
-  })();  
 
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
@@ -3542,6 +3610,7 @@ PPP_HTML = """
   });
 })();
 </script>
+<audio id="pppYogaAudio" src="/static/audio/yoga.wav" preload="auto"></audio>
 </body></html>
 """
 
