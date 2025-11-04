@@ -5379,25 +5379,44 @@ def ppp(station_id=None):
             flash(f"Budget insuffisant. Points restants : {grem:.3f}.")
             return redirect(_ppp_url())
 
-        # insertion (inclut target_time)
+        # insertion
         bet = PPPBet(
             user_id=current_user.id,
             bet_date=target,
             choice=choice,
             amount=amount,
-            odds=float(odds),         # cote initiale (sans boost)
+            odds=float(odds),
             status='ACTIVE',
             station_id=scope_station_id,
-            funded_from_balance=1
+            funded_from_balance=1,
         )
-        # colonne ajoutée par migration idempotente
         try:
-            setattr(bet, "target_time", hhmm)
+            setattr(bet, "target_time", hhmm)  # si la colonne existe
         except Exception:
             pass
 
         db.session.add(bet)
+
+        # 🔻 DÉBIT IMMÉDIAT DU SOLDE STOCKÉ
+        # On part d’un "base" = 500 si points est NULL (anciens comptes)
+        db.session.execute(
+            text("""
+                UPDATE "user"
+                SET points = COALESCE(points, :base) - :amt
+                WHERE id = :uid
+            """),
+            {"base": 500.0, "amt": float(amount), "uid": int(current_user.id)},
+        )
+
         db.session.commit()
+
+        # Option AJAX (pour éviter un fetch supplémentaire côté client)
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({
+                "ok": True,
+                "new_points": remaining_points(current_user),
+                "target_time": hhmm,
+            })
 
         flash(f"Mise enregistrée pour le {target.isoformat()} à {hhmm} — {choice.replace('_',' ')} à x{odds:.1f}.")
 

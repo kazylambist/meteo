@@ -89,10 +89,22 @@
       const res = await fetch('/api/users/me', { credentials: 'same-origin' });
       if(!res.ok) return;
       const me = await res.json();
+
+      // petit formateur local (indépendant de PPP)
+      const fmt = (x) => {
+        const v = Math.round((Number(x)||0)*10)/10;
+        const s = v.toFixed(1).replace('.', ',');
+        return s.replace(/,0$/, ''); // 2,0 -> 2
+      };
+
       const top = document.querySelector('.solde-box .solde-value');
-      if (top && me && me.points != null) top.textContent = `${fmtPts(me.points)} pts`;
+      if (top && me && me.points != null) {
+        top.textContent = fmt(me.points);
+      }
       const mePts = document.querySelector('#me-points');
-      if (mePts && me && me.points != null) mePts.textContent = `${fmtPts(me.points)} ⛃`;
+      if (mePts && me && me.points != null) {
+        mePts.textContent = `${fmt(me.points)} ⛃`;
+      }
     }catch(e){
       console.warn('refreshTopbarSolde', e);
     }
