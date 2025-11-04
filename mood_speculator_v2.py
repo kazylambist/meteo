@@ -2661,16 +2661,17 @@ PPP_HTML = """
   .ppp-grid .ppp-day,
   .ppp-grid .ppp-day.disabled { pointer-events:auto; }
   
-  /* --- Animation "ciné" pour une mise PPP --- */
+  /* --- Animation "ciné douce" pour une mise PPP --- */
   @keyframes pppBetFlash {
-    0%   { background-color: rgba(255, 230, 0, 0.95); transform: scale(1); }
-    20%  { background-color: rgba(255, 215, 0, 1);    transform: scale(1.03); }
-    40%  { background-color: rgba(255, 210, 60, 0.9); transform: scale(1.00); }
-    100% { background-color: transparent; transform: scale(1); }
+    0%   { background-color: rgba(255, 230, 0, 0.7); }  /* jaune clair, translucide */
+    30%  { background-color: rgba(255, 215, 0, 0.6); }  /* doré chaud */
+    70%  { background-color: rgba(255, 200, 80, 0.3); } /* chaleur diffuse */
+    100% { background-color: transparent; }             /* fondu naturel */
   }
+
   .ppp-bet-flash {
-    animation: pppBetFlash 2.5s ease-out forwards;
-    box-shadow: 0 0 16px rgba(255, 220, 60, 0.6); /* halo lumineux doux */
+    animation: pppBetFlash 3.2s ease-out forwards;
+    box-shadow: 0 0 14px rgba(255, 220, 60, 0.45); /* halo doux */
     z-index: 1;
   }
   .user-menu { position: relative; display: inline-block; }
@@ -3206,13 +3207,13 @@ PPP_HTML = """
     return wrap;
   }
 
-  // 🔶 Effet visuel de mise : flash jaune 0,5s puis fondu 2s
+  // 🔶 Effet visuel de mise : flash jaune
   function flashPPPcell(cell){
     if (!cell) return;
     cell.classList.add('ppp-bet-flash');   // ← passe en jaune
     setTimeout(() => {
       cell.classList.remove('ppp-bet-flash'); // ← laisse le CSS gérer le fondu 2s
-    }, 2500); // 0,5s “plein + jaune” + 2s de transition background-color
+    }, 3200); // plein + transition background-color
   }
   
   function addDaysLocal(d, n){
