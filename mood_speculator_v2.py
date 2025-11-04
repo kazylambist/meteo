@@ -7176,7 +7176,7 @@ def api_comment():
             payload = request.get_json(silent=True) or {}
             image_data_url = (payload.get("imageDataUrl") or "").strip()
             try:
-                stake = float(payload.get("stake") or 0.0)
+                stake = float(str(payload.get("stake") or 0.0).replace(",", "."))
             except Exception:
                 stake = 0.0
 
@@ -7230,131 +7230,187 @@ def api_comment():
         base_comment = (resp.choices[0].message.content or "").strip() or \
                        "Par les nuages sacrés, ton art rayonne !"
 
-        verdict = _pick_verdict()
-        comment = _compose_with_limit(base_comment, verdict, limit=268)
+        verdict_text = _pick_verdict()  # ex. "J'accepte ton dessin." (1/13) ou "J'aime un peu."
+        comment = _compose_with_limit(base_comment, verdict_text, limit=268)
 
-        # ---- 3) Gestion mise/gain/perte/boosts — ledger only (ne touche pas user.points) ----
-        stake = max(1, int(stake))
+        # ---- 3) Gestion mise/gain/perte — met à jour user.points (sans nouveau helper) ----
+        # Normalise la mise (entier min 1, comme avant)
+        try:
+            stake = max(1, int(round(stake)))
+        except Exception:
+            stake = 1
+
         multiplier = 0
-        payout = 0
+        payout = 0.0
         balance = None
         boosts_now = None
 
-        if getattr(current_user, "is_authenticated", False) and stake >= 1:
+        # Si non connecté, on ne touche pas au solde : on renvoie juste le texte
+        if not getattr(current_user, "is_authenticated", False):
+            payload = {
+                "comment": comment,
+                "verdict": verdict_text,
+                "multiplier": multiplier,
+                "payout": int(payout),
+            }
+            res = jsonify(payload)
+            res.headers["Cache-Control"] = "no-store"
+            return res
+
+        # Budget actuel (source de vérité existante)
+        try:
+            points_now = float(remaining_points(current_user) or 0.0)
+        except Exception:
+            points_now = 0.0
+
+        if stake > points_now + 1e-6:
+            # lire les boosts (optionnel)
             try:
-                uid = int(current_user.id)
-
-                # 3.1 Solde courant via ledger
-                points_now = float(remaining_points(current_user) or 0.0)
-
-                if points_now < stake:
-                    # Lire les boosts si possible (optionnel)
-                    try:
-                        ensure_bolts_column()
-                        boosts_now = db.session.execute(
-                            text('SELECT COALESCE(bolts,0) FROM "user" WHERE id=:uid'),
-                            {"uid": uid}
-                        ).scalar()
-                        boosts_now = int(boosts_now or 0)
-                    except Exception:
-                        boosts_now = None
-
-                    return jsonify({
-                        "error": "solde insuffisant",
-                        "balance": round(points_now, 6),
-                        "comment": comment,
-                        "verdict": verdict,
-                        "multiplier": multiplier,
-                        "payout": int(payout),
-                        "boosts": boosts_now,
-                    }), 400
-
-                # 3.2 Résultat
-                if verdict == "Beau dessin.":
-                    multiplier = random.randint(7, 14)
-                    payout = stake * multiplier
-                    verdict_tag = "WIN"
-                else:
-                    payout = 0
-                    verdict_tag = "LOSE"
-
-                # 3.3 Écritures: ArtBet + (bonus bolt si win)
-                db.session.add(ArtBet(
-                    user_id=uid,
-                    amount=stake,
-                    verdict=verdict_tag,
-                    multiplier=multiplier,
-                    payout=payout
-                ))
-
+                ensure_bolts_column()
+                boosts_now = db.session.execute(
+                    text('SELECT COALESCE(bolts,0) FROM "user" WHERE id=:uid'),
+                    {"uid": int(current_user.id)}
+                ).scalar()
+                boosts_now = int(boosts_now or 0)
+            except Exception:
                 boosts_now = None
-                if verdict_tag == "WIN":
-                    try:
-                        ensure_bolts_column()
-                        db.session.execute(
-                            text('UPDATE "user" SET bolts = COALESCE(bolts,0) + 1 WHERE id = :uid'),
-                            {"uid": uid}
-                        )
-                        boosts_now = db.session.execute(
-                            text('SELECT COALESCE(bolts,0) FROM "user" WHERE id=:uid'),
-                            {"uid": uid}
-                        ).scalar()
-                        boosts_now = int(boosts_now or 0)
-                    except Exception:
-                        boosts_now = None
 
-                db.session.commit()
+            return jsonify({
+                "error": "solde insuffisant",
+                "balance": round(points_now, 6),
+                "comment": comment,
+                "verdict": verdict_text,
+                "multiplier": multiplier,
+                "payout": int(payout),
+                "boosts": boosts_now,
+            }), 400
 
-                # 3.4 Recalcul du solde via ledger
+        # Détermine si c'est une victoire :
+        # - nouveau format : "J'accepte ton dessin." => WIN
+        # - compatibilité ancienne version : "Beau dessin." => WIN
+        vt_norm = (verdict_text or "").strip().lower()
+        is_win = vt_norm.startswith("j'accepte") or (verdict_text.strip() == "Beau dessin.")
+        if is_win:
+            # règle des 1/13 (si tu veux un multiplicateur aléatoire 7..14, garde ta variante)
+            multiplier = 13
+            payout = float(stake * multiplier)
+            verdict_tag = "WIN"
+        else:
+            multiplier = 0
+            payout = 0.0
+            verdict_tag = "LOSE"
+
+        try:
+            uid = int(current_user.id)
+
+            # 3.1 Insère la ligne d'historique (payout=0, on mettra le vrai si win)
+            db.session.execute(text("""
+                INSERT INTO art_bets (user_id, amount, verdict, multiplier, payout)
+                VALUES (:uid, :amt, :verdict, :mult, 0)
+            """), {
+                "uid": uid,
+                "amt": float(stake),
+                "verdict": verdict_tag,
+                "mult": int(multiplier),
+            })
+
+            # 3.2 Débit immédiat du stake depuis user.points (NULL => 500 bootstrap)
+            db.session.execute(text("""
+                UPDATE "user"
+                SET points = COALESCE(points, 500.0) - :amt
+                WHERE id = :uid
+            """), {"amt": float(stake), "uid": uid})
+
+            # 3.3 Crédit si WIN
+            if payout > 0.0:
+                db.session.execute(text("""
+                    UPDATE "user"
+                    SET points = COALESCE(points, 500.0) + :pout
+                    WHERE id = :uid
+                """), {"pout": float(payout), "uid": uid})
+
+                # mets à jour le payout réel sur la dernière ligne de cet utilisateur
+                db.session.execute(text("""
+                    UPDATE art_bets
+                    SET payout = :pout
+                    WHERE id = (SELECT MAX(id) FROM art_bets WHERE user_id = :uid)
+                """), {"pout": float(payout), "uid": uid})
+
+                # Bonus: +1 ⚡ si win (si la colonne existe)
+                try:
+                    ensure_bolts_column()
+                    db.session.execute(
+                        text('UPDATE "user" SET bolts = COALESCE(bolts,0) + 1 WHERE id = :uid'),
+                        {"uid": uid}
+                    )
+                except Exception:
+                    pass
+
+            db.session.commit()
+
+            # boosts_now (optionnel)
+            try:
+                ensure_bolts_column()
+                boosts_now = db.session.execute(
+                    text('SELECT COALESCE(bolts,0) FROM "user" WHERE id=:uid'),
+                    {"uid": uid}
+                ).scalar()
+                boosts_now = int(boosts_now or 0)
+            except Exception:
+                boosts_now = None
+
+            # 3.4 Solde frais
+            try:
                 balance = float(remaining_points(current_user) or 0.0)
+            except Exception:
+                balance = None
 
-            except SQLAlchemyError as e:
-                db.session.rollback()
-                print("[/api/comment] SQL ERROR:", repr(e), file=sys.stderr)
-                safe_balance = None
-                try:
-                    safe_balance = float(remaining_points(current_user) or 0.0)
-                except Exception:
-                    pass
-                return jsonify({
-                    "error": "server_error",
-                    "message": "database_error",
-                    "comment": comment,
-                    "verdict": verdict,
-                    "multiplier": multiplier,
-                    "payout": int(payout),
-                    "balance": safe_balance,
-                    "boosts": boosts_now,
-                }), 500
-
-            except Exception as e:
-                db.session.rollback()
-                print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
-                safe_balance = None
-                try:
-                    safe_balance = float(remaining_points(current_user) or 0.0)
-                except Exception:
-                    pass
-                return jsonify({
-                    "error": "server_error",
-                    "message": str(e),
-                    "comment": comment,
-                    "verdict": verdict,
-                    "multiplier": multiplier,
-                    "payout": int(payout),
-                    "balance": safe_balance,
-                    "boosts": boosts_now,
-                }), 500
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print("[/api/comment] SQL ERROR:", repr(e), file=sys.stderr)
+            safe_balance = None
+            try:
+                safe_balance = float(remaining_points(current_user) or 0.0)
+            except Exception:
+                pass
+            return jsonify({
+                "error": "server_error",
+                "message": "database_error",
+                "comment": comment,
+                "verdict": verdict_text,
+                "multiplier": multiplier,
+                "payout": int(payout),
+                "balance": safe_balance,
+                "boosts": boosts_now,
+            }), 500
+        except Exception as e:
+            db.session.rollback()
+            print("[/api/comment] ERROR:", repr(e), file=sys.stderr)
+            safe_balance = None
+            try:
+                safe_balance = float(remaining_points(current_user) or 0.0)
+            except Exception:
+                pass
+            return jsonify({
+                "error": "server_error",
+                "message": str(e),
+                "comment": comment,
+                "verdict": verdict_text,
+                "multiplier": multiplier,
+                "payout": int(payout),
+                "balance": safe_balance,
+                "boosts": boosts_now,
+            }), 500
 
         # ---- 4) Réponse ----
         payload = {
             "comment": comment,
-            "verdict": verdict,
-            "multiplier": multiplier,
+            "verdict": verdict_text,
+            "multiplier": int(multiplier),
             "payout": int(payout),
         }
         if balance is not None:
-            payload["balance"] = balance
+            payload["balance"] = round(balance, 2)
         if boosts_now is not None:
             payload["boosts"] = boosts_now
 
