@@ -246,7 +246,7 @@ if RUN_MIG:
             except Exception:
                 pass
 
-            # PPP : nouvelle colonne pour la date/heure cible du pari (ex: "2025-11-15T18:00:00")
+            # PPP : nouvelle colonne pour la date/heure cible du pari (ex: '2025-11-15T18:00:00')
             try:
                 db.session.execute(text(
                     "ALTER TABLE ppp_bet ADD COLUMN target_dt TEXT"
@@ -322,6 +322,37 @@ if RUN_MIG:
             try:
                 db.session.execute(text(
                     "UPDATE user SET bolts = COALESCE(bolts, 0)"
+                ))
+            except Exception:
+                pass
+
+            # --- USER : solde points (utilisé par 'tome🎁N') ---
+            # Colonne principale points : NOT NULL + DEFAULT 500.0 (pour les nouveaux users)
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE user ADD COLUMN points REAL NOT NULL DEFAULT 500.0"
+                ))
+            except Exception:
+                pass
+            # Backfill défensif : anciennes lignes NULL -> 500.0
+            try:
+                db.session.execute(text(
+                    "UPDATE user SET points = 500.0 WHERE points IS NULL"
+                ))
+            except Exception:
+                pass
+
+            # Colonne bonus_points : NOT NULL + DEFAULT 0.0
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE user ADD COLUMN bonus_points REAL NOT NULL DEFAULT 0.0"
+                ))
+            except Exception:
+                pass
+            # Backfill défensif : anciennes lignes NULL -> 0.0
+            try:
+                db.session.execute(text(
+                    "UPDATE user SET bonus_points = 0.0 WHERE bonus_points IS NULL"
                 ))
             except Exception:
                 pass
@@ -487,6 +518,7 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            # --- ART_BETS : table + index ---
             try:
                 db.session.execute(text("""
                     CREATE TABLE IF NOT EXISTS art_bets (
@@ -535,6 +567,8 @@ class User(UserMixin, db.Model):
     bal_marie  = db.Column(db.Float, default=0.0)
     bolts = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
+    points = db.Column(db.Float, nullable=False, default=500.0)      # solde “source de vérité”
+    bonus_points = db.Column(db.Float, nullable=False, default=0.0)   # bonus séparé
 
     @validates("email", "username")
     def _normalize_fields(self, key, value):
