@@ -568,7 +568,7 @@ class User(UserMixin, db.Model):
     bolts = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(APP_TZ))
     points = db.Column(db.Float, nullable=False, default=500.0)      # solde “source de vérité”
-    bonus_points = db.Column(db.Float, nullable=False, default=0.0)   # bonus séparé
+    # bonus_points = db.Column(db.Float, nullable=False, default=0.0)   # bonus séparé
 
     @validates("email", "username")
     def _normalize_fields(self, key, value):
