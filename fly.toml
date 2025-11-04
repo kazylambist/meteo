@@ -5,10 +5,16 @@ primary_region = "cdg"
 [build]
 
 [env]
-  PYTHONUNBUFFERED = "1"                   # imprime sans buffer
+  PYTHONUNBUFFERED = "1"
   GUNICORN_CMD_ARGS = "--access-logfile - --error-logfile - --log-level info"
-  # Si tu es en uvicorn à la place, commente la ligne ci-dessus et mets :
-  # UVICORN_LOG_LEVEL = "info"
+
+  # --- Active les migrations idempotentes au boot ---
+  RUN_MIGRATIONS = "1"
+
+  # --- (Optionnel) Sécurité d'affichage des soldes le temps de corriger la DB ---
+  # Si remaining_points détecte une incohérence, il retombe sur le ledger (base 500).
+  # Tu pourras remettre à "0" après vérification.
+  POINTS_RECONCILE = "1"
 
 [http_service]
   internal_port = 8080
