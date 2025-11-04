@@ -2985,7 +2985,7 @@ PPP_HTML = """
 
       // heure choisie (menu déroulant)
       const hourSel = document.getElementById('mHour');
-      const hhmm = (hourSel && hourSel.value) ? hourSel.value : '18:00';
+      const hhmm = (hourSel && hourSel.value) ? hourSel.value.slice(0,5) : '18:00';
 
       // alimente le champ caché "target_dt" (si tu l’utilises côté backend)
       if (mTimeHidden) {
@@ -3001,18 +3001,41 @@ PPP_HTML = """
       const key = mDateInput.value;
       const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || lastClickedCell);
 
+      // --- CONTRAINTES AVANT ENVOI ---
+      const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase(); // 'PLUIE'|'PAS_PLUIE'
+      const dayInfo = (MY_BETS && MY_BETS[key]) ? (MY_BETS[key].bets || []) : [];
+
+      // 2.a Interdiction d'un choix opposé au même horaire
+      const opposite = (c)=> (c === 'PLUIE' ? 'PAS_PLUIE' : 'PLUIE');
+      const conflict = dayInfo.some(b => {
+        const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
+        const bChoice = String(b.choice || '').toUpperCase();
+        return bTime === hhmm && bChoice === opposite(choiceVal);
+      });
+      if (conflict) {
+        alert(`Déjà une mise "${opposite(choiceVal) === 'PLUIE' ? 'Pluie' : 'Pas Pluie'}" à ${hhmm}. Impossible de miser l'inverse au même horaire.`);
+        return;
+      }
+
+      // 3) Max 3 créneaux distincts par jour
+      const uniqueHours = new Set(dayInfo.map(b => String(b.target_time || b.time || '18:00').slice(0,5)));
+      if (!uniqueHours.has(hhmm) && uniqueHours.size >= 3) {
+        const list = Array.from(uniqueHours).sort().join(', ');
+        alert(`Limite de 3 horaires atteinte pour ce jour (${list}). Vous pouvez remiser sur ces horaires, pas en ajouter un nouveau.`);
+        return;
+      }
+
+      // ✅ Les contraintes sont OK : on peut déclencher le son (geste utilisateur),
+      // fermer le modal, lancer le flash (feedback immédiat), puis faire la requête.
       try {
-        // 🔊 Joue le son immédiatement (même geste utilisateur)
-        try {
-          const audio = document.getElementById('pppYogaAudio');
-          if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
-        } catch(_) {}
+        const audio = document.getElementById('pppYogaAudio');
+        if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
+      } catch(_) {}
 
-        // ✅ Ferme le modal et flashe la case tout de suite
-        if (modal) modal.classList.remove('open');
-        flashPPPcell(cell);
+      if (modal) modal.classList.remove('open');
+      flashPPPcell(cell);
 
-        // 👉 Ensuite seulement on envoie au serveur
+      try {
         const resp = await fetch(form.action || '/ppp/bet', {
           method: 'POST',
           body: fd,
@@ -3020,11 +3043,22 @@ PPP_HTML = """
           headers
         });
 
-        // On tente de lire du JSON si dispo (nouveau solde, etc.)
+        // Si le serveur refuse (garde-fous backend), on affiche le message et on s'arrête
+        if (!resp.ok) {
+          let errMsg = 'La mise a été refusée.';
+          try {
+            const j = await resp.clone().json();
+            if (j && (j.message || j.error)) errMsg = j.message || j.error;
+          } catch(_) {}
+          alert(errMsg);
+          return;
+        }
+
+        // JSON éventuel (nouveau solde, etc.)
         let payload = null;
         try { payload = await resp.clone().json(); } catch (_) { /* HTML fallback */ }
 
-        // (Optionnel) MAJ du stake affiché dans la cellule si tu as un input "amount"
+        // 🔁 MAJ UI : montant cumulé dans la cellule
         try {
           const amountInput = form.querySelector('[name="amount"]');
           if (amountInput && cell) {
@@ -3032,13 +3066,26 @@ PPP_HTML = """
             if (delta > 0) {
               let stakeWrap = cell.querySelector('.stake-wrap');
               if (!stakeWrap) {
+                // Ajoute aussi l’icône en même temps si nouvelle wrap
+                const iconHtml = (choiceVal === 'PLUIE')
+                  ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
+                  : `☀️`;
                 stakeWrap = document.createElement('div');
                 stakeWrap.className = 'stake-wrap';
                 stakeWrap.innerHTML = `
+                  ${iconHtml}
                   <div class="stake-amt">+${fmtPts(delta)}</div>
                 `;
                 cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
               } else {
+                // s'il n'y a pas encore d'icône, on en place une
+                const hasIcon = !!(stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️'));
+                if (!hasIcon) {
+                  const iconHtml = (choiceVal === 'PLUIE')
+                    ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
+                    : `☀️`;
+                  stakeWrap.insertAdjacentHTML('afterbegin', iconHtml);
+                }
                 const amtEl = stakeWrap.querySelector('.stake-amt');
                 const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
                 if (amtEl) amtEl.textContent = '+' + fmtPts(cur + delta);
@@ -3047,7 +3094,43 @@ PPP_HTML = """
           }
         } catch(_) {}
 
-        // (Optionnel) Rafraîchis le solde topbar si ton backend renvoie new_points
+        // 🔁 MAJ STATE : on enregistre/fusionne la mise localement
+        try {
+          const amountInput = form.querySelector('[name="amount"]');
+          const delta = parseFloat(String(amountInput?.value || '0').replace(',', '.')) || 0;
+          const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase();
+          const hhmmNow = (document.getElementById('mHour')?.value || '18:00').slice(0,5);
+          const oddNow = (mOddsEl?.textContent ? parseFloat(String(mOddsEl.textContent).replace('x','').replace(',','.')) : undefined);
+          const odd1 = Math.round(((Number.isFinite(oddNow) && oddNow > 0) ? oddNow : undefined) * 10) / 10;
+
+          if (!MY_BETS[key]) MY_BETS[key] = { bets: [], amount: 0, choice: choiceVal };
+          const list = Array.isArray(MY_BETS[key].bets) ? MY_BETS[key].bets : (MY_BETS[key].bets = []);
+
+          // cherche une ligne identique (hhmm, choice, cote ≈ 1 décimale)
+          let merged = false;
+          for (const b of list) {
+            const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
+            const bChoice = String(b.choice || '').toUpperCase();
+            const bOdd = Math.round(((Number.isFinite(+b.odds) && +b.odds > 0) ? +b.odds : odd1) * 10) / 10;
+            if (bTime === hhmmNow && bChoice === choiceVal && bOdd === odd1) {
+              b.amount = (Number(b.amount)||0) + delta;
+              merged = true;
+              break;
+            }
+          }
+          if (!merged) {
+            list.push({
+              amount: delta,
+              target_time: hhmmNow,
+              choice: choiceVal,
+              odds: odd1,
+              when: new Date().toISOString()
+            });
+          }
+          MY_BETS[key].amount = (Number(MY_BETS[key].amount)||0) + delta;
+        } catch(_) {}
+
+        // 🔁 MAJ solde topbar si le backend renvoie new_points
         try {
           if (payload && typeof payload.new_points !== 'undefined') {
             if (window.updateTopbarSolde) {
@@ -3059,10 +3142,6 @@ PPP_HTML = """
             window.refreshTopbarSolde();
           }
         } catch(_) {}
-
-        // (Optionnel) tu peux aussi marquer localement que ce jour a une mise :
-        // MY_BETS[key] = (MY_BETS[key] || {bets:[], amount:0});
-        // MY_BETS[key].amount = (Number(MY_BETS[key].amount)||0) + (parseFloat(fd.get('amount')||'0')||0);
 
       } catch (e2) {
         console.error('[ppp] submit bet error:', e2);
@@ -3184,63 +3263,59 @@ PPP_HTML = """
         if (!isNaN(num)) shownOdds = num;
       }
 
-      // Historique (lecture seule + verdict/pluie)
+      // Historique (lecture seule + verdict/pluie) — AVEC AGRÉGATION
       if (histWrap) {
         histWrap.innerHTML = '';
         if (hasBetNow) {
           const list = (betInfo && Array.isArray(betInfo.bets)) ? betInfo.bets : [];
-          const totalAmount = Math.round(list.reduce((acc, b) => acc + (Number(b.amount) || 0), 0) * 100) / 100;
 
+          // On calcule aussi un initialOdds de secours (comme avant)
+          const totalAmount = Math.round(list.reduce((acc, b) => acc + (Number(b.amount) || 0), 0) * 100) / 100;
           let weightedSum = 0;
           for (const b of list) {
             const a = Number(b.amount) || 0;
             const o = Number(b.odds);
-            const odd0 = (Number.isFinite(o) && o > 0) ? o : baseOdds;
-            weightedSum += a * odd0;
+            const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
+            weightedSum += a * (odd0 || 0);
           }
-
+          const baseIdx = Math.max(0, Math.min(30, Number((document.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
+          const baseOdds = ODDS_SAFE[baseIdx];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
             : baseOdds;
 
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
-          const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
 
-          const lines = [];
+          // 👉 GROUPE par (heure, choix, cote arrondie à 1 décimale)
+          const groups = new Map(); // key: "HH:MM|CHOICE|ODD1D"
           for (const b of list) {
-            const whenDate = new Date(b.when);
-            const frWhen = whenDate.toLocaleDateString('fr-FR', {
-              weekday:'short', day:'2-digit', month:'short', year:'numeric'
-            });
+            const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
+            const choice = String(b.choice || '').toUpperCase(); // 'PLUIE' / 'PAS_PLUIE'
+            const o = Number(b.odds);
+            const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
+            const odd1 = Math.round(usedOdd * 10) / 10; // 1 décimale comme l’affichage
 
-            const amt = fmtPts(b.amount);
-            const o   = Number(b.odds);
-            const odd = (Number.isFinite(o) && o > 0 ? o : initialOdds)
-                          .toFixed(1).replace('.', ',');
+            const k = `${hhmm}|${choice}|${odd1}`;
+            const cur = groups.get(k) || { amount: 0, hhmm, choice, odd1 };
+            cur.amount += (Number(b.amount) || 0);
+            groups.set(k, cur);
+          }
 
-            // heure cible : fallback 18:00 si non fournie
-            const rawTime = String(b.target_time || b.time || '18:00');
-            const hhmm = rawTime.slice(0,5);
-            const hh   = hhmm.split(':')[0] || '18';
-
-            // verdict icône
-            const v = String(b.verdict || b.result || '').toUpperCase();
-            const badge   = v === 'WIN' ? ' ✅' : v === 'LOSE' ? ' ❌' : '';
-
-            // pluie mesurée (mm) si dispo
-            let observedNote = '';
-            if (b.observed_mm != null && b.observed_mm !== '') {
-              const mm = Number(b.observed_mm);
-              if (!Number.isNaN(mm)) {
-                observedNote = ` (${mm.toFixed(1).replace('.', ',')} mm observés à ${hh}h)`;
-              }
-            }
-
-            lines.push(`Mise du ${frWhen} — ${hh}h : ${amt} pts — (x${odd})${badge}${observedNote}`);
+          // Affichage lignes
+          const lines = [];
+          // tri par heure (HH:MM) pour un rendu stable
+          const sorted = Array.from(groups.values()).sort((a,b)=> a.hhmm.localeCompare(b.hhmm));
+          for (const g of sorted) {
+            const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
+            // badge verdict non pertinent en agrégé → on supprime l’icône win/lose par mise
+            lines.push(`Mises ${g.hhmm} — ${fmtPts(g.amount)} pts — (x${oddTxt})`);
           }
 
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
+
+          // Gain potentiel : on repart de la somme pondérée + boosts (comme avant)
+          const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
 
           histWrap.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
