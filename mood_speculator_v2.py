@@ -1942,6 +1942,15 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 .ppp-day.win.disabled,
 .ppp-day.lose.disabled { opacity: 1; filter: none; }
 
+/* Jour passé avec pari non encore résolu */
+.ppp-day.past-pending {
+  outline: 2px dashed rgba(255, 203, 77, .9);  /* ambre doré */
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(255, 203, 77, .18) inset;
+  opacity: 1;
+  filter: none;
+}
+
 /* modal */
 .ppp-modal{
   position:fixed; inset:0; display:none; place-items:center; z-index:20;
@@ -3178,27 +3187,32 @@ PPP_HTML = """
     const choice  = betInfo ? betInfo.choice : null;
 
     // ----- Calcul du verdict (priorité LOSE s'il y a plusieurs mises) -----
+    // accepte aussi status: "WON"/"LOST" (backends variés)
     let verdict = null; // 'WIN' | 'LOSE' | null
     if (betInfo) {
+      const norm = (v) => String(v || '').trim().toUpperCase();
       if (Array.isArray(betInfo.bets) && betInfo.bets.length > 0) {
         const results = betInfo.bets
-          .map(b => String(b.result || b.verdict || '').toUpperCase())
+          .map(b => norm(b.result) || norm(b.verdict) || norm(b.status))
           .filter(Boolean);
-        if (results.includes('LOSE')) verdict = 'LOSE';
-        else if (results.includes('WIN')) verdict = 'WIN';
+        if (results.includes('LOSE') || results.includes('LOST')) verdict = 'LOSE';
+        else if (results.includes('WIN') || results.includes('WON')) verdict = 'WIN';
       } else {
-        const r = String(betInfo.result || betInfo.verdict || '').toUpperCase();
-        if (r === 'WIN' || r === 'LOSE') verdict = r;
+        const r = norm(betInfo.result) || norm(betInfo.verdict) || norm(betInfo.status);
+        if (r === 'LOSE' || r === 'LOST') verdict = 'LOSE';
+        else if (r === 'WIN' || r === 'WON') verdict = 'WIN';
       }
     }
 
-    // --- Jours passés : grisés si aucun pari, sinon halo générique (win/lose) ---
+    // --- Jours passés : affichage clair (win / lose / pending) ---
     if (delta < 0) {
-      if (!hasBetFor(key)) {
+      const hasBet = hasBetFor(key);
+      if (!hasBet) {
         el.classList.add('is-past');
-      } else if (verdict) {
-        if (verdict === 'LOSE') el.classList.add('lose');   // ❌ rouge générique
-        if (verdict === 'WIN')  el.classList.add('win');    // ✅ vert générique
+      } else {
+        if (verdict === 'LOSE')      el.classList.add('lose');
+        else if (verdict === 'WIN')  el.classList.add('win');
+        else                         el.classList.add('past-pending'); // pari existant, verdict non résolu
       }
     }
 
