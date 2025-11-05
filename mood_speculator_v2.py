@@ -215,6 +215,16 @@ RUN_MIG = os.environ.get("RUN_MIGRATIONS", "0") == "1"
 
 if RUN_MIG:
     with app.app_context():
+        db.session.execute(text("""
+            CREATE TABLE IF NOT EXISTS meteo_obs_hourly (
+                station_id TEXT NOT NULL,
+                ts_utc     TEXT NOT NULL,     -- "YYYY-MM-DDTHH:MM:SSZ"
+                rain_mm    REAL,              -- mm sur l'heure (>=0) ; peut être NULL si on n'a qu'un code meteo
+                code       INTEGER,           -- code WMO si dispo (ex: >=60 = pluie)
+                PRIMARY KEY (station_id, ts_utc)
+            )
+        """))  
+ 
         try:
             # --- PPP : colonnes historiques ---
             try:
@@ -237,6 +247,16 @@ if RUN_MIG:
                 ))
             except Exception:
                 pass
+
+            for ddl in [
+                'ALTER TABLE ppp_bet ADD COLUMN observed_at TEXT',   -- ISO (UTC) de l’observation retenue
+                'ALTER TABLE ppp_bet ADD COLUMN observed_mm REAL',   -- mm/h observés (>= 0)
+                'ALTER TABLE ppp_bet ADD COLUMN verdict TEXT'        -- "WIN" | "LOSE" | NULL (= en attente)
+            ]:
+                try:
+                    db.session.execute(text(ddl))
+                except Exception:
+                    pass                 
 
             # PPP: funded_from_balance pour séparer solde vs. achat
             try:
@@ -897,12 +917,59 @@ def today_paris() -> date:
 def dt_paris_now() -> datetime:
     return datetime.now(APP_TZ)
 
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 import pytz
 
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    from backports.zoneinfo import ZoneInfo
 from flask import jsonify, request
 import json as _json
+
+PARIS = ZoneInfo("Europe/Paris")
+UTC   = ZoneInfo("UTC")
+
+def _first_observation_after(station_id: str, utc_from_iso: str):
+    """
+    Recherche la première observation à partir de `utc_from_iso` (incluse),
+    pour la station donnée. Retourne dict: {"obs_utc": "...Z", "mm": float}.
+    Si l'on n'a pas de rain_mm, on peut approximer via code WMO >=60 → mm=0.1
+    """
+    if not station_id:
+        return None
+    row = db.session.execute(text("""
+        SELECT
+            ts_utc,
+            CASE
+              WHEN rain_mm IS NOT NULL THEN MAX(rain_mm, 0)
+              WHEN code IS NOT NULL AND code >= 60 THEN 0.1
+              ELSE 0.0
+            END AS mm_eff
+        FROM meteo_obs_hourly
+        WHERE station_id = :sid
+          AND ts_utc >= :utc_from
+        ORDER BY ts_utc ASC
+        LIMIT 1
+    """), {"sid": station_id, "utc_from": utc_from_iso}).mappings().first()
+    if not row:
+        return None
+    return {"obs_utc": row["ts_utc"], "mm": float(row["mm_eff"] or 0.0)}
+
+def _parse_local_iso_to_utc_iso(local_iso: str) -> str:
+    """
+    local_iso: ex "2025-11-12T17:00" (heure locale Europe/Paris)
+    → retourne "YYYY-MM-DDTHH:MM:SSZ" en UTC.
+    """
+    if not local_iso:
+        raise ValueError("empty target_dt")
+    # autoriser formats sans secondes
+    dt_local = datetime.fromisoformat(local_iso)
+    if dt_local.tzoffset is None and dt_local.tzinfo is None:
+        dt_local = dt_local.replace(tzinfo=PARIS)
+    dt_utc = dt_local.astimezone(UTC).replace(microsecond=0)
+    iso = dt_utc.isoformat().replace("+00:00", "Z")
+    return iso
 
 def paris_now():
     return datetime.now(ZoneInfo("Europe/Paris"))
@@ -1389,6 +1456,24 @@ def openmeteo_daily(lat, lon, start_date, end_date):
     r = requests.get(url, params=params, timeout=15)
     r.raise_for_status()
     return r.json()
+
+def openmeteo_hourly_precip(lat, lon, start_iso, end_iso):
+    """Retourne une liste [(iso_time, mm), ...] pour la plage [start, end] en Europe/Paris."""
+    import requests
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat, "longitude": lon,
+        "hourly": "precipitation",
+        "start_date": start_iso[:10],
+        "end_date": end_iso[:10],
+        "timezone": "Europe/Paris"
+    }
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
+    j = r.json()
+    times = (j.get("hourly", {}) or {}).get("time", []) or []
+    precs = (j.get("hourly", {}) or {}).get("precipitation", []) or []
+    return list(zip(times, precs))   
 
 def compute_last3_hours(lat, lon, ref_date):
     # last 3 full days ending at ref_date (inclusive)
@@ -5072,6 +5157,166 @@ CARTE_HTML = """
 """
 
 # -----------------------------------------------------------------------------
+# Services/cron
+# -----------------------------------------------------------------------------
+
+def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
+    """
+    Parcourt les ppp_bet sans verdict et tente de les résoudre à partir des observations.
+    station_scope: si fourni, ne traite que cette station_id.
+    Retourne le nombre de paris mis à jour.
+    """
+    q = """
+      SELECT id, user_id, station_id,
+             COALESCE(target_dt, (date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt,
+             choice
+      FROM ppp_bet
+      WHERE (verdict IS NULL OR TRIM(verdict) = '')
+        AND COALESCE(target_dt, (date || 'T' || COALESCE(target_time,''))) <> ''
+    """
+    if station_scope:
+        q += " AND (station_id = :sid OR (station_id IS NULL AND :sid = ''))"
+
+    rows = db.session.execute(text(q), {"sid": station_scope or ""}).mappings().all()
+    if not rows:
+        return 0
+
+    updated = 0
+    for r in rows:
+        sid   = (r["station_id"] or "").strip()
+        tloc  = (r["target_dt"] or "").strip()
+        choice = (r["choice"] or "").upper()  # 'PLUIE' | 'PAS_PLUIE' | ...
+
+        if not tloc:
+            continue
+        try:
+            utc_from = _parse_local_iso_to_utc_iso(tloc)
+        except Exception:
+            continue
+
+        obs = _first_observation_after(sid, utc_from)
+        if not obs:
+            # pas encore d’observation ≥ target_dt → on laisse en attente
+            continue
+
+        mm = float(obs["mm"])
+        verdict = "WIN" if ((choice == "PLUIE" and mm > 0.0) or (choice == "PAS_PLUIE" and mm <= 0.0)) else "LOSE"
+
+        db.session.execute(
+            text("""UPDATE ppp_bet
+                      SET observed_at = :obs_at,
+                          observed_mm  = :mm,
+                          verdict      = :verdict
+                    WHERE id = :bid"""),
+            {"obs_at": obs["obs_utc"], "mm": mm, "verdict": verdict, "bid": r["id"]}
+        )
+        updated += 1
+
+    db.session.commit()
+    return updated
+
+from datetime import datetime, timedelta
+import pytz
+
+def resolve_pending_ppp_bets(max_back_days=14):
+    """Résout les ppp_bet sans verdict, dont target_dt est dans le passé.
+    Règle :
+      - On prend la 1ère observation horaire >= target_dt (Europe/Paris).
+      - outcome = 'PLUIE' si mm>0 else 'PAS_PLUIE'
+      - verdict = 'WIN' si outcome == choice sinon 'LOSE'
+    """
+    tz_paris = pytz.timezone("Europe/Paris")
+    now_paris = datetime.now(tz_paris)
+
+    # 1) Récup bets en attente
+    rows = db.session.execute(text("""
+        SELECT id, user_id, bet_date, target_time, target_dt, choice, station_id
+        FROM ppp_bet
+        WHERE verdict IS NULL
+          AND target_dt IS NOT NULL
+    """)).mappings().all()
+
+    # On ne garde que ceux dont target_dt est dans le passé et pas trop vieux
+    todo = []
+    for r in rows:
+        try:
+            tdt = datetime.fromisoformat(str(r["target_dt"]))
+            if tdt.tzinfo is None:
+                tdt = tz_paris.localize(tdt)
+        except Exception:
+            # fallback si target_dt n'était pas stocké : reconstruire avec bet_date+target_time
+            try:
+                bd = datetime.fromisoformat(str(r["bet_date"])).date()
+                hh, mm = str(r["target_time"] or "18:00").split(":")
+                naive = datetime(bd.year, bd.month, bd.day, int(hh), int(mm), 0)
+                tdt = tz_paris.localize(naive)
+            except Exception:
+                continue
+
+        if tdt <= now_paris and tdt >= now_paris - timedelta(days=max_back_days):
+            todo.append((r["id"], r["choice"], r.get("station_id") or "", tdt))
+
+    if not todo:
+        return 0
+
+    # 2) Pour simplifier, on géocode la ville courante de la page PPP (si tu veux par station_id, adapte)
+    # Ici, on prend le city_label global si tu l'as en config; sinon choisis une valeur par défaut.
+    city_q = os.environ.get("PPP_CITY_DEFAULT", "Paris, France")
+    geo = geocode_city_openmeteo(city_q)
+    if not geo:
+        return 0
+    lat, lon = geo["lat"], geo["lon"]
+
+    resolved_count = 0
+    for bet_id, choice, station_id, tdt in todo:
+        start = tdt
+        end = tdt + timedelta(hours=6)  # on se donne une fenêtre de 6h
+        hourly = openmeteo_hourly_precip(lat, lon, start.isoformat(), end.isoformat())
+        if not hourly:
+            continue
+
+        # 1ère obs >= target_dt
+        obs_mm = None
+        obs_at = None
+        for iso_t, mm in hourly:
+            try:
+                t = datetime.fromisoformat(iso_t)
+                # open-meteo renvoie en timezone demandée (Europe/Paris)
+                if t >= tdt:
+                    obs_mm = float(mm or 0.0)
+                    obs_at = t
+                    break
+            except Exception:
+                continue
+
+        if obs_mm is None:
+            # rien ≥ target_dt → on laisse en attente
+            continue
+
+        # outcome + verdict
+        outcome = "PLUIE" if obs_mm > 0 else "PAS_PLUIE"
+        verdict = "WIN" if (outcome == (choice or "").upper()) else "LOSE"
+
+        db.session.execute(text("""
+            UPDATE ppp_bet
+            SET observed_mm = :mm,
+                outcome = :outcome,
+                verdict = :verdict,
+                resolved_at = :now_iso
+            WHERE id = :bid
+        """), {
+            "mm": obs_mm,
+            "outcome": outcome,
+            "verdict": verdict,
+            "now_iso": now_paris.isoformat(),
+            "bid": bet_id
+        })
+        resolved_count += 1
+
+    db.session.commit()
+    return resolved_count   
+
+# -----------------------------------------------------------------------------
 # Routes publiques API/UI
 # -----------------------------------------------------------------------------
 @app.route('/')
@@ -5389,6 +5634,11 @@ def station_by_id(sid):
 @login_required
 def ppp(station_id=None):
     # --------- contexte (ville & scope station) ----------
+    try:
+        resolve_ppp_open_bets(station_scope=station_id or "")
+    except Exception as e:
+        app.logger.warning("resolve_ppp_open_bets failed: %r", e)
+
     if station_id:
         S = station_by_id(station_id)
         if not S:
@@ -5407,31 +5657,35 @@ def ppp(station_id=None):
 
     # ------------------ POST: créer une mise ------------------
     if request.method == 'POST':
+        wants_json = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or \
+                     'application/json' in (request.headers.get('Accept') or '')
+
+        def _return_error(msg):
+            if wants_json:
+                return jsonify({"ok": False, "error": msg}), 400
+            flash(msg)
+            return redirect(_ppp_url())
+
         try:
             target_str = (request.form.get('date') or '').strip()
             choice     = (request.form.get('choice') or '').strip().upper()
-            amount     = round(float(request.form.get('amount') or 0), 2)
-            # heure ciblée HH:MM (ex: "18:00"), défaut 18:00 si vide
+            amount     = round(float(str(request.form.get('amount') or 0).replace(',', '.')), 2)
             raw_hhmm   = (request.form.get('target_time') or '').strip() or '18:00'
         except Exception:
-            flash("Entrées invalides.")
-            return redirect(_ppp_url())
+            return _return_error("Entrées invalides.")
 
         if not target_str:
-            flash("Cliquez sur une case du calendrier pour choisir la date.")
-            return redirect(_ppp_url())
+            return _return_error("Cliquez sur une case du calendrier pour choisir la date.")
 
         if choice not in ('PLUIE', 'PAS_PLUIE') or amount <= 0:
-            flash("Choix ou montant invalides.")
-            return redirect(_ppp_url())
+            return _return_error("Choix ou montant invalides.")
 
         # parse date choisie
         try:
             y, m, d = [int(x) for x in target_str.split('-')]
             target = date(y, m, d)
         except Exception:
-            flash("Date invalide.")
-            return redirect(_ppp_url())
+            return _return_error("Date invalide.")
 
         # clamp/valide l'heure HH:MM
         def clamp_hhmm(s: str) -> str:
@@ -5445,34 +5699,56 @@ def ppp(station_id=None):
 
         hhmm = clamp_hhmm(raw_hhmm)
 
+        # Compose target_dt (Europe/Paris)
+        try:
+            from datetime import datetime as _dt
+            import pytz
+            tz_paris = pytz.timezone("Europe/Paris")
+            hh, mm = hhmm.split(":")
+            naive = _dt(target.year, target.month, target.day, int(hh), int(mm), 0)
+            target_dt = tz_paris.localize(naive)
+        except Exception:
+            target_dt = None  # on ne bloque pas, mais on devrait rarement arriver ici
+
         # validations métier (J+3..J+31)
         today = today_paris_date()
         ok, msg, offset, odds = ppp_validate_can_bet(target, today)
         if not ok:
-            flash(msg or "Mise impossible pour ce jour.")
-            return redirect(_ppp_url())
+            return _return_error(msg or "Mise impossible pour ce jour.")
 
-        # empêcher paris contradictoires le même jour pour le même scope
-        existing = (
-            PPPBet.query
-            .filter(
-                PPPBet.user_id == current_user.id,
-                PPPBet.bet_date == target,
-                PPPBet.status == 'ACTIVE',
-                PPPBet.station_id == scope_station_id
-            )
-            .order_by(PPPBet.id.asc())
-            .all()
+        # Empêcher paris contradictoires AU MÊME HORAIRE ce jour
+        # + Limite de 3 créneaux horaires distincts par jour
+        q = PPPBet.query.filter(
+            PPPBet.user_id == current_user.id,
+            PPPBet.bet_date == target,
+            PPPBet.station_id == scope_station_id,
+            PPPBet.status == 'ACTIVE'
         )
-        if existing and existing[0].choice != choice:
-            flash(f"Vous avez déjà misé « {existing[0].choice.replace('_',' ')} » pour ce jour.")
-            return redirect(_ppp_url())
+        existing_bets = q.order_by(PPPBet.id.asc()).all()
+
+        # 2a) opposé au même horaire → interdit
+        opposite = 'PAS_PLUIE' if choice == 'PLUIE' else 'PLUIE'
+        for b in existing_bets:
+            b_hhmm = getattr(b, "target_time", None) or "18:00"
+            if b_hhmm[:5] == hhmm and (b.choice or '').upper() == opposite:
+                return _return_error(
+                    f"Déjà une mise « {opposite.replace('_',' ')} » à {hhmm}. "
+                    f"Impossible de miser l'inverse au même horaire."
+                )
+
+        # 2b) max 3 heures distinctes
+        hours_set = set((getattr(b, "target_time", None) or "18:00")[:5] for b in existing_bets)
+        if hhmm not in hours_set and len(hours_set) >= 3:
+            listed = ", ".join(sorted(hours_set))
+            return _return_error(
+                f"Limite de 3 horaires atteinte pour ce jour ({listed}). "
+                f"Vous pouvez remiser sur ces horaires, pas en ajouter un nouveau."
+            )
 
         # budget
         grem = remaining_points(current_user)
         if amount > grem + 1e-6:
-            flash(f"Budget insuffisant. Points restants : {grem:.3f}.")
-            return redirect(_ppp_url())
+            return _return_error(f"Budget insuffisant. Points restants : {grem:.3f}.")
 
         # insertion
         bet = PPPBet(
@@ -5485,40 +5761,45 @@ def ppp(station_id=None):
             station_id=scope_station_id,
             funded_from_balance=1,
         )
+        # colonnes optionnelles
         try:
-            setattr(bet, "target_time", hhmm)  # si la colonne existe
+            setattr(bet, "target_time", hhmm)
+        except Exception:
+            pass
+        try:
+            if target_dt is not None and hasattr(PPPBet, "target_dt"):
+                setattr(bet, "target_dt", target_dt)
         except Exception:
             pass
 
         db.session.add(bet)
 
-        # 🔻 DÉBIT IMMÉDIAT DU SOLDE STOCKÉ
-        # On part d’un "base" = 500 si points est NULL (anciens comptes)
+        # Débit immédiat du solde stocké (NULL → 500.0 bootstrap)
         db.session.execute(
             text("""
                 UPDATE "user"
-                SET points = COALESCE(points, :base) - :amt
-                WHERE id = :uid
+                   SET points = COALESCE(points, :base) - :amt
+                 WHERE id = :uid
             """),
             {"base": 500.0, "amt": float(amount), "uid": int(current_user.id)},
         )
 
         db.session.commit()
 
-        # Option AJAX (pour éviter un fetch supplémentaire côté client)
-        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        # Réponse AJAX (utilisée par ton submit JS)
+        if wants_json:
+            try:
+                new_pts = remaining_points(current_user)
+            except Exception:
+                new_pts = None
             return jsonify({
                 "ok": True,
-                "new_points": remaining_points(current_user),
+                "new_points": new_pts,
                 "target_time": hhmm,
+                "choice": choice
             })
 
         flash(f"Mise enregistrée pour le {target.isoformat()} à {hhmm} — {choice.replace('_',' ')} à x{odds:.1f}.")
-
-        # support AJAX si tu l'utilises
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({"ok": True, "target_time": hhmm})
-
         return redirect(url_for('you_bet', back=_ppp_url()))
 
     # ------------------ GET: afficher la page ------------------
@@ -5570,14 +5851,14 @@ def ppp(station_id=None):
         except Exception:
             when_iso = key + "T00:00:00"
 
-        # ---- Déduction du verdict si manquant ----
+        # Déduction du verdict si manquant
         v = (getattr(r, "verdict", None) or getattr(r, "result", None))
         if not v:
             try:
                 outcome = (getattr(r, "outcome", None) or "").upper()
-                choice  = (getattr(r, "choice",  None) or "").upper()
-                if outcome and choice:
-                    v = "WIN" if outcome == choice else "LOSE"
+                choice_u  = (getattr(r, "choice",  None) or "").upper()
+                if outcome and choice_u:
+                    v = "WIN" if outcome == choice_u else "LOSE"
             except Exception:
                 v = None
 
@@ -5587,7 +5868,7 @@ def ppp(station_id=None):
             "odds": float(r.odds or 1.0),
             "target_time": getattr(r, "target_time", None) or "18:00",
             "verdict": v,
-            "result": v,  # compatibilité anciens templates
+            "result": v,  # compat ancien template
             "outcome": getattr(r, "outcome", None),
             "observed_mm": (
                 float(getattr(r, "observed_mm", 0.0))
@@ -5597,7 +5878,7 @@ def ppp(station_id=None):
         }
         entry["bets"].append(bet_dict)
 
-        # 🎯 verdict agrégé du jour (priorité au rouge)
+        # verdict agrégé du jour (priorité au rouge)
         results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
         if "LOSE" in results_upper:
             entry["verdict"] = "LOSE"
@@ -5608,7 +5889,7 @@ def ppp(station_id=None):
 
         bets_map[key] = entry
 
-    # -------- Boosts groupés par jour pour CE scope (normalisation station_id -> '') --------
+    # -------- Boosts groupés par jour pour CE scope --------
     boosts_map = {}
     sid_norm = scope_station_id or ""  # IMPORTANT: même normalisation que dans /ppp/boost
     res = db.session.execute(
@@ -5672,6 +5953,14 @@ def api_user_me():
     except Exception as e:
         app.logger.exception("Erreur /api/users/me : %s", e)
         return jsonify({"error": str(e)}), 500
+
+@app.get("/tasks/ppp/resolve")
+def tasks_ppp_resolve():
+    try:
+        n = resolve_pending_ppp_bets(max_back_days=14)
+        return jsonify({"ok": True, "resolved": n})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500       
 
 # --- WET: 48h humidity betting ----------------------------------------------
 @app.route('/wet', methods=['GET', 'POST'])
