@@ -3827,6 +3827,22 @@ PPP_HTML = """
   });
 })();
 </script>
+<script>
+window.updateTopbarSolde = function(newPts) {
+  if (typeof newPts === 'undefined' || newPts === null) return;
+  const el = document.querySelector('.solde-value, #solde-points');
+  if (!el) return;
+  // formattage identique à format_points_fr côté Python
+  const txt = Number(newPts).toFixed(1).replace('.', ',');
+  el.textContent = txt;
+  // petit feedback visuel
+  el.classList.add('solde-up');
+  setTimeout(() => el.classList.remove('solde-up'), 600);
+};
+</script>
+<style>
+.solde-up { color: #79e7ff; transition: color .3s; }
+</style>
 <audio id="pppYogaAudio" src="/static/audio/yoga.wav" preload="auto"></audio>
 <audio id="pppBoostAudio" src="/static/audio/boost.mp3" preload="auto"></audio>
 </body></html>
@@ -4260,7 +4276,22 @@ function parisCurrentHourISO() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 })();
 </script>
-
+<script>
+window.updateTopbarSolde = function(newPts) {
+  if (typeof newPts === 'undefined' || newPts === null) return;
+  const el = document.querySelector('.solde-value, #solde-points');
+  if (!el) return;
+  // formattage identique à format_points_fr côté Python
+  const txt = Number(newPts).toFixed(1).replace('.', ',');
+  el.textContent = txt;
+  // petit feedback visuel
+  el.classList.add('solde-up');
+  setTimeout(() => el.classList.remove('solde-up'), 600);
+};
+</script>
+<style>
+.solde-up { color: #79e7ff; transition: color .3s; }
+</style>
 </body></html>
 """
 
