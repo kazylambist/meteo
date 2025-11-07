@@ -3088,8 +3088,11 @@ PPP_HTML = """
 
       // Prépare la payload depuis le formulaire
       const fd = new FormData(form);
-      // Tip: certains backends aiment savoir que c’est une requête AJAX
-      const headers = { 'Accept': 'application/json' };
+      // Important: signale bien une requête AJAX au backend
+      const headers = {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      };
 
       // On cible la case à flasher (soit la sélection courante, soit la dernière cliquée)
       const key = mDateInput.value;
@@ -3119,8 +3122,7 @@ PPP_HTML = """
         return;
       }
 
-      // ✅ Les contraintes sont OK : on peut déclencher le son (geste utilisateur),
-      // fermer le modal, lancer le flash (feedback immédiat), puis faire la requête.
+      // ✅ Feedback immédiat (avant le réseau): son + flash + icône si absente
       try {
         const audio = document.getElementById('pppYogaAudio');
         if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
@@ -3128,6 +3130,27 @@ PPP_HTML = """
 
       if (modal) modal.classList.remove('open');
       flashPPPcell(cell);
+
+      // Assure l’icône ⛅/💧 visible tout de suite (sans modifier le montant pour éviter un faux-positif si erreur)
+      try {
+        if (cell) {
+          let stakeWrap = cell.querySelector('.stake-wrap');
+          const hasIcon = !!(stakeWrap && (stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️')));
+          if (!hasIcon) {
+            const iconHtml = (choiceVal === 'PLUIE')
+              ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
+              : `☀️`;
+            if (!stakeWrap) {
+              stakeWrap = document.createElement('div');
+              stakeWrap.className = 'stake-wrap';
+              stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+0</div>`;
+              cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
+            } else {
+              stakeWrap.insertAdjacentHTML('afterbegin', iconHtml);
+            }
+          }
+        }
+      } catch(_) {}
 
       try {
         const resp = await fetch(form.action || '/ppp/bet', {
@@ -3160,7 +3183,6 @@ PPP_HTML = """
             if (delta > 0) {
               let stakeWrap = cell.querySelector('.stake-wrap');
               if (!stakeWrap) {
-                // Ajoute aussi l’icône en même temps si nouvelle wrap
                 const iconHtml = (choiceVal === 'PLUIE')
                   ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
                   : `☀️`;
@@ -3172,14 +3194,6 @@ PPP_HTML = """
                 `;
                 cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
               } else {
-                // s'il n'y a pas encore d'icône, on en place une
-                const hasIcon = !!(stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️'));
-                if (!hasIcon) {
-                  const iconHtml = (choiceVal === 'PLUIE')
-                    ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
-                    : `☀️`;
-                  stakeWrap.insertAdjacentHTML('afterbegin', iconHtml);
-                }
                 const amtEl = stakeWrap.querySelector('.stake-amt');
                 const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
                 if (amtEl) amtEl.textContent = '+' + fmtPts(cur + delta);
@@ -3188,16 +3202,16 @@ PPP_HTML = """
           }
         } catch(_) {}
 
-        // 🔁 MAJ STATE : on enregistre/fusionne la mise localement
+        // 🔁 MAJ STATE : on enregistre/fusionne la mise localement (pour le modal/historique)
         try {
           const amountInput = form.querySelector('[name="amount"]');
           const delta = parseFloat(String(amountInput?.value || '0').replace(',', '.')) || 0;
-          const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase();
+          const choiceVal2 = (document.getElementById('mChoice')?.value || '').toUpperCase();
           const hhmmNow = (document.getElementById('mHour')?.value || '18:00').slice(0,5);
           const oddNow = (mOddsEl?.textContent ? parseFloat(String(mOddsEl.textContent).replace('x','').replace(',','.')) : undefined);
           const odd1 = Math.round(((Number.isFinite(oddNow) && oddNow > 0) ? oddNow : undefined) * 10) / 10;
 
-          if (!MY_BETS[key]) MY_BETS[key] = { bets: [], amount: 0, choice: choiceVal };
+          if (!MY_BETS[key]) MY_BETS[key] = { bets: [], amount: 0, choice: choiceVal2 };
           const list = Array.isArray(MY_BETS[key].bets) ? MY_BETS[key].bets : (MY_BETS[key].bets = []);
 
           // cherche une ligne identique (hhmm, choice, cote ≈ 1 décimale)
@@ -3206,7 +3220,7 @@ PPP_HTML = """
             const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
             const bChoice = String(b.choice || '').toUpperCase();
             const bOdd = Math.round(((Number.isFinite(+b.odds) && +b.odds > 0) ? +b.odds : odd1) * 10) / 10;
-            if (bTime === hhmmNow && bChoice === choiceVal && bOdd === odd1) {
+            if (bTime === hhmmNow && bChoice === choiceVal2 && bOdd === odd1) {
               b.amount = (Number(b.amount)||0) + delta;
               merged = true;
               break;
@@ -3216,7 +3230,7 @@ PPP_HTML = """
             list.push({
               amount: delta,
               target_time: hhmmNow,
-              choice: choiceVal,
+              choice: choiceVal2,
               odds: odd1,
               when: new Date().toISOString()
             });
@@ -3231,6 +3245,9 @@ PPP_HTML = """
               window.updateTopbarSolde(payload.new_points);
             } else if (window.refreshTopbarSolde) {
               window.refreshTopbarSolde();
+            } else {
+              const soldeEl = document.querySelector('#solde-points, .solde-points');
+              if (soldeEl) soldeEl.textContent = Number(payload.new_points).toFixed(1).replace('.', ',');
             }
           } else if (window.refreshTopbarSolde) {
             window.refreshTopbarSolde();
@@ -3245,7 +3262,7 @@ PPP_HTML = """
       }
     });
   }
-
+  
   // Normalisation ODDS/BOOSTS
   const ODDS_SAFE = Array.from({ length: 31 }, (_, i) => {
     const v = (ODDS && Object.prototype.hasOwnProperty.call(ODDS, i)) ? Number(ODDS[i]) : NaN;
@@ -5708,7 +5725,7 @@ def ppp(station_id=None):
             naive = _dt(target.year, target.month, target.day, int(hh), int(mm), 0)
             target_dt = tz_paris.localize(naive)
         except Exception:
-            target_dt = None  # on ne bloque pas, mais on devrait rarement arriver ici
+            target_dt = None  # ne bloque pas le flux
 
         # validations métier (J+3..J+31)
         today = today_paris_date()
