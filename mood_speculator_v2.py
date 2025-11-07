@@ -5222,26 +5222,42 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
       WHERE (verdict IS NULL OR TRIM(verdict) = '')
         AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
     """
+    params = {}
     if station_scope is not None:
         q += " AND COALESCE(station_id,'') = :sid"
+        params["sid"] = station_scope or ""
 
-    rows = db.session.execute(text(q), {"sid": station_scope or ""}).mappings().all()
+    rows = db.session.execute(text(q), params).mappings().all()
     if not rows:
         return 0
+
+    def _normalize_to_utc_iso(s: str) -> str:
+        """Si s est déjà en UTC/offset (se termine par 'Z' ou contient un '+HH:MM'), on renvoie s.
+        Sinon on interprète s comme local Europe/Paris et on convertit en UTC ISO."""
+        ss = (s or "").strip()
+        if not ss:
+            return ss
+        # déjà horodaté UTC/offset
+        if ss.endswith("Z") or ("+" in ss[10:]):
+            return ss
+        # sinon: local → UTC
+        try:
+            return _parse_local_iso_to_utc_iso(ss)
+        except Exception:
+            return ss  # repli: on garde tel quel
 
     updated = 0
     for r in rows:
         sid     = (r["station_id"] or "").strip()
-        tloc    = (r["target_dt"] or "").strip()
-        choice  = (r["choice"] or "").upper()  # 'PLUIE' | 'PAS_PLUIE'
+        tloc    = (r["target_dt"] or "").strip()     # peut être 'YYYY-MM-DDTHH:MM[:SS][Z]'
+        choice  = (r["choice"] or "").upper()         # 'PLUIE' | 'PAS_PLUIE'
 
-        if not tloc:
-            continue
-        try:
-            utc_from = _parse_local_iso_to_utc_iso(tloc)
-        except Exception:
+        if not tloc or choice not in ("PLUIE", "PAS_PLUIE"):
             continue
 
+        utc_from = _normalize_to_utc_iso(tloc)
+
+        # Cherche la première observation ts_utc >= utc_from pour cette station normalisée
         obs = _first_observation_after(sid, utc_from)
         if not obs:
             # Pas encore d’observation ≥ target_dt → en attente
@@ -5250,10 +5266,8 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
         mm = float(obs.get("mm", 0.0))
         if choice == "PLUIE":
             verdict = "WIN" if mm > 0.0 else "LOSE"
-        elif choice == "PAS_PLUIE":
+        else:  # PAS_PLUIE
             verdict = "WIN" if mm <= 0.0 else "LOSE"
-        else:
-            continue
 
         db.session.execute(
             text("""
