@@ -3424,8 +3424,8 @@ PPP_HTML = """
           const sorted = Array.from(groups.values()).sort((a,b)=> a.hhmm.localeCompare(b.hhmm));
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
-            // badge verdict non pertinent en agrégé → on supprime l’icône win/lose par mise
-            lines.push(`Mises ${g.hhmm} — ${fmtPts(g.amount)} pts — (x${oddTxt})`);
+            const icon = (g.choice || '').toUpperCase() === 'PLUIE' ? '💧' : '☀️';
+            lines.push(`Mises ${icon} ${g.hhmm} — ${fmtPts(g.amount)} pts — (x${oddTxt})`);
           }
 
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
