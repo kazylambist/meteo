@@ -2823,6 +2823,18 @@ PPP_HTML = """
   }
   .time-row{ margin-top:12px; }
   .time-row label{ display:block; font-size:12px; opacity:.8; margin-bottom:6px; }
+  /* Jours passés avec pari mais sans verdict */
+  .ppp-day.past-pending{
+    outline:2px dashed #f6c945;
+    outline-offset:3px;
+  }
+  /* Victoires / défaites passées, pas de pointillé */
+  .ppp-day.win{
+    box-shadow:0 0 0 2px #30d158, 0 0 14px rgba(48,209,88,.25);
+  }
+  .ppp-day.lose{
+   box-shadow:0 0 0 2px #ff3b30, 0 0 14px rgba(255,59,48,.25);
+  }  
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -3306,16 +3318,20 @@ PPP_HTML = """
         else if (r === 'WIN' || r === 'WON') verdict = 'WIN';
       }
     }
+    // Expose au DOM pour debug/styling
+    el.dataset.verdict = verdict || '';    
 
     // --- Jours passés : affichage clair (win / lose / pending) ---
     if (delta < 0) {
       const hasBet = hasBetFor(key);
       if (!hasBet) {
         el.classList.add('is-past');
+      } else if (verdict === 'LOSE') {
+        el.classList.add('lose');
+      } else if (verdict === 'WIN') {
+        el.classList.add('win');
       } else {
-        if (verdict === 'LOSE')      el.classList.add('lose');
-        else if (verdict === 'WIN')  el.classList.add('win');
-        else                         el.classList.add('past-pending'); // pari existant, verdict non résolu
+        el.classList.add('past-pending'); // pari existant, verdict non résolu
       }
     }
 
