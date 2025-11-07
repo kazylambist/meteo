@@ -930,13 +930,14 @@ import json as _json
 PARIS = ZoneInfo("Europe/Paris")
 UTC   = ZoneInfo("UTC")
 
-def _first_observation_after(station_id: str, utc_from_iso: str):
+def _first_observation_after(station_id: str | None, utc_from_iso: str):
     """
     Recherche la première observation à partir de `utc_from_iso` (incluse),
     pour la station donnée. Retourne dict: {"obs_utc": "...Z", "mm": float}.
     Si l'on n'a pas de rain_mm, on peut approximer via code WMO >=60 → mm=0.1
     """
-    if not station_id:
+    # On autorise station_id = '' (scope "toutes stations"/par défaut).
+    if station_id is None:
         return None
     row = db.session.execute(text("""
         SELECT
@@ -947,7 +948,7 @@ def _first_observation_after(station_id: str, utc_from_iso: str):
               ELSE 0.0
             END AS mm_eff
         FROM meteo_obs_hourly
-        WHERE station_id = :sid
+        WHERE COALESCE(station_id,'') = :sid
           AND ts_utc >= :utc_from
         ORDER BY ts_utc ASC
         LIMIT 1
