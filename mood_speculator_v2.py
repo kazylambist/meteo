@@ -5215,15 +5215,15 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     Retourne le nombre de paris mis à jour.
     """
     q = """
-      SELECT id, user_id, station_id,
-             COALESCE(target_dt, (date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt,
-             choice
+      SELECT id, user_id, COALESCE(station_id,'') AS station_id,
+             COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt,
+             UPPER(COALESCE(choice,'')) AS choice
       FROM ppp_bet
       WHERE (verdict IS NULL OR TRIM(verdict) = '')
-        AND COALESCE(target_dt, (date || 'T' || COALESCE(target_time,''))) <> ''
+        AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
     """
-    if station_scope:
-        q += " AND (station_id = :sid OR (station_id IS NULL AND :sid = ''))"
+    if station_scope is not None:
+        q += " AND COALESCE(station_id,'') = :sid"
 
     rows = db.session.execute(text(q), {"sid": station_scope or ""}).mappings().all()
     if not rows:
@@ -5231,9 +5231,9 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
     updated = 0
     for r in rows:
-        sid   = (r["station_id"] or "").strip()
-        tloc  = (r["target_dt"] or "").strip()
-        choice = (r["choice"] or "").upper()  # 'PLUIE' | 'PAS_PLUIE' | ...
+        sid     = (r["station_id"] or "").strip()
+        tloc    = (r["target_dt"] or "").strip()
+        choice  = (r["choice"] or "").upper()  # 'PLUIE' | 'PAS_PLUIE'
 
         if not tloc:
             continue
@@ -5244,18 +5244,25 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
         obs = _first_observation_after(sid, utc_from)
         if not obs:
-            # pas encore d’observation ≥ target_dt → on laisse en attente
+            # Pas encore d’observation ≥ target_dt → en attente
             continue
 
-        mm = float(obs["mm"])
-        verdict = "WIN" if ((choice == "PLUIE" and mm > 0.0) or (choice == "PAS_PLUIE" and mm <= 0.0)) else "LOSE"
+        mm = float(obs.get("mm", 0.0))
+        if choice == "PLUIE":
+            verdict = "WIN" if mm > 0.0 else "LOSE"
+        elif choice == "PAS_PLUIE":
+            verdict = "WIN" if mm <= 0.0 else "LOSE"
+        else:
+            continue
 
         db.session.execute(
-            text("""UPDATE ppp_bet
-                      SET observed_at = :obs_at,
-                          observed_mm  = :mm,
-                          verdict      = :verdict
-                    WHERE id = :bid"""),
+            text("""
+                UPDATE ppp_bet
+                   SET observed_at = :obs_at,
+                       observed_mm  = :mm,
+                       verdict      = :verdict
+                 WHERE id = :bid
+            """),
             {"obs_at": obs["obs_utc"], "mm": mm, "verdict": verdict, "bid": r["id"]}
         )
         updated += 1
