@@ -223,8 +223,8 @@ if RUN_MIG:
                 code       INTEGER,           -- code WMO si dispo (ex: >=60 = pluie)
                 PRIMARY KEY (station_id, ts_utc)
             )
-        """))  
- 
+        """))
+
         try:
             # --- PPP : colonnes historiques ---
             try:
@@ -248,15 +248,16 @@ if RUN_MIG:
             except Exception:
                 pass
 
-            for ddl in [
-                'ALTER TABLE ppp_bet ADD COLUMN observed_at TEXT',   -- ISO (UTC) de l’observation retenue
-                'ALTER TABLE ppp_bet ADD COLUMN observed_mm REAL',   -- mm/h observés (>= 0)
-                'ALTER TABLE ppp_bet ADD COLUMN verdict TEXT'        -- "WIN" | "LOSE" | NULL (= en attente)
-            ]:
+            # Ajouts PPP pour observations/verdict — sans commentaires hors chaîne
+            for ddl in (
+                "ALTER TABLE ppp_bet ADD COLUMN observed_at TEXT",
+                "ALTER TABLE ppp_bet ADD COLUMN observed_mm REAL",
+                "ALTER TABLE ppp_bet ADD COLUMN verdict TEXT",
+            ):
                 try:
                     db.session.execute(text(ddl))
                 except Exception:
-                    pass                 
+                    pass
 
             # PPP: funded_from_balance pour séparer solde vs. achat
             try:
@@ -399,7 +400,7 @@ if RUN_MIG:
                 db.session.commit()
             except Exception:
                 db.session.rollback()
-                
+
             # Si ancienne colonne nullable → normaliser à '' (éviter NULL dans UNIQUE)
             try:
                 db.session.execute(text("""
@@ -450,8 +451,7 @@ if RUN_MIG:
                 pass
 
             # 3) Remplace les données par la version agrégée (1 ligne par clé)
-            #    (⚠️ si tu avais des FKs référant ppp_boosts.id, dis-le : je te donnerai
-            #    une variante qui conserve les ids. Par défaut ppp_boosts n’est pas référencée.)
+            #    (si tu avais des FKs sur ppp_boosts.id, me le dire pour une variante)
             try:
                 db.session.execute(text("DELETE FROM ppp_boosts"))
                 db.session.execute(text("""
@@ -461,7 +461,7 @@ if RUN_MIG:
                 """))
             except Exception:
                 pass
-            
+
             # 4) (Re)crée l’index unique pour verrouiller l’unicité
             try:
                 db.session.execute(text("""
