@@ -2036,6 +2036,12 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
   opacity: 1;
   filter: none;
 }
+/* Si un verdict est posé, on annule tout pointillé résiduel */
+.ppp-day.win.past-pending,
+.ppp-day.lose.past-pending {
+  outline: none !important;
+  box-shadow: inherit; /* le halo vert/rouge reste actif */
+}
 
 /* modal */
 .ppp-modal{
@@ -3298,28 +3304,29 @@ PPP_HTML = """
     const choice  = betInfo ? betInfo.choice : null;
 
     // ----- Calcul du verdict (priorité LOSE s'il y a plusieurs mises) -----
-    // accepte aussi status: "WON"/"LOST" (backends variés)
-    let verdict = null; // 'WIN' | 'LOSE' | null
-    if (betInfo) {
+    function computeVerdict(info){
+      if (!info) return null;
       const norm = (v) => String(v || '').trim().toUpperCase();
-      if (Array.isArray(betInfo.bets) && betInfo.bets.length > 0) {
-        const results = betInfo.bets
-          .map(b => norm(b.result) || norm(b.verdict) || norm(b.status))
-          .filter(Boolean);
-        if (results.includes('LOSE') || results.includes('LOST')) verdict = 'LOSE';
-        else if (results.includes('WIN') || results.includes('WON')) verdict = 'WIN';
-      } else {
-        const r = norm(betInfo.result) || norm(betInfo.verdict) || norm(betInfo.status);
-        if (r === 'LOSE' || r === 'LOST') verdict = 'LOSE';
-        else if (r === 'WIN' || r === 'WON') verdict = 'WIN';
-      }
+      // 1) champ agrégé éventuel côté backend
+      const agg = norm(info.verdict) || norm(info.result) || norm(info.status);
+      if (agg === 'LOSE' || agg === 'LOST') return 'LOSE';
+      if (agg === 'WIN'  || agg === 'WON')  return 'WIN';
+      // 2) détail des mises
+      const arr = Array.isArray(info.bets) ? info.bets : [];
+      const results = arr.map(b => norm(b.verdict) || norm(b.result) || norm(b.status)).filter(Boolean);
+      if (results.includes('LOSE') || results.includes('LOST')) return 'LOSE';
+      if (results.includes('WIN')  || results.includes('WON'))  return 'WIN';
+      return null;
     }
+    let verdict = computeVerdict(betInfo);
+  
     // Expose au DOM pour debug/styling
     el.dataset.verdict = verdict || '';    
 
     // --- Jours passés : affichage clair (win / lose / pending) ---
     if (delta < 0) {
       const hasBet = hasBetFor(key);
+      el.classList.remove('is-past','past-pending','win','lose'); // reset propre
       if (!hasBet) {
         el.classList.add('is-past');
       } else if (verdict === 'LOSE') {
@@ -3488,6 +3495,23 @@ PPP_HTML = """
     if (!o.textContent || !o.textContent.trim()) return;
     o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
   });
+
+    // Réconciliation des jours passés: supprime les pointillés si un verdict existe
+  (function reconcilePastCells(){
+    const cells = document.querySelectorAll('.ppp-day');
+    const now = new Date();
+    const parisNow = new Date(now.toLocaleString('en-US', { timeZone:'Europe/Paris' }));
+    const todayKey = ymdParis(parisNow); // même fabriquant de clé que pour les cellules
+    for (const el of cells) {
+      const key = el.getAttribute('data-key') || '';
+      if (!key || key >= todayKey) continue; // seulement passé
+      const v = String(el.dataset.verdict || '').toUpperCase();
+      if (v === 'WIN' || v === 'LOSE') {
+        el.classList.remove('past-pending','is-past');
+        el.classList.add(v === 'WIN' ? 'win' : 'lose');
+      }
+    }
+  })();
 
   // Icônes météo
   function ensureForecastWrap(cell){
@@ -5982,6 +6006,7 @@ def ppp(station_id=None):
             "amount": float(r.amount or 0.0),
             "odds": float(r.odds or 1.0),
             "target_time": getattr(r, "target_time", None) or "18:00",
+            "choice": (getattr(r, "choice", None) or None),
             "verdict": v,
             "result": v,  # compat ancien template
             "outcome": getattr(r, "outcome", None),
