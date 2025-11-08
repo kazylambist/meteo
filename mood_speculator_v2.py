@@ -5222,9 +5222,12 @@ CARTE_HTML = """
 # Services/cron
 # -----------------------------------------------------------------------------
 
+from sqlalchemy import text  # assure-toi d'avoir cet import
+
 def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     """
     Parcourt les ppp_bet sans verdict et tente de les résoudre à partir des observations.
+    Si verdict = WIN, crédite immédiatement le solde utilisateur (points).
     station_scope: si fourni, ne traite que cette station_id.
     Retourne le nombre de paris mis à jour.
     """
@@ -5251,10 +5254,8 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
         ss = (s or "").strip()
         if not ss:
             return ss
-        # déjà horodaté UTC/offset
         if ss.endswith("Z") or ("+" in ss[10:]):
             return ss
-        # sinon: local → UTC
         try:
             return _parse_local_iso_to_utc_iso(ss)
         except Exception:
@@ -5262,27 +5263,26 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
     updated = 0
     for r in rows:
-        sid     = (r["station_id"] or "").strip()
-        tloc    = (r["target_dt"] or "").strip()     # peut être 'YYYY-MM-DDTHH:MM[:SS][Z]'
-        choice  = (r["choice"] or "").upper()         # 'PLUIE' | 'PAS_PLUIE'
+        sid    = (r["station_id"] or "").strip()
+        tloc   = (r["target_dt"] or "").strip()   # 'YYYY-MM-DDTHH:MM[:SS][Z]'
+        choice = (r["choice"] or "").upper()       # 'PLUIE' / 'PAS_PLUIE'
 
         if not tloc or choice not in ("PLUIE", "PAS_PLUIE"):
             continue
 
         utc_from = _normalize_to_utc_iso(tloc)
 
-        # Cherche la première observation ts_utc >= utc_from pour cette station normalisée
+        # Observation la plus proche à ts_utc >= target_dt
         obs = _first_observation_after(sid, utc_from)
         if not obs:
-            # Pas encore d’observation ≥ target_dt → en attente
+            # Rien encore en base pour ce créneau → en attente
             continue
 
         mm = float(obs.get("mm", 0.0))
-        if choice == "PLUIE":
-            verdict = "WIN" if mm > 0.0 else "LOSE"
-        else:  # PAS_PLUIE
-            verdict = "WIN" if mm <= 0.0 else "LOSE"
+        verdict = "WIN" if ((choice == "PLUIE" and mm > 0.0) or
+                            (choice == "PAS_PLUIE" and mm <= 0.0)) else "LOSE"
 
+        # Écrit le verdict + observation
         db.session.execute(
             text("""
                 UPDATE ppp_bet
@@ -5294,6 +5294,38 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
             {"obs_at": obs["obs_utc"], "mm": mm, "verdict": verdict, "bid": r["id"]}
         )
         updated += 1
+
+        # Crédit des points si victoire
+        if verdict == "WIN":
+            # Date "clé jour" côté PPP. Évite date() SQLite sur '...Z' → on prend les 10 premiers chars.
+            date_key = tloc[:10] if len(tloc) >= 10 else None
+            if date_key:
+                # total des boosts pour cet utilisateur ce jour-là et cette station
+                boost_total = db.session.execute(
+                    text("""
+                      SELECT COALESCE(SUM(value),0)
+                      FROM ppp_boosts
+                      WHERE user_id = :uid
+                        AND bet_date = :bet_date
+                        AND COALESCE(station_id,'') = :sid
+                    """),
+                    {"uid": r["user_id"], "bet_date": date_key, "sid": sid}
+                ).scalar() or 0.0
+
+                # Récupère montant et cote du pari pour calculer le payout
+                row_bet = db.session.execute(
+                    text("SELECT amount, odds FROM ppp_bet WHERE id = :bid"),
+                    {"bid": r["id"]}
+                ).mappings().first()
+                if row_bet:
+                    amt = float(row_bet.get("amount") or 0.0)
+                    odd = float(row_bet.get("odds") or 0.0)
+                    payout = amt * (odd + float(boost_total))
+                    if payout > 0:
+                        db.session.execute(
+                            text("UPDATE user SET points = COALESCE(points,0) + :p WHERE id = :uid"),
+                            {"p": payout, "uid": r["user_id"]}
+                        )
 
     db.session.commit()
     return updated
