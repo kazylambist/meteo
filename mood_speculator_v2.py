@@ -2823,18 +2823,6 @@ PPP_HTML = """
   }
   .time-row{ margin-top:12px; }
   .time-row label{ display:block; font-size:12px; opacity:.8; margin-bottom:6px; }
-  /* Jours passés avec pari mais sans verdict */
-  .ppp-day.past-pending{
-    outline:2px dashed #f6c945;
-    outline-offset:3px;
-  }
-  /* Victoires / défaites passées, pas de pointillé */
-  .ppp-day.win{
-    box-shadow:0 0 0 2px #30d158, 0 0 14px rgba(48,209,88,.25);
-  }
-  .ppp-day.lose{
-   box-shadow:0 0 0 2px #ff3b30, 0 0 14px rgba(255,59,48,.25);
-  }  
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -2997,6 +2985,14 @@ PPP_HTML = """
     let s = v.toFixed(1).replace('.', ',');
     return s.replace(/,0$/, '');  // 2,0 -> 2
   }
+  function normChoice(x){
+    const s = String(x||'').trim().toUpperCase();
+    if (s === 'PLUIE' || s === 'PAS_PLUIE') return s;
+    // tolérances éventuelles si des anciennes valeurs existent
+    if (['RAIN','WET'].includes(s)) return 'PLUIE';
+    if (['DRY','NO_RAIN','PASPLUIE','SUN'].includes(s)) return 'PAS_PLUIE';
+    return '';
+  }  
   // --- Aujourd'hui (Europe/Paris) ---
   const now = new Date();
   const parisNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
@@ -3424,7 +3420,8 @@ PPP_HTML = """
           const groups = new Map(); // key: "HH:MM|CHOICE|ODD1D"
           for (const b of list) {
             const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
-            const choice = String(b.choice || '').toUpperCase(); // 'PLUIE' / 'PAS_PLUIE'
+            // normalise; repli sur le choix global du jour si la mise n’a pas de champ propre
+            const choice = normChoice(b.choice) || normChoice(betInfo && betInfo.choice) || 'PLUIE';
             const o = Number(b.odds);
             const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
             const odd1 = Math.round(usedOdd * 10) / 10; // 1 décimale comme l’affichage
@@ -3441,7 +3438,7 @@ PPP_HTML = """
           const sorted = Array.from(groups.values()).sort((a,b)=> a.hhmm.localeCompare(b.hhmm));
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
-            const icon = (g.choice || '').toUpperCase() === 'PLUIE' ? '💧' : '☀️';
+            const icon = g.choice === 'PLUIE' ? '💧' : '☀️';
             lines.push(`Mises ${icon} ${g.hhmm} — ${fmtPts(g.amount)} pts — (x${oddTxt})`);
           }
 
