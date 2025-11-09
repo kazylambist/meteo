@@ -3572,7 +3572,7 @@ function initPPPCalendar(ctx){
   }
 
   (function loadTodayIcon(){
-    const todayKey = ymd(today);
+    const todayKey = ymdParis(today);
     const cell = document.querySelector(`.ppp-day[data-key="${todayKey}"]`);
     if (!cell) return;
 
@@ -6011,7 +6011,7 @@ def ppp(station_id=None):
             .all()
         )
 
-        rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, r.id))
+        rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, getattr(r, "id", 0)))
 
         bets_map: dict[str, dict] = {}
         for r in rows:
