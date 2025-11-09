@@ -3550,13 +3550,6 @@ PPP_HTML = """
 
         // Couleur du liseré (win/lose) — logique "du jour" (conserve ton existant)
         cell.classList.remove('today-win','today-loss');
-        if (hasBet) {
-          const choice = betInfo ? betInfo.choice : null; // 'PLUIE' ou 'PAS_PLUIE'
-          if (choice === 'PLUIE' || choice === 'PAS_PLUIE') {
-            const isWin = (choice === 'PLUIE' && isRain) || (choice === 'PAS_PLUIE' && !isRain);
-            cell.classList.add(isWin ? 'today-win' : 'today-loss');
-          }
-        }
       })
       .catch(()=>{});
   })();
