@@ -5806,39 +5806,61 @@ def ppp(station_id=None):
         db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_my_stations_user ON my_stations(user_id)"))
         db.session.commit()
     
-    # ---------- stations de l'utilisateur + Paris par défaut ----------
-    def _user_stations(uid: int):
+    # ---------- stations de l'utilisateur (source: user_station) + Paris ----------
+    def _catalog_by_id():
+        # Map rapide depuis stations(3).json → { id: {label,city} }
         try:
-            rows = db.session.execute(text("""
-              SELECT id, COALESCE(label,'') AS label, COALESCE(city,'') AS city
-              FROM my_stations
-              WHERE user_id = :uid
-            """), {"uid": uid}).mappings().all()
-        except OperationalError as e:
-            if "no such table: my_stations" in str(e).lower():
-                _ensure_my_stations()
-                return []
-            raise                
+            cats = {}
+            for s in load_stations():
+                sid = (s.get("id") or "").strip()
+                if not sid:
+                    continue
+                lab = (s.get("label") or "").strip()
+                city = (s.get("city") or "").strip()
+                cats[sid] = {"city_label": lab or city or sid, "city": city}
+            return cats
+        except Exception:
+            return {}
+
+    def _user_stations(uid: int):
+        rows = db.session.execute(text("""
+            SELECT station_id AS id,
+                   COALESCE(station_label,'') AS label,
+                   lat, lon
+              FROM user_station
+             WHERE user_id = :uid
+             ORDER BY station_label ASC
+        """), {"uid": uid}).mappings().all()
+        cats = _catalog_by_id()
         out = []
         for r in rows:
-            sid  = (r["id"] or "").strip()
-            lab  = (r["label"] or "").strip()
-            city = (r["city"] or "").strip()
-            if not lab and city:
-                lab = f"{city}, France"
-            out.append({"id": sid, "city_label": lab or sid or "?", "city": city})
+            sid = (r["id"] or "").strip()
+            lbl = (r["label"] or "").strip()
+            if not sid:
+                continue
+            # city_label priorité: label en base > catalogue JSON > sid
+            cat = cats.get(sid, {})
+            city_label = lbl or cat.get("city_label") or sid
+            out.append({"id": sid, "city_label": city_label, "city": cat.get("city", "")})
         return out
 
     # Paris par défaut en tête
     stations = [{"id": "", "city_label": "Paris, France", "city": "Paris"}]
     stations += _user_stations(current_user.id)
 
-    # Si /ppp/<station_id> demandé, remonte-le en premier s’il existe
+    # /ppp/<station_id> : remonte si présent, sinon ajoute en tête
     if station_id is not None:
-        for i, s in enumerate(stations):
-            if s["id"] == (station_id or ""):
-                stations.insert(0, stations.pop(i))
-                break
+        wanted = (station_id or "")
+        if wanted:
+            for i, s in enumerate(stations):
+                if s["id"] == wanted:
+                    stations.insert(0, stations.pop(i))
+                    break
+            else:
+                # dérive un label depuis le catalogue si possible
+                cats = _catalog_by_id()
+                city_label = cats.get(wanted, {}).get("city_label", wanted.upper())
+                stations.insert(0, {"id": wanted, "city_label": city_label, "city": cats.get(wanted, {}).get("city","")})
 
     # Résout les mises en attente pour chaque scope présent
     try:
