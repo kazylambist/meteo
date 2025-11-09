@@ -930,48 +930,6 @@ import json as _json
 PARIS = ZoneInfo("Europe/Paris")
 UTC   = ZoneInfo("UTC")
 
-def _first_observation_after(station_id: str | None, utc_from_iso: str):
-    """
-    Recherche la première observation à partir de `utc_from_iso` (incluse),
-    pour la station donnée. Retourne dict: {"obs_utc": "...Z", "mm": float}.
-    Si l'on n'a pas de rain_mm, on peut approximer via code WMO >=60 → mm=0.1
-    """
-    # On autorise station_id = '' (scope "toutes stations"/par défaut).
-    if station_id is None:
-        return None
-    row = db.session.execute(text("""
-        SELECT
-            ts_utc,
-            CASE
-              WHEN rain_mm IS NOT NULL THEN MAX(rain_mm, 0)
-              WHEN code IS NOT NULL AND code >= 60 THEN 0.1
-              ELSE 0.0
-            END AS mm_eff
-        FROM meteo_obs_hourly
-        WHERE COALESCE(station_id,'') = :sid
-          AND ts_utc >= :utc_from
-        ORDER BY ts_utc ASC
-        LIMIT 1
-    """), {"sid": station_id, "utc_from": utc_from_iso}).mappings().first()
-    if not row:
-        return None
-    return {"obs_utc": row["ts_utc"], "mm": float(row["mm_eff"] or 0.0)}
-
-def _parse_local_iso_to_utc_iso(local_iso: str) -> str:
-    """
-    local_iso: ex "2025-11-12T17:00" (heure locale Europe/Paris)
-    → retourne "YYYY-MM-DDTHH:MM:SSZ" en UTC.
-    """
-    if not local_iso:
-        raise ValueError("empty target_dt")
-    # autoriser formats sans secondes
-    dt_local = datetime.fromisoformat(local_iso)
-    if dt_local.tzoffset is None and dt_local.tzinfo is None:
-        dt_local = dt_local.replace(tzinfo=PARIS)
-    dt_utc = dt_local.astimezone(UTC).replace(microsecond=0)
-    iso = dt_utc.isoformat().replace("+00:00", "Z")
-    return iso
-
 def paris_now():
     return datetime.now(ZoneInfo("Europe/Paris"))
 
@@ -5246,13 +5204,65 @@ CARTE_HTML = """
 # Services/cron
 # -----------------------------------------------------------------------------
 
+# --- imports requis ---
 from sqlalchemy import text  # assure-toi d'avoir cet import
+from datetime import datetime, timedelta
+
+# --- helpers sûrs (utilisent PARIS / UTC déjà définis plus haut dans ton fichier) ---
+
+def _parse_local_iso_to_utc_iso(local_iso: str) -> str:
+    """
+    Accepte 'YYYY-MM-DDTHH:MM' ou 'YYYY-MM-DDTHH:MM:SS' en Europe/Paris,
+    ou un ISO déjà tz-aware. Retourne un ISO UTC '...Z'.
+    """
+    if not local_iso:
+        raise ValueError("empty target_dt")
+    s = local_iso.strip()
+    if len(s) == 16 and s[10] == "T":
+        s += ":00"
+    dt = datetime.fromisoformat(s)  # gère aussi offset / Z
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=PARIS)
+    dt_utc = dt.astimezone(UTC).replace(microsecond=0)
+    return dt_utc.isoformat().replace("+00:00", "Z")
+
+
+def _first_observation_after(station_id: str | None, utc_from_iso: str):
+    """
+    Première obs ts_utc >= utc_from_iso. Si station_id vide → essaie 'lfpg_95', puis 'lfpg_75'.
+    Retourne dict: {"obs_utc": "...Z", "mm": float}
+    """
+    sid = (station_id or "").strip()
+    candidates = [sid] if sid else ["lfpg_95", "lfpg_75"]
+
+    SQL = text("""
+        SELECT ts_utc,
+               CASE
+                 WHEN rain_mm IS NOT NULL AND rain_mm >= 0 THEN rain_mm
+                 WHEN rain_mm IS NOT NULL AND rain_mm <  0 THEN 0.0
+                 WHEN code    IS NOT NULL AND code    >= 60 THEN 0.1
+                 ELSE 0.0
+               END AS mm_eff
+        FROM meteo_obs_hourly
+        WHERE COALESCE(station_id,'') = :sid
+          AND ts_utc >= :utc_from
+        ORDER BY ts_utc ASC
+        LIMIT 1
+    """)
+    for s in candidates:
+        row = db.session.execute(SQL, {"sid": s, "utc_from": utc_from_iso}).mappings().first()
+        if row:
+            return {"obs_utc": row["ts_utc"], "mm": float(row["mm_eff"] or 0.0)}
+    return None
+
+
+# --- résolution + crédit ---
 
 def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     """
     Parcourt les ppp_bet sans verdict et tente de les résoudre à partir des observations.
     Si verdict = WIN, crédite immédiatement le solde utilisateur (points).
-    station_scope: si fourni, ne traite que cette station_id.
+    station_scope: si fourni, ne traite que cette station_id (chaîne vide autorisée).
     Retourne le nombre de paris mis à jour.
     """
     q = """
@@ -5272,19 +5282,6 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     if not rows:
         return 0
 
-    def _normalize_to_utc_iso(s: str) -> str:
-        """Si s est déjà en UTC/offset (se termine par 'Z' ou contient un '+HH:MM'), on renvoie s.
-        Sinon on interprète s comme local Europe/Paris et on convertit en UTC ISO."""
-        ss = (s or "").strip()
-        if not ss:
-            return ss
-        if ss.endswith("Z") or ("+" in ss[10:]):
-            return ss
-        try:
-            return _parse_local_iso_to_utc_iso(ss)
-        except Exception:
-            return ss  # repli: on garde tel quel
-
     updated = 0
     for r in rows:
         sid    = (r["station_id"] or "").strip()
@@ -5294,13 +5291,18 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
         if not tloc or choice not in ("PLUIE", "PAS_PLUIE"):
             continue
 
-        utc_from = _normalize_to_utc_iso(tloc)
+        # Normalise en UTC ISO Z si nécessaire
+        utc_from = tloc
+        if not (utc_from.endswith("Z") or ("+" in utc_from[10:])):
+            try:
+                utc_from = _parse_local_iso_to_utc_iso(utc_from)
+            except Exception:
+                continue
 
         # Observation la plus proche à ts_utc >= target_dt
         obs = _first_observation_after(sid, utc_from)
         if not obs:
-            # Rien encore en base pour ce créneau → en attente
-            continue
+            continue  # en attente
 
         mm = float(obs.get("mm", 0.0))
         verdict = "WIN" if ((choice == "PLUIE" and mm > 0.0) or
@@ -5321,10 +5323,9 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
         # Crédit des points si victoire
         if verdict == "WIN":
-            # Date "clé jour" côté PPP. Évite date() SQLite sur '...Z' → on prend les 10 premiers chars.
-            date_key = tloc[:10] if len(tloc) >= 10 else None
+            date_key = tloc[:10] if len(tloc) >= 10 else None  # évite date() SQLite sur ISO
             if date_key:
-                # total des boosts pour cet utilisateur ce jour-là et cette station
+                # cumul des boosts du jour et de la station pour l'utilisateur
                 boost_total = db.session.execute(
                     text("""
                       SELECT COALESCE(SUM(value),0)
@@ -5336,7 +5337,7 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
                     {"uid": r["user_id"], "bet_date": date_key, "sid": sid}
                 ).scalar() or 0.0
 
-                # Récupère montant et cote du pari pour calculer le payout
+                # montant et cote de CE pari
                 row_bet = db.session.execute(
                     text("SELECT amount, odds FROM ppp_bet WHERE id = :bid"),
                     {"bid": r["id"]}
@@ -5347,113 +5348,75 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
                     payout = amt * (odd + float(boost_total))
                     if payout > 0:
                         db.session.execute(
-                            text("UPDATE user SET points = COALESCE(points,0) + :p WHERE id = :uid"),
+                            text('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
                             {"p": payout, "uid": r["user_id"]}
                         )
 
     db.session.commit()
     return updated
 
-from datetime import datetime, timedelta
-import pytz
 
 def resolve_pending_ppp_bets(max_back_days=14):
-    """Résout les ppp_bet sans verdict, dont target_dt est dans le passé.
+    """
+    Résout les ppp_bet sans verdict, dont target_dt est dans le passé.
     Règle :
-      - On prend la 1ère observation horaire >= target_dt (Europe/Paris).
+      - 1ère obs horaire >= target_dt (Europe/Paris → UTC via _parse_local_iso_to_utc_iso si besoin)
       - outcome = 'PLUIE' si mm>0 else 'PAS_PLUIE'
       - verdict = 'WIN' si outcome == choice sinon 'LOSE'
+    NB: utilise la même table meteo_obs_hourly et _first_observation_after.
     """
-    tz_paris = pytz.timezone("Europe/Paris")
-    now_paris = datetime.now(tz_paris)
-
     # 1) Récup bets en attente
     rows = db.session.execute(text("""
-        SELECT id, user_id, bet_date, target_time, target_dt, choice, station_id
+        SELECT id, user_id, bet_date, target_time, target_dt, choice, COALESCE(station_id,'') AS station_id
         FROM ppp_bet
-        WHERE verdict IS NULL
-          AND target_dt IS NOT NULL
+        WHERE (verdict IS NULL OR TRIM(verdict) = '')
+          AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
     """)).mappings().all()
 
-    # On ne garde que ceux dont target_dt est dans le passé et pas trop vieux
-    todo = []
+    if not rows:
+        return 0
+
+    now_utc_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    cutoff_iso  = (datetime.utcnow() - timedelta(days=max_back_days)).replace(microsecond=0).isoformat() + "Z"
+
+    resolved = 0
     for r in rows:
+        tloc = (r["target_dt"] or (str(r["bet_date"]) + "T" + (r["target_time"] or "18:00"))).strip()
+        # passé et pas trop vieux
         try:
-            tdt = datetime.fromisoformat(str(r["target_dt"]))
-            if tdt.tzinfo is None:
-                tdt = tz_paris.localize(tdt)
+            utc_from = tloc if (tloc.endswith("Z") or ("+" in tloc[10:])) else _parse_local_iso_to_utc_iso(tloc)
         except Exception:
-            # fallback si target_dt n'était pas stocké : reconstruire avec bet_date+target_time
-            try:
-                bd = datetime.fromisoformat(str(r["bet_date"])).date()
-                hh, mm = str(r["target_time"] or "18:00").split(":")
-                naive = datetime(bd.year, bd.month, bd.day, int(hh), int(mm), 0)
-                tdt = tz_paris.localize(naive)
-            except Exception:
-                continue
-
-        if tdt <= now_paris and tdt >= now_paris - timedelta(days=max_back_days):
-            todo.append((r["id"], r["choice"], r.get("station_id") or "", tdt))
-
-    if not todo:
-        return 0
-
-    # 2) Pour simplifier, on géocode la ville courante de la page PPP (si tu veux par station_id, adapte)
-    # Ici, on prend le city_label global si tu l'as en config; sinon choisis une valeur par défaut.
-    city_q = os.environ.get("PPP_CITY_DEFAULT", "Paris, France")
-    geo = geocode_city_openmeteo(city_q)
-    if not geo:
-        return 0
-    lat, lon = geo["lat"], geo["lon"]
-
-    resolved_count = 0
-    for bet_id, choice, station_id, tdt in todo:
-        start = tdt
-        end = tdt + timedelta(hours=6)  # on se donne une fenêtre de 6h
-        hourly = openmeteo_hourly_precip(lat, lon, start.isoformat(), end.isoformat())
-        if not hourly:
+            continue
+        if utc_from >= now_utc_iso or utc_from < cutoff_iso:
             continue
 
-        # 1ère obs >= target_dt
-        obs_mm = None
-        obs_at = None
-        for iso_t, mm in hourly:
-            try:
-                t = datetime.fromisoformat(iso_t)
-                # open-meteo renvoie en timezone demandée (Europe/Paris)
-                if t >= tdt:
-                    obs_mm = float(mm or 0.0)
-                    obs_at = t
-                    break
-            except Exception:
-                continue
-
-        if obs_mm is None:
-            # rien ≥ target_dt → on laisse en attente
+        obs = _first_observation_after(r["station_id"], utc_from)
+        if not obs:
             continue
 
-        # outcome + verdict
-        outcome = "PLUIE" if obs_mm > 0 else "PAS_PLUIE"
-        verdict = "WIN" if (outcome == (choice or "").upper()) else "LOSE"
+        mm = float(obs.get("mm", 0.0))
+        outcome = "PLUIE" if mm > 0.0 else "PAS_PLUIE"
+        choice  = (r["choice"] or "").upper()
+        verdict = "WIN" if outcome == choice else "LOSE"
 
         db.session.execute(text("""
             UPDATE ppp_bet
-            SET observed_mm = :mm,
-                outcome = :outcome,
-                verdict = :verdict,
-                resolved_at = :now_iso
-            WHERE id = :bid
+               SET observed_at = :obs_at,
+                   observed_mm  = :mm,
+                   outcome      = :outcome,
+                   verdict      = :verdict
+             WHERE id = :bid
         """), {
-            "mm": obs_mm,
+            "obs_at": obs["obs_utc"],
+            "mm": mm,
             "outcome": outcome,
             "verdict": verdict,
-            "now_iso": now_paris.isoformat(),
-            "bid": bet_id
+            "bid": r["id"],
         })
-        resolved_count += 1
+        resolved += 1
 
     db.session.commit()
-    return resolved_count   
+    return resolved
 
 # -----------------------------------------------------------------------------
 # Routes publiques API/UI
