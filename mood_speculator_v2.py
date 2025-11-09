@@ -1472,6 +1472,21 @@ def forecast_5days(lat, lon, ref_date):
         if len(result) >= 5: break
     return result
 
+def user_station_ids(u) -> list[str]:
+    """
+    Retourne la liste des station_id suivies par l'utilisateur.
+    Doit être cohérent avec station_by_id(id).
+    """
+    try:
+        rows = db.session.execute(text("""
+            SELECT station_id FROM user_stations
+            WHERE user_id = :uid
+            ORDER BY id
+        """), {"uid": u.id}).scalars().all()
+        return [str(x or "").strip() for x in rows if (x or "").strip()]
+    except Exception:
+        return []
+
 def get_city_snapshot(city_query: str, ref_date, force_refresh: bool = False):
     """
     Return a WeatherSnapshot row for (city_query, ref_date).
@@ -2728,6 +2743,11 @@ PPP_HTML = """
     100% { background-color: transparent; }             /* fondu naturel */
   }
 
+  /* PPP — titre ville centré */
+  .ppp-city{ 
+    text-align:center;
+    margin: 4px 0 8px;
+  }  
   .ppp-bet-flash {
     animation: pppBetFlash 3.2s ease-out forwards;
     box-shadow: 0 0 14px rgba(255, 220, 60, 0.45); /* halo doux */
@@ -2860,11 +2880,23 @@ PPP_HTML = """
 </nav>
 
 <div class="container" style="margin-top:16px;">
-  <div class="card">
-    <h2>{{ city_label }}</h2>
-    <p class="muted"></p>
-    <div id="pppGrid" class="ppp-grid"></div>
-  </div>
+  {% for cal in calendars %}
+    <div class="card ppp-card-wrap" data-station-id="{{ cal.station_id or '' }}">
+      <h2 class="ppp-city">{{ cal.city_label }}</h2>
+      <div class="muted"></div>
+      <div id="pppGrid-{{ loop.index0 }}" class="ppp-grid"></div>
+      <script>
+        window.__PPP_CALS__ = window.__PPP_CALS__ || [];
+        window.__PPP_CALS__.push({
+          gridId: "pppGrid-{{ loop.index0 }}",
+          city_label: {{ cal.city_label | tojson }},
+          station_id: {{ cal.station_id | default(None) | tojson }},
+          bets_map: {{ cal.bets_map | tojson }},
+          boosts_map: {{ cal.boosts_map | tojson }}
+        });
+      </script>
+    </div>
+  {% endfor %}
 </div>
 
 <!-- modal -->
@@ -2940,7 +2972,7 @@ PPP_HTML = """
 </div>
 
 <script>
-(function(){
+function initPPPCalendar(ctx){
   let lastClickedCell = null;
   
   function fmtPts(x){
@@ -2970,7 +3002,7 @@ PPP_HTML = """
   };
 
   // Refs DOM
-  const grid       = document.getElementById('pppGrid');
+  const grid       = document.getElementById(ctx.gridId);
   const modal      = document.getElementById('pppModal');
   const mOddsEl    = document.getElementById('mOdds');
   const mDateInput = document.getElementById('mDateInput');
@@ -3000,12 +3032,10 @@ PPP_HTML = """
 
   if (!grid) { console.error('[ppp] #pppGrid introuvable'); return; }
 
-  // Données serveur
-  const MY_BETS = {{ bets_map  | default({}) | tojson | safe }};
-  const BOOSTS  = {{ boosts_map| default({}) | tojson | safe }};
-
-  // Ville cible accessible partout
-  const qCity = {{ city_label | tojson }};
+  // Données serveur (par calendrier)
+  const MY_BETS = ctx.bets_map || {};
+  const BOOSTS  = ctx.boosts_map || {};
+  const qCity   = ctx.city_label;  
 
   console.debug('[ppp] BOOSTS from server:', BOOSTS);
 
@@ -3691,7 +3721,7 @@ PPP_HTML = """
         body: JSON.stringify({
           date: key,
           value: 5.0,
-          station_id: {{ station_id | default(None) | tojson }}
+          station_id: ctx.station_id
         })
       });
 
@@ -3736,6 +3766,11 @@ PPP_HTML = """
       console.error('[ppp] boost error:', e);
     }
   });
+}
+// Bootstrap: lance pour chaque calendrier collecté
+(function(){
+  const cals = window.__PPP_CALS__ || [];
+  for (const ctx of cals) initPPPCalendar(ctx);
 })();
 
 /* ---------- Menu utilisateur (topbar) ---------- */
@@ -5901,115 +5936,133 @@ def ppp(station_id=None):
     from datetime import timedelta
 
     solde_str = format_points_fr(remaining_points(current_user))
-    bets_map: dict[str, dict] = {}
 
-    # borne temps (pour inclure J-3 même si status != ACTIVE)
-    today = today_paris_date()
-    past3 = today - timedelta(days=3)
+    def build_context_for_station(station_id_or_none):
+        """Construit (city_label, station_id, bets_map, boosts_map) pour une station."""
+        if station_id_or_none:
+            S = station_by_id(station_id_or_none)
+            if not S:
+                return None
+            city_label = f"{S['city']}, France"
+            scope_station_id = S["id"]
+        else:
+            city_label = "Paris, France"
+            scope_station_id = None
 
-    # FUTUR (>= aujourd’hui) : seulement ACTIVE & non verrouillées
-    rows_future_q = PPPBet.query.filter(
-        PPPBet.user_id == current_user.id,
-        PPPBet.station_id == scope_station_id,
-        PPPBet.bet_date >= today,
-        PPPBet.status == 'ACTIVE',
-    )
-    if hasattr(PPPBet, "locked_for_trade"):
-        rows_future_q = rows_future_q.filter(PPPBet.locked_for_trade == False)
-    rows_future = rows_future_q.all()
+        # borne temps (inclure J-3 même si status != ACTIVE)
+        today = today_paris_date()
+        past3 = today - timedelta(days=3)
 
-    # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (pour afficher verdict)
-    rows_past = (
-        PPPBet.query
-        .filter(
+        # FUTUR (>= aujourd’hui) : seulement ACTIVE & non verrouillées
+        rows_future_q = PPPBet.query.filter(
             PPPBet.user_id == current_user.id,
             PPPBet.station_id == scope_station_id,
-            PPPBet.bet_date >= past3,
-            PPPBet.bet_date < today,
+            PPPBet.bet_date >= today,
+            PPPBet.status == 'ACTIVE',
         )
-        .all()
-    )
+        if hasattr(PPPBet, "locked_for_trade"):
+            rows_future_q = rows_future_q.filter(PPPBet.locked_for_trade == False)
+        rows_future = rows_future_q.all()
 
-    # Fusion triée (date + id)
-    rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, r.id))
+        # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (pour afficher verdict)
+        rows_past = (
+            PPPBet.query
+            .filter(
+                PPPBet.user_id == current_user.id,
+                PPPBet.station_id == scope_station_id,
+                PPPBet.bet_date >= past3,
+                PPPBet.bet_date < today,
+            )
+            .all()
+        )
 
-    for r in rows:
-        key = r.bet_date.isoformat()
-        entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
+        # Fusion triée (date + id)
+        rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, r.id))
 
-        entry["amount"] += float(r.amount or 0.0)
-        if r.choice:
-            entry["choice"] = r.choice
-
-        try:
-            when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
-        except Exception:
-            when_iso = key + "T00:00:00"
-
-        # Déduction du verdict si manquant
-        v = (getattr(r, "verdict", None) or getattr(r, "result", None))
-        if not v:
+        bets_map: dict[str, dict] = {}
+        for r in rows:
+            key = r.bet_date.isoformat()
+            entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
+            entry["amount"] += float(r.amount or 0.0)
+            if r.choice:
+                entry["choice"] = r.choice
             try:
-                outcome = (getattr(r, "outcome", None) or "").upper()
-                choice_u  = (getattr(r, "choice",  None) or "").upper()
-                if outcome and choice_u:
-                    v = "WIN" if outcome == choice_u else "LOSE"
+                when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
             except Exception:
-                v = None
+                when_iso = key + "T00:00:00"
+            v = (getattr(r, "verdict", None) or getattr(r, "result", None))
+            if not v:
+                try:
+                    outcome = (getattr(r, "outcome", None) or "").upper()
+                    choice_u  = (getattr(r, "choice",  None) or "").upper()
+                    if outcome and choice_u:
+                        v = "WIN" if outcome == choice_u else "LOSE"
+                except Exception:
+                    v = None
+            bet_dict = {
+                "when": when_iso,
+                "amount": float(r.amount or 0.0),
+                "odds": float(r.odds or 1.0),
+                "target_time": getattr(r, "target_time", None) or "18:00",
+                "verdict": v,
+                "result": v,
+                "outcome": getattr(r, "outcome", None),
+                "observed_mm": (
+                    float(getattr(r, "observed_mm", 0.0))
+                    if getattr(r, "observed_mm", None) not in (None, "")
+                    else None
+                ),
+            }
+            entry["bets"].append(bet_dict)
+            results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
+            if "LOSE" in results_upper:
+                entry["verdict"] = "LOSE"
+            elif "WIN" in results_upper:
+                entry["verdict"] = "WIN"
+            else:
+                entry["verdict"] = None
+            bets_map[key] = entry
 
-        bet_dict = {
-            "when": when_iso,
-            "amount": float(r.amount or 0.0),
-            "odds": float(r.odds or 1.0),
-            "target_time": getattr(r, "target_time", None) or "18:00",
-            "choice": (getattr(r, "choice", None) or None),
-            "verdict": v,
-            "result": v,  # compat ancien template
-            "outcome": getattr(r, "outcome", None),
-            "observed_mm": (
-                float(getattr(r, "observed_mm", 0.0))
-                if getattr(r, "observed_mm", None) not in (None, "")
-                else None
-            ),
+        # Boosts groupés par jour
+        boosts_map = {}
+        sid_norm = scope_station_id or ""
+        res = db.session.execute(
+            text("""
+              SELECT bet_date AS d, SUM(COALESCE(value,0)) AS total
+                FROM ppp_boosts
+               WHERE user_id = :uid
+                 AND COALESCE(station_id, '') = :sid
+               GROUP BY d
+            """),
+            {"uid": current_user.id, "sid": sid_norm}
+        )
+        for d, total in res:
+            key = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
+            boosts_map[key] = float(total or 0.0)
+
+        return {
+            "city_label": city_label,
+            "station_id": scope_station_id,
+            "bets_map": bets_map,
+            "boosts_map": boosts_map,
         }
-        entry["bets"].append(bet_dict)
 
-        # verdict agrégé du jour (priorité au rouge)
-        results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
-        if "LOSE" in results_upper:
-            entry["verdict"] = "LOSE"
-        elif "WIN" in results_upper:
-            entry["verdict"] = "WIN"
-        else:
-            entry["verdict"] = None
-
-        bets_map[key] = entry
-
-    # -------- Boosts groupés par jour pour CE scope --------
-    boosts_map = {}
-    sid_norm = scope_station_id or ""  # IMPORTANT: même normalisation que dans /ppp/boost
-    res = db.session.execute(
-        text("""
-          SELECT bet_date AS d, SUM(COALESCE(value,0)) AS total
-            FROM ppp_boosts
-           WHERE user_id = :uid
-             AND COALESCE(station_id, '') = :sid
-           GROUP BY d
-        """),
-        {"uid": current_user.id, "sid": sid_norm}
-    )
-    for d, total in res:
-        key = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
-        boosts_map[key] = float(total or 0.0)
+    # 1) Paris en premier
+    calendars = []
+    ctx_paris = build_context_for_station(None)
+    if ctx_paris:
+        calendars.append(ctx_paris)
+    # 2) Stations suivies par l’utilisateur
+    for sid in user_station_ids(current_user):
+        ctx = build_context_for_station(sid)
+        if ctx:
+            calendars.append(ctx)
 
     return render_template_string(
-        PPP_HTML.replace("Zeus", page_title),
+        PPP_HTML.replace("Zeus", "Zeus"),
         css=BASE_CSS,
         solde_str=solde_str,
-        bets_map=bets_map,
-        boosts_map=boosts_map,
-        city_label=city_label,
-        station_id=scope_station_id  # pour que le JS puisse l'envoyer lors des boosts
+        calendars=calendars
     )
 
 @app.route("/api/chat/unread_count")
