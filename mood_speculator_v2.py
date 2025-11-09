@@ -5569,6 +5569,11 @@ def you_bet():
     back = request.args.get('back') or url_for('ppp')
     return render_template_string(YOUBET_HTML, css=BASE_CSS, back=back)
 
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, 'static'),
+                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
 # -----------------------------------------------------------------------------
 # Auth minimal
 # -----------------------------------------------------------------------------
@@ -5781,18 +5786,42 @@ def station_by_id(sid):
     return None
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 @app.route('/ppp', methods=['GET', 'POST'])
 @app.route('/ppp/<station_id>', methods=['GET', 'POST'])
 @login_required
 def ppp(station_id=None):
+    # -- ensure table my_stations exists (SQLite-safe)
+    def _ensure_my_stations():
+        db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS my_stations (
+          user_id     INTEGER NOT NULL,
+          id          TEXT    NOT NULL,       -- station_id (string)
+          label       TEXT    DEFAULT '',
+          city        TEXT    DEFAULT '',
+          lat         REAL,
+          lon         REAL,
+          created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, id)
+        )
+        """))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_my_stations_user ON my_stations(user_id)"))
+        db.session.commit()
+    
     # ---------- stations de l'utilisateur + Paris par défaut ----------
     def _user_stations(uid: int):
-        rows = db.session.execute(text("""
-          SELECT id, COALESCE(label,'') AS label, COALESCE(city,'') AS city
-          FROM my_stations
-          WHERE user_id = :uid
-        """), {"uid": uid}).mappings().all()
+        try:
+            rows = db.session.execute(text("""
+              SELECT id, COALESCE(label,'') AS label, COALESCE(city,'') AS city
+              FROM my_stations
+              WHERE user_id = :uid
+            """), {"uid": uid}).mappings().all()
+        except OperationalError as e:
+            if "no such table: my_stations" in str(e).lower():
+                _ensure_my_stations()
+                return []
+            raise                
         out = []
         for r in rows:
             sid  = (r["id"] or "").strip()
