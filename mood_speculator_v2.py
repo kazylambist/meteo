@@ -2880,23 +2880,22 @@ PPP_HTML = """
 </nav>
 
 <div class="container" style="margin-top:16px;">
-  {% if not calendars %}
+  {% if not cals %}
     <div class="muted">Aucune station à afficher.</div>
   {% endif %}
-
-  {% for cal in calendars %}
+  {% for cal in cals %}
     <div class="card ppp-card-wrap" data-station-id="{{ cal.station_id or '' }}">
       <h2 class="ppp-city" style="text-align:center;margin:0 0 8px;">
         {{ cal.city_label }}
       </h2>
       <div class="muted"></div>
 
-      <div id="pppGrid-{{ loop.index0 }}" class="ppp-grid"></div>
+      <div id="{{ cal.gridId or ('pppGrid-' ~ loop.index0) }}" class="ppp-grid"></div>
 
       <script>
         window.__PPP_CALS__ = window.__PPP_CALS__ || [];
         window.__PPP_CALS__.push({
-          gridId: "pppGrid-{{ loop.index0 }}",
+          gridId: {{ (cal.gridId or ('pppGrid-' ~ loop.index0)) | tojson }},
           city_label: {{ cal.city_label | tojson }},
           station_id: {{ cal.station_id | tojson }},
           bets_map: {{ cal.bets_map | tojson }},
@@ -2910,7 +2909,7 @@ PPP_HTML = """
 <!-- modal -->
 <div id="pppModal" class="ppp-modal">
   <div class="ppp-card">
-    <h3 style="margin:0 0 8px;" id="mTitle"></h3>
+    <h3 id="mTitle" style="margin:0 0 8px;"></h3>
 
     <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
 
@@ -2923,10 +2922,7 @@ PPP_HTML = """
          style="margin-bottom:10px; font-size:14px; color:#ccc; display:none;">
     </div>
 
-    <form method="post"
-          action="{{ url_for('ppp') }}"
-          id="pppForm">
-
+    <form method="post" action="{{ url_for('ppp') }}" id="pppForm">
       <!-- valeurs cachées -->
       <input type="hidden" name="date" id="mDateInput">
       <input type="hidden" name="target_dt" id="mTargetDt">
@@ -6121,9 +6117,22 @@ def ppp(station_id=None):
     # Construit tous les calendriers: Paris + stations suivies
     cals = []
     for i, S in enumerate(stations):
-        ctx = build_context_for_station(S, i)
-        if ctx:
-            cals.append(ctx)
+        try:
+            ctx = build_context_for_station(S, i)
+            if ctx:
+                cals.append(ctx)
+        except Exception as e:
+            app.logger.warning("ppp: build_context_for_station failed for %r: %r", S, e)
+
+    # Filet de sécurité: si rien n'a été construit, injecte Paris vide
+    if not cals:
+        cals.append({
+            "gridId": "pppGrid-0",
+            "city_label": "Paris, France",
+            "station_id": None,
+            "bets_map": {},
+            "boosts_map": {},
+        })
 
     return render_template_string(
         PPP_HTML.replace("Zeus", page_title),
