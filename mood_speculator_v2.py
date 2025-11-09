@@ -5785,6 +5785,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 @app.route('/ppp', methods=['GET', 'POST'])
+@app.route('/ppp/', methods=['GET', 'POST'])  
 @app.route('/ppp/<station_id>', methods=['GET', 'POST'])
 @login_required
 def ppp(station_id=None):
