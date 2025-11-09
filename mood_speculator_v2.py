@@ -2884,7 +2884,7 @@ PPP_HTML = """
     <div class="muted">Aucune station à afficher.</div>
   {% endif %}
   {% for cal in cals %}
-    <div class="card ppp-card-wrap" data-station-id="{{ cal.station_id or '' }}">
+    <div class="card ppp-card-wrap" data-station-id="{{ cal.station_id or '' }}" style="margin-bottom:14px;">
       <h2 class="ppp-city" style="text-align:center;margin:0 0 8px;">
         {{ cal.city_label }}
       </h2>
@@ -5781,7 +5781,7 @@ def station_by_id(sid):
             return s
     return None
 
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.exc import OperationalError
 
 @app.route('/ppp', methods=['GET', 'POST'])
@@ -5882,7 +5882,7 @@ def ppp(station_id=None):
         )
 
         # scope station pour la mise POST: champ caché > URL
-        scope_station_id = (request.form.get('station_id') or station_id or "").strip() or None
+        scope_station_id = (request.form.get('station_id') or station_id or "").strip()
 
         def _return_error(msg):
             if wants_json:
@@ -5943,7 +5943,7 @@ def ppp(station_id=None):
         q = PPPBet.query.filter(
             PPPBet.user_id == current_user.id,
             PPPBet.bet_date == target,
-            PPPBet.station_id == scope_station_id,
+            func.coalesce(PPPBet.station_id, '') == (scope_station_id or ''),
             PPPBet.status == 'ACTIVE'
         )
         existing_bets = q.order_by(PPPBet.id.asc()).all()
@@ -6030,7 +6030,7 @@ def ppp(station_id=None):
         Retourne dict: {gridId, city_label, station_id, bets_map, boosts_map}
         """
         city_label = S["city_label"]
-        scope_station_id = S["id"] or None
+        scope_station_id = S["id"] or ''
 
         # borne temps (inclure J-3 même si status != ACTIVE)
         today = today_paris_date()
@@ -6039,7 +6039,7 @@ def ppp(station_id=None):
         # FUTUR (>= aujourd’hui) : seulement ACTIVE & non verrouillées
         rows_future_q = PPPBet.query.filter(
             PPPBet.user_id == current_user.id,
-            PPPBet.station_id == scope_station_id,
+            func.coalesce(PPPBet.station_id, '') == scope_station_id,
             PPPBet.bet_date >= today,
             PPPBet.status == 'ACTIVE',
         )
@@ -6052,7 +6052,7 @@ def ppp(station_id=None):
             PPPBet.query
             .filter(
                 PPPBet.user_id == current_user.id,
-                PPPBet.station_id == scope_station_id,
+                func.coalesce(PPPBet.station_id, '') == scope_station_id,
                 PPPBet.bet_date >= past3,
                 PPPBet.bet_date < today,
             )
