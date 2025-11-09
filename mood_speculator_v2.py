@@ -2880,17 +2880,25 @@ PPP_HTML = """
 </nav>
 
 <div class="container" style="margin-top:16px;">
+  {% if not calendars %}
+    <div class="muted">Aucune station à afficher.</div>
+  {% endif %}
+
   {% for cal in calendars %}
     <div class="card ppp-card-wrap" data-station-id="{{ cal.station_id or '' }}">
-      <h2 class="ppp-city">{{ cal.city_label }}</h2>
+      <h2 class="ppp-city" style="text-align:center;margin:0 0 8px;">
+        {{ cal.city_label }}
+      </h2>
       <div class="muted"></div>
+
       <div id="pppGrid-{{ loop.index0 }}" class="ppp-grid"></div>
+
       <script>
         window.__PPP_CALS__ = window.__PPP_CALS__ || [];
         window.__PPP_CALS__.push({
           gridId: "pppGrid-{{ loop.index0 }}",
           city_label: {{ cal.city_label | tojson }},
-          station_id: {{ cal.station_id | default(None) | tojson }},
+          station_id: {{ cal.station_id | tojson }},
           bets_map: {{ cal.bets_map | tojson }},
           boosts_map: {{ cal.boosts_map | tojson }}
         });
@@ -2916,15 +2924,13 @@ PPP_HTML = """
     </div>
 
     <form method="post"
-          action="{{ url_for('ppp', station_id=station_id) if station_id else url_for('ppp') }}"
+          action="{{ url_for('ppp') }}"
           id="pppForm">
 
       <!-- valeurs cachées -->
       <input type="hidden" name="date" id="mDateInput">
       <input type="hidden" name="target_dt" id="mTargetDt">
-      {% if station_id is not none %}
-      <input type="hidden" name="station_id" value="{{ station_id }}">
-      {% endif %}
+      <input type="hidden" name="station_id" id="mStationId" value="">
 
       <div class="grid cols-3"
            style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
@@ -2972,6 +2978,7 @@ PPP_HTML = """
 </div>
 
 <script>
+
 function initPPPCalendar(ctx){
   let lastClickedCell = null;
   
@@ -3267,7 +3274,7 @@ function initPPPCalendar(ctx){
   }
   
   // Normalisation ODDS/BOOSTS
-  const ODDS_SAFE = Array.from({ length: 31 }, (_, i) => {
+  const ODDS_SAFE = Array.from({ length: 32 }, (_, i) => {
     const v = (ODDS && Object.prototype.hasOwnProperty.call(ODDS, i)) ? Number(ODDS[i]) : NaN;
     return Number.isFinite(v) && v > 0 ? v : 1;
   });
@@ -3307,6 +3314,16 @@ function initPPPCalendar(ctx){
       return null;
     }
     let verdict = computeVerdict(betInfo);
+    // Garde-fou: si on est aujourd’hui, on ne colore pas avant la dernière heure pariée
+    if (delta === 0 && verdict && betInfo && Array.isArray(betInfo.bets)) {
+      const lastHHMM = betInfo.bets
+        .map(b => String(b.target_time || b.time || '18:00').slice(0,5))
+        .sort().at(-1) || '18:00';
+      const [lh, lm] = lastHHMM.split(':').map(x=>parseInt(x,10));
+      const nowParis = new Date(new Date().toLocaleString('en-US', { timeZone:'Europe/Paris' }));
+      const afterLast = nowParis.getHours() > lh || (nowParis.getHours() === lh && nowParis.getMinutes() >= lm);
+      if (!afterLast) verdict = null; // suspend l’affichage win/lose tant que l’heure n’est pas atteinte
+    }
   
     // Expose au DOM pour debug/styling
     el.dataset.verdict = verdict || '';    
@@ -3355,7 +3372,7 @@ function initPPPCalendar(ctx){
 
     const oddsEl   = el.querySelector('.odds');
     // Les cotes client sont définies pour des deltas >= 0 → clamp sur [0..30]
-    const baseIdx  = Math.max(0, Math.min(30, delta));
+    const baseIdx  = Math.max(0, Math.min(31, delta));
     const baseOdds = ODDS_SAFE[baseIdx];
     const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key])) ? Number(BOOSTS_SAFE[key]) : 0;
     renderOdds(oddsEl, baseOdds, boostForDay);
@@ -3402,7 +3419,7 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdx = Math.max(0, Math.min(30, Number((document.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
+          const baseIdx = Math.max(0, Math.min(31, Number((document.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
           const baseOdds = ODDS_SAFE[baseIdx];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
@@ -3471,6 +3488,10 @@ function initPPPCalendar(ctx){
         }
         if (mTimeHidden) mTimeHidden.value = ''; // nettoie le champ caché
       }
+      
+      // renseigne la station de la modale depuis le calendrier courant
+      const hidSid = document.getElementById('mStationId');
+      if (hidSid) hidSid.value = ctx.station_id || '';      
 
       if (modal) modal.classList.add('open');
     });
@@ -5759,42 +5780,67 @@ def station_by_id(sid):
             return s
     return None
 
-@app.route('/ppp', methods=['GET','POST'])
-@app.route('/ppp/<station_id>', methods=['GET','POST'])
+from sqlalchemy import text
+
+@app.route('/ppp', methods=['GET', 'POST'])
+@app.route('/ppp/<station_id>', methods=['GET', 'POST'])
 @login_required
 def ppp(station_id=None):
-    # --------- contexte (ville & scope station) ----------
+    # ---------- stations de l'utilisateur + Paris par défaut ----------
+    def _user_stations(uid: int):
+        rows = db.session.execute(text("""
+          SELECT id, COALESCE(label,'') AS label, COALESCE(city,'') AS city
+          FROM my_stations
+          WHERE user_id = :uid
+        """), {"uid": uid}).mappings().all()
+        out = []
+        for r in rows:
+            sid  = (r["id"] or "").strip()
+            lab  = (r["label"] or "").strip()
+            city = (r["city"] or "").strip()
+            if not lab and city:
+                lab = f"{city}, France"
+            out.append({"id": sid, "city_label": lab or sid or "?", "city": city})
+        return out
+
+    # Paris par défaut en tête
+    stations = [{"id": "", "city_label": "Paris, France", "city": "Paris"}]
+    stations += _user_stations(current_user.id)
+
+    # Si /ppp/<station_id> demandé, remonte-le en premier s’il existe
+    if station_id is not None:
+        for i, s in enumerate(stations):
+            if s["id"] == (station_id or ""):
+                stations.insert(0, stations.pop(i))
+                break
+
+    # Résout les mises en attente pour chaque scope présent
     try:
-        resolve_ppp_open_bets(station_scope=station_id or "")
+        for s in stations:
+            resolve_ppp_open_bets(station_scope=s["id"] or "")
     except Exception as e:
         app.logger.warning("resolve_ppp_open_bets failed: %r", e)
 
-    if station_id:
-        S = station_by_id(station_id)
-        if not S:
-            flash("Station introuvable.")
-            return redirect(url_for('carte'))
-        city_label = f"{S['city']}, France"
-        scope_station_id = S["id"]
-        page_title = f"{S['city']} — Pluie ou Pas Pluie"
-    else:
-        city_label = "Paris, France"
-        scope_station_id = None
-        page_title = "Zeus"
+    page_title = "Zeus — Pluie ou Pas Pluie"
 
-    def _ppp_url():
-        return url_for('ppp', station_id=scope_station_id) if scope_station_id else url_for('ppp')
+    def _ppp_url(scope_id):
+        return url_for('ppp', station_id=scope_id) if scope_id else url_for('ppp')
 
     # ------------------ POST: créer une mise ------------------
     if request.method == 'POST':
-        wants_json = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or \
-                     'application/json' in (request.headers.get('Accept') or '')
+        wants_json = (
+            request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            or 'application/json' in (request.headers.get('Accept') or '')
+        )
+
+        # scope station pour la mise POST: champ caché > URL
+        scope_station_id = (request.form.get('station_id') or station_id or "").strip() or None
 
         def _return_error(msg):
             if wants_json:
                 return jsonify({"ok": False, "error": msg}), 400
             flash(msg)
-            return redirect(_ppp_url())
+            return redirect(_ppp_url(scope_station_id))
 
         try:
             target_str = (request.form.get('date') or '').strip()
@@ -5806,7 +5852,6 @@ def ppp(station_id=None):
 
         if not target_str:
             return _return_error("Cliquez sur une case du calendrier pour choisir la date.")
-
         if choice not in ('PLUIE', 'PAS_PLUIE') or amount <= 0:
             return _return_error("Choix ou montant invalides.")
 
@@ -5846,8 +5891,7 @@ def ppp(station_id=None):
         if not ok:
             return _return_error(msg or "Mise impossible pour ce jour.")
 
-        # Empêcher paris contradictoires AU MÊME HORAIRE ce jour
-        # + Limite de 3 créneaux horaires distincts par jour
+        # Empêcher paris contradictoires au même horaire + limite 3 horaires
         q = PPPBet.query.filter(
             PPPBet.user_id == current_user.id,
             PPPBet.bet_date == target,
@@ -5856,7 +5900,6 @@ def ppp(station_id=None):
         )
         existing_bets = q.order_by(PPPBet.id.asc()).all()
 
-        # 2a) opposé au même horaire → interdit
         opposite = 'PAS_PLUIE' if choice == 'PLUIE' else 'PLUIE'
         for b in existing_bets:
             b_hhmm = getattr(b, "target_time", None) or "18:00"
@@ -5866,7 +5909,6 @@ def ppp(station_id=None):
                     f"Impossible de miser l'inverse au même horaire."
                 )
 
-        # 2b) max 3 heures distinctes
         hours_set = set((getattr(b, "target_time", None) or "18:00")[:5] for b in existing_bets)
         if hhmm not in hours_set and len(hours_set) >= 3:
             listed = ", ".join(sorted(hours_set))
@@ -5891,7 +5933,6 @@ def ppp(station_id=None):
             station_id=scope_station_id,
             funded_from_balance=1,
         )
-        # colonnes optionnelles
         try:
             setattr(bet, "target_time", hhmm)
         except Exception:
@@ -5913,10 +5954,8 @@ def ppp(station_id=None):
             """),
             {"base": 500.0, "amt": float(amount), "uid": int(current_user.id)},
         )
-
         db.session.commit()
 
-        # Réponse AJAX (utilisée par ton submit JS)
         if wants_json:
             try:
                 new_pts = remaining_points(current_user)
@@ -5930,24 +5969,20 @@ def ppp(station_id=None):
             })
 
         flash(f"Mise enregistrée pour le {target.isoformat()} à {hhmm} — {choice.replace('_',' ')} à x{odds:.1f}.")
-        return redirect(url_for('you_bet', back=_ppp_url()))
+        return redirect(url_for('you_bet', back=_ppp_url(scope_station_id)))
 
     # ------------------ GET: afficher la page ------------------
     from datetime import timedelta
 
     solde_str = format_points_fr(remaining_points(current_user))
 
-    def build_context_for_station(station_id_or_none):
-        """Construit (city_label, station_id, bets_map, boosts_map) pour une station."""
-        if station_id_or_none:
-            S = station_by_id(station_id_or_none)
-            if not S:
-                return None
-            city_label = f"{S['city']}, France"
-            scope_station_id = S["id"]
-        else:
-            city_label = "Paris, France"
-            scope_station_id = None
+    def build_context_for_station(S: dict, idx: int):
+        """
+        Construit un contexte calendrier pour une station.
+        Retourne dict: {gridId, city_label, station_id, bets_map, boosts_map}
+        """
+        city_label = S["city_label"]
+        scope_station_id = S["id"] or None
 
         # borne temps (inclure J-3 même si status != ACTIVE)
         today = today_paris_date()
@@ -5964,7 +5999,7 @@ def ppp(station_id=None):
             rows_future_q = rows_future_q.filter(PPPBet.locked_for_trade == False)
         rows_future = rows_future_q.all()
 
-        # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (pour afficher verdict)
+        # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (verdict)
         rows_past = (
             PPPBet.query
             .filter(
@@ -5976,36 +6011,39 @@ def ppp(station_id=None):
             .all()
         )
 
-        # Fusion triée (date + id)
         rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, r.id))
 
         bets_map: dict[str, dict] = {}
         for r in rows:
             key = r.bet_date.isoformat()
             entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
+
             entry["amount"] += float(r.amount or 0.0)
             if r.choice:
                 entry["choice"] = r.choice
+
             try:
                 when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
             except Exception:
                 when_iso = key + "T00:00:00"
+
             v = (getattr(r, "verdict", None) or getattr(r, "result", None))
             if not v:
                 try:
                     outcome = (getattr(r, "outcome", None) or "").upper()
-                    choice_u  = (getattr(r, "choice",  None) or "").upper()
+                    choice_u = (getattr(r, "choice", None) or "").upper()
                     if outcome and choice_u:
                         v = "WIN" if outcome == choice_u else "LOSE"
                 except Exception:
                     v = None
+
             bet_dict = {
                 "when": when_iso,
                 "amount": float(r.amount or 0.0),
                 "odds": float(r.odds or 1.0),
                 "target_time": getattr(r, "target_time", None) or "18:00",
                 "verdict": v,
-                "result": v,
+                "result": v,  # compat
                 "outcome": getattr(r, "outcome", None),
                 "observed_mm": (
                     float(getattr(r, "observed_mm", 0.0))
@@ -6014,6 +6052,8 @@ def ppp(station_id=None):
                 ),
             }
             entry["bets"].append(bet_dict)
+
+            # verdict agrégé du jour (priorité LOSE)
             results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
             if "LOSE" in results_upper:
                 entry["verdict"] = "LOSE"
@@ -6021,6 +6061,7 @@ def ppp(station_id=None):
                 entry["verdict"] = "WIN"
             else:
                 entry["verdict"] = None
+
             bets_map[key] = entry
 
         # Boosts groupés par jour
@@ -6041,28 +6082,25 @@ def ppp(station_id=None):
             boosts_map[key] = float(total or 0.0)
 
         return {
+            "gridId": f"pppGrid-{idx}",
             "city_label": city_label,
             "station_id": scope_station_id,
             "bets_map": bets_map,
             "boosts_map": boosts_map,
         }
 
-    # 1) Paris en premier
-    calendars = []
-    ctx_paris = build_context_for_station(None)
-    if ctx_paris:
-        calendars.append(ctx_paris)
-    # 2) Stations suivies par l’utilisateur
-    for sid in user_station_ids(current_user):
-        ctx = build_context_for_station(sid)
+    # Construit tous les calendriers: Paris + stations suivies
+    cals = []
+    for i, S in enumerate(stations):
+        ctx = build_context_for_station(S, i)
         if ctx:
-            calendars.append(ctx)
+            cals.append(ctx)
 
     return render_template_string(
-        PPP_HTML.replace("Zeus", "Zeus"),
+        PPP_HTML.replace("Zeus", page_title),
         css=BASE_CSS,
         solde_str=solde_str,
-        calendars=calendars
+        cals=cals  # utilisé par le script: window.__PPP_CALS__
     )
 
 @app.route("/api/chat/unread_count")
