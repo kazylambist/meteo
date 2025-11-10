@@ -2747,7 +2747,17 @@ PPP_HTML = """
   .ppp-city{ 
     text-align:center;
     margin: 4px 0 8px;
-  }  
+  }
+  /* Liste de calendriers PPP avec un vrai gap uniforme */
+  .ppp-list{
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  /* Carte de calendrier */
+  .ppp-card-wrap{
+    padding: 12px 12px 16px;
+  }
   .ppp-bet-flash {
     animation: pppBetFlash 3.2s ease-out forwards;
     box-shadow: 0 0 14px rgba(255, 220, 60, 0.45); /* halo doux */
@@ -2883,8 +2893,11 @@ PPP_HTML = """
   {% if not cals %}
     <div class="muted">Aucune station à afficher.</div>
   {% endif %}
+  <div class="ppp-list">
   {% for cal in cals %}
-    <div class="card ppp-card-wrap" data-station-id="{{ cal.station_id or '' }}" style="margin-bottom:14px;">
+    <section class="card ppp-card-wrap"
+             data-station-id="{{ cal.station_id or '' }}"
+             data-ppp-scope="{{ cal.station_id or '' }}">
       <h2 class="ppp-city" style="text-align:center;margin:0 0 8px;">
         {{ cal.city_label }}
       </h2>
@@ -2902,8 +2915,9 @@ PPP_HTML = """
           boosts_map: {{ cal.boosts_map | tojson }}
         });
       </script>
-    </div>
+    </section>      
   {% endfor %}
+  </div>  
 </div>
 
 <!-- modal -->
@@ -2975,8 +2989,98 @@ PPP_HTML = """
 
 <script>
 
+// Contexte actif partagé par tous les calendriers
+const PPP_ACTIVE = { grid:null, ctx:null, lastCell:null };
+
+// Handler unique pour le formulaire
+(function attachPPPSubmitHandlerOnce(){
+  const form = document.getElementById('pppForm');
+  if (!form || form.__pppBound) return;
+  form.__pppBound = true;
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const grid = PPP_ACTIVE.grid;
+    if (!grid) return; // aucun calendrier ciblé
+    const modal      = document.getElementById('pppModal');
+    const mDateInput = document.getElementById('mDateInput');
+    const mTimeHidden= document.getElementById('mTargetDt');
+    const mOddsEl    = document.getElementById('mOdds');
+    const hasDate = !!(mDateInput && mDateInput.value);
+    if (!hasDate) { alert("Cliquez d'abord sur un jour."); return; }
+    const hourSel = document.getElementById('mHour');
+    const hhmm = (hourSel && hourSel.value) ? hourSel.value.slice(0,5) : '18:00';
+    if (mTimeHidden) mTimeHidden.value = `${mDateInput.value}T${hhmm}`;
+    const fd = new FormData(form);
+    const headers = { 'Accept':'application/json', 'X-Requested-With':'XMLHttpRequest' };
+    const key = mDateInput.value;
+    const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || PPP_ACTIVE.lastCell);
+    const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase();
+    // feedback immédiat
+    try{ const a=document.getElementById('pppYogaAudio'); if(a){a.currentTime=0;a.play().catch(()=>{});} }catch(_){}
+    if (modal) modal.classList.remove('open');
+    if (cell) flashPPPcell(cell);
+    // icône locale précoce
+    try {
+      if (cell) {
+        let stakeWrap = cell.querySelector('.stake-wrap');
+        const hasIcon = !!(stakeWrap && (stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️')));
+        if (!hasIcon) {
+          const iconHtml = (choiceVal === 'PLUIE')
+            ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
+            : `☀️`;
+          if (!stakeWrap) {
+            stakeWrap = document.createElement('div');
+            stakeWrap.className = 'stake-wrap';
+            stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+0</div>`;
+            cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
+          } else {
+            stakeWrap.insertAdjacentHTML('afterbegin', iconHtml);
+          }
+        }
+      }
+    } catch(_) {}
+    // POST serveur
+    let payload=null;
+    const resp = await fetch(form.action || '/ppp/bet', { method:'POST', body:fd, credentials:'same-origin', headers });
+    if (!resp.ok) {
+      let errMsg='La mise a été refusée.'; try{ const j=await resp.clone().json(); if(j&&(j.message||j.error)) errMsg=j.message||j.error; }catch(_){}
+      alert(errMsg); return;
+    }
+    try{ payload = await resp.clone().json(); }catch(_){}
+    // MAJ UI locale dans **la grille active uniquement**
+    try {
+      const amountInput = form.querySelector('[name="amount"]');
+      const delta = parseFloat(String(amountInput?.value||'0').replace(',','.')) || 0;
+      if (delta>0 && cell){
+        let stakeWrap = cell.querySelector('.stake-wrap');
+        if (!stakeWrap){
+          const iconHtml = (choiceVal==='PLUIE')
+            ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
+            : `☀️`;
+          stakeWrap = document.createElement('div');
+          stakeWrap.className = 'stake-wrap';
+          stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+${fmtPts(delta)}</div>`;
+          cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
+        } else {
+          const amtEl = stakeWrap.querySelector('.stake-amt');
+          const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
+          if (amtEl) amtEl.textContent = '+' + fmtPts(cur + delta);
+        }
+      }
+    } catch(_) {}
+    // MAJ solde
+    try {
+      if (payload && typeof payload.new_points !== 'undefined') {
+        if (window.updateTopbarSolde) window.updateTopbarSolde(payload.new_points);
+        else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
+      } else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
+    } catch(_) {}
+  });
+})();
+
 function initPPPCalendar(ctx){
   let lastClickedCell = null;
+}
   
   function fmtPts(x){
     // arrondi à 1 décimale, puis supprime la décimale inutile (,0)
@@ -3375,6 +3479,10 @@ function initPPPCalendar(ctx){
 
     // Clic → modal (jours passés consultables, futur misable selon règles)
     el.addEventListener('click', () => {
+      // fixe le contexte actif pour le handler global
+      PPP_ACTIVE.grid = grid;
+      PPP_ACTIVE.ctx = ctx;
+      PPP_ACTIVE.lastCell = el;
       lastClickedCell = el;
       const hasBetNow = hasBetFor(key);
       const isPast = (delta < 0);
@@ -3415,7 +3523,7 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdx = Math.max(0, Math.min(31, Number((document.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
+          const baseIdx = Math.max(0, Math.min(31, Number((grid.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
           const baseOdds = ODDS_SAFE[baseIdx];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
@@ -3569,7 +3677,7 @@ function initPPPCalendar(ctx){
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
-    const cell = document.querySelector(`.ppp-day[data-key="${todayKey}"]`);
+    const cell = grid.querySelector(`.ppp-day[data-key="${todayKey}"]`);
     if (!cell) return;
 
     const wrap = ensureForecastWrap(cell);
@@ -3611,7 +3719,7 @@ function initPPPCalendar(ctx){
       for (const f of data.forecast5) {
         const dt = new Date(f.date + 'T00:00:00');
         if (dt < today || dt > limitEnd) continue;
-        const cell = document.querySelector(`.ppp-day[data-key="${f.date}"]`);
+        const cell = grid.querySelector(`.ppp-day[data-key="${f.date}"]`);
         if (!cell) continue;
         const wrap = ensureForecastWrap(cell);
         let isRain = false;
