@@ -2665,7 +2665,7 @@ AUTH_HTML = """
 PPP_HTML = """
 <!doctype html><html lang='fr'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
-<link rel="preload" as="image" href="/static/trade/bg.jpg">
+<link rel="preload" as="image" href="/static/trade/fondbleu.jpg">
 <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2" type="image/x-icon">
 <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=2">
 <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=2">
@@ -2757,6 +2757,7 @@ PPP_HTML = """
   /* Carte de calendrier */
   .ppp-card-wrap{
     padding: 12px 12px 16px;
+    margin-bottom:18px;
   }
   .ppp-bet-flash {
     animation: pppBetFlash 3.2s ease-out forwards;
@@ -2805,7 +2806,7 @@ PPP_HTML = """
     z-index:-2;
     background:
       linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.25)),
-      url("/static/trade/bg.jpg") center / cover no-repeat fixed;
+      url("/static/trade/fondbleu.jpg") center / cover no-repeat fixed;
   }
   body.trade-page::after{
   content:"";
@@ -3514,7 +3515,7 @@ function initPPPCalendar(ctx){
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
-    o.textContent = o.textContent.replace(/^[⚡\s]+/g, '').replace(/^x?/, 'x');
+    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
   });
 
   // Réconciliation des jours passés
@@ -5274,7 +5275,37 @@ def _first_observation_after(station_id: str | None, utc_from_iso: str):
     return None
 
 
-# --- résolution + crédit ---
+# --- PPP: alias de stations (fallback obs) ---
+PPP_STATION_ALIAS = {
+    "lfpg_75": "cdg_07157",
+    "lfpg_95": "cdg_07157",
+}
+
+def _ppp_source_ids(scope: str) -> list[str]:
+    """Retourne la liste d'IDs à interroger pour les obs (scope + alias)."""
+    s = (scope or "").strip()
+    alt = PPP_STATION_ALIAS.get(s)
+    ids = []
+    if s:   ids.append(s)
+    if alt: ids.append(alt)
+    # déduplique en gardant l'ordre
+    seen=set(); out=[]
+    for x in ids:
+        if x and x not in seen:
+            seen.add(x); out.append(x)
+    return out or (["cdg_07157"] if not s else [s])
+
+def _ppp_is_rain_from_humidity(values: list[float]) -> bool:
+    """
+    Heuristique conservative tant qu'on n'a pas rain_mm/code :
+    pluie si max(humidité) >= 90% dans la fenêtre considérée.
+    """
+    try:
+        return max(float(h) for h in values if h is not None) >= 90.0
+    except ValueError:
+        return False
+
+# --- résolution + crédit ---    
 
 def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     """
