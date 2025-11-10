@@ -1976,9 +1976,10 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 }
 .ppp-day{
   position:relative; padding:10px; border-radius:12px;
+  /* un cran plus sombre pour la lisibilité */
   background: color-mix(in oklab, var(--card-bg) 96%, #000 4%);
-  border:1px solid rgba(255,255,255,.12);
-  min-height:90px; cursor:pointer;
+  border:1px solid rgba(255,255,255,.14);
+  min-height:90px; cursor:pointer;  
 }
 .ppp-day.disabled{ cursor:not-allowed; opacity:.5; filter:grayscale(30%); }
 .ppp-day .date{ font-weight:700; }
