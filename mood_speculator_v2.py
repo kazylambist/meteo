@@ -1976,8 +1976,8 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 }
 .ppp-day{
   position:relative; padding:10px; border-radius:12px;
-  background: color-mix(in oklab, var(--card-bg) 88%, rgba(255,255,255,.0) 12%);
-  border:1px solid rgba(255,255,255,.10);
+  background: color-mix(in oklab, var(--card-bg) 96%, #000 4%);
+  border:1px solid rgba(255,255,255,.12);
   min-height:90px; cursor:pointer;
 }
 .ppp-day.disabled{ cursor:not-allowed; opacity:.5; filter:grayscale(30%); }
@@ -2756,7 +2756,7 @@ PPP_HTML = """
   /* Carte de calendrier */
   .ppp-card-wrap{
     padding: 12px 12px 16px;
-    margin-bottom:18px;
+    margin-bottom:30px;
   }
   .ppp-bet-flash {
     animation: pppBetFlash 3.2s ease-out forwards;
