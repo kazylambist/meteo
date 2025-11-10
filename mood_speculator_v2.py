@@ -2988,7 +2988,6 @@ PPP_HTML = """
 </div>
 
 <script>
-
 // Contexte actif partagé par tous les calendriers
 const PPP_ACTIVE = { grid:null, ctx:null, lastCell:null };
 
@@ -3080,22 +3079,20 @@ const PPP_ACTIVE = { grid:null, ctx:null, lastCell:null };
 
 function initPPPCalendar(ctx){
   let lastClickedCell = null;
-}
-  
+
   function fmtPts(x){
-    // arrondi à 1 décimale, puis supprime la décimale inutile (,0)
     const v = Math.round((Number(x) || 0) * 10) / 10;
     let s = v.toFixed(1).replace('.', ',');
-    return s.replace(/,0$/, '');  // 2,0 -> 2
+    return s.replace(/,0$/, '');
   }
   function normChoice(x){
     const s = String(x||'').trim().toUpperCase();
     if (s === 'PLUIE' || s === 'PAS_PLUIE') return s;
-    // tolérances éventuelles si des anciennes valeurs existent
     if (['RAIN','WET'].includes(s)) return 'PLUIE';
     if (['DRY','NO_RAIN','PASPLUIE','SUN'].includes(s)) return 'PAS_PLUIE';
     return '';
-  }  
+  }
+
   // --- Aujourd'hui (Europe/Paris) ---
   const now = new Date();
   const parisNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
@@ -3117,7 +3114,7 @@ function initPPPCalendar(ctx){
   const form       = document.getElementById('pppForm');
   const mTimeHidden = document.getElementById('mTargetDt');
 
-  // 🔓 Débloque l'audio au premier geste utilisateur (iOS/Safari)
+  // 🔓 Débloque l'audio au premier geste utilisateur
   (function unlockPPP_AudioOnce(){
     function unlock() {
       const a = document.getElementById('pppYogaAudio');
@@ -3142,7 +3139,7 @@ function initPPPCalendar(ctx){
   // Données serveur (par calendrier)
   const MY_BETS = ctx.bets_map || {};
   const BOOSTS  = ctx.boosts_map || {};
-  const qCity   = ctx.city_label;  
+  const qCity   = ctx.city_label;
 
   console.debug('[ppp] BOOSTS from server:', BOOSTS);
 
@@ -3179,40 +3176,25 @@ function initPPPCalendar(ctx){
   // Submit guard
   if (form) {
     form.addEventListener('submit', async function (e) {
-      e.preventDefault(); // ❌ on bloque la navigation vers YOUBET
+      e.preventDefault(); // ❌ garde ajax
 
       const hasDate = !!(mDateInput && mDateInput.value);
-      if (!hasDate) {
-        alert("Cliquez d'abord sur un jour du calendrier pour choisir la date.");
-        return;
-      }
+      if (!hasDate) { alert("Cliquez d'abord sur un jour du calendrier pour choisir la date."); return; }
 
-      // heure choisie (menu déroulant)
       const hourSel = document.getElementById('mHour');
       const hhmm = (hourSel && hourSel.value) ? hourSel.value.slice(0,5) : '18:00';
 
-      // alimente le champ caché "target_dt" (si tu l’utilises côté backend)
-      if (mTimeHidden) {
-        mTimeHidden.value = `${mDateInput.value}T${hhmm}`; // ex: 2025-11-15T18:00
-      }
+      if (mTimeHidden) mTimeHidden.value = `${mDateInput.value}T${hhmm}`;
 
-      // Prépare la payload depuis le formulaire
       const fd = new FormData(form);
-      // Important: signale bien une requête AJAX au backend
-      const headers = {
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      };
+      const headers = { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
 
-      // On cible la case à flasher (soit la sélection courante, soit la dernière cliquée)
       const key = mDateInput.value;
       const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || lastClickedCell);
 
-      // --- CONTRAINTES AVANT ENVOI ---
-      const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase(); // 'PLUIE'|'PAS_PLUIE'
+      const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase();
       const dayInfo = (MY_BETS && MY_BETS[key]) ? (MY_BETS[key].bets || []) : [];
 
-      // 2.a Interdiction d'un choix opposé au même horaire
       const opposite = (c)=> (c === 'PLUIE' ? 'PAS_PLUIE' : 'PLUIE');
       const conflict = dayInfo.some(b => {
         const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
@@ -3224,7 +3206,6 @@ function initPPPCalendar(ctx){
         return;
       }
 
-      // 3) Max 3 créneaux distincts par jour
       const uniqueHours = new Set(dayInfo.map(b => String(b.target_time || b.time || '18:00').slice(0,5)));
       if (!uniqueHours.has(hhmm) && uniqueHours.size >= 3) {
         const list = Array.from(uniqueHours).sort().join(', ');
@@ -3232,24 +3213,17 @@ function initPPPCalendar(ctx){
         return;
       }
 
-      // ✅ Feedback immédiat (avant le réseau): son + flash + icône si absente
-      try {
-        const audio = document.getElementById('pppYogaAudio');
-        if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
-      } catch(_) {}
+      try { const audio = document.getElementById('pppYogaAudio'); if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); } } catch(_) {}
 
       if (modal) modal.classList.remove('open');
       flashPPPcell(cell);
 
-      // Assure l’icône ⛅/💧 visible tout de suite (sans modifier le montant pour éviter un faux-positif si erreur)
       try {
         if (cell) {
           let stakeWrap = cell.querySelector('.stake-wrap');
           const hasIcon = !!(stakeWrap && (stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️')));
           if (!hasIcon) {
-            const iconHtml = (choiceVal === 'PLUIE')
-              ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
-              : `☀️`;
+            const iconHtml = (choiceVal === 'PLUIE') ? svgDrop : `☀️`;
             if (!stakeWrap) {
               stakeWrap = document.createElement('div');
               stakeWrap.className = 'stake-wrap';
@@ -3263,29 +3237,17 @@ function initPPPCalendar(ctx){
       } catch(_) {}
 
       try {
-        const resp = await fetch(form.action || '/ppp/bet', {
-          method: 'POST',
-          body: fd,
-          credentials: 'same-origin',
-          headers
-        });
-
-        // Si le serveur refuse (garde-fous backend), on affiche le message et on s'arrête
+        const resp = await fetch(form.action || '/ppp/bet', { method:'POST', body:fd, credentials:'same-origin', headers });
         if (!resp.ok) {
           let errMsg = 'La mise a été refusée.';
-          try {
-            const j = await resp.clone().json();
-            if (j && (j.message || j.error)) errMsg = j.message || j.error;
-          } catch(_) {}
+          try { const j = await resp.clone().json(); if (j && (j.message||j.error)) errMsg = j.message||j.error; } catch(_){}
           alert(errMsg);
           return;
         }
 
-        // JSON éventuel (nouveau solde, etc.)
         let payload = null;
-        try { payload = await resp.clone().json(); } catch (_) { /* HTML fallback */ }
+        try { payload = await resp.clone().json(); } catch (_){}
 
-        // 🔁 MAJ UI : montant cumulé dans la cellule
         try {
           const amountInput = form.querySelector('[name="amount"]');
           if (amountInput && cell) {
@@ -3293,15 +3255,10 @@ function initPPPCalendar(ctx){
             if (delta > 0) {
               let stakeWrap = cell.querySelector('.stake-wrap');
               if (!stakeWrap) {
-                const iconHtml = (choiceVal === 'PLUIE')
-                  ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
-                  : `☀️`;
+                const iconHtml = (choiceVal === 'PLUIE') ? svgDrop : `☀️`;
                 stakeWrap = document.createElement('div');
                 stakeWrap.className = 'stake-wrap';
-                stakeWrap.innerHTML = `
-                  ${iconHtml}
-                  <div class="stake-amt">+${fmtPts(delta)}</div>
-                `;
+                stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+${fmtPts(delta)}</div>`;
                 cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
               } else {
                 const amtEl = stakeWrap.querySelector('.stake-amt');
@@ -3312,7 +3269,6 @@ function initPPPCalendar(ctx){
           }
         } catch(_) {}
 
-        // 🔁 MAJ STATE : on enregistre/fusionne la mise localement (pour le modal/historique)
         try {
           const amountInput = form.querySelector('[name="amount"]');
           const delta = parseFloat(String(amountInput?.value || '0').replace(',', '.')) || 0;
@@ -3324,7 +3280,6 @@ function initPPPCalendar(ctx){
           if (!MY_BETS[key]) MY_BETS[key] = { bets: [], amount: 0, choice: choiceVal2 };
           const list = Array.isArray(MY_BETS[key].bets) ? MY_BETS[key].bets : (MY_BETS[key].bets = []);
 
-          // cherche une ligne identique (hhmm, choice, cote ≈ 1 décimale)
           let merged = false;
           for (const b of list) {
             const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
@@ -3337,25 +3292,16 @@ function initPPPCalendar(ctx){
             }
           }
           if (!merged) {
-            list.push({
-              amount: delta,
-              target_time: hhmmNow,
-              choice: choiceVal2,
-              odds: odd1,
-              when: new Date().toISOString()
-            });
+            list.push({ amount: delta, target_time: hhmmNow, choice: choiceVal2, odds: odd1, when: new Date().toISOString() });
           }
           MY_BETS[key].amount = (Number(MY_BETS[key].amount)||0) + delta;
         } catch(_) {}
 
-        // 🔁 MAJ solde topbar si le backend renvoie new_points
         try {
           if (payload && typeof payload.new_points !== 'undefined') {
-            if (window.updateTopbarSolde) {
-              window.updateTopbarSolde(payload.new_points);
-            } else if (window.refreshTopbarSolde) {
-              window.refreshTopbarSolde();
-            } else {
+            if (window.updateTopbarSolde) window.updateTopbarSolde(payload.new_points);
+            else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
+            else {
               const soldeEl = document.querySelector('#solde-points, .solde-points');
               if (soldeEl) soldeEl.textContent = Number(payload.new_points).toFixed(1).replace('.', ',');
             }
@@ -3366,13 +3312,12 @@ function initPPPCalendar(ctx){
 
       } catch (e2) {
         console.error('[ppp] submit bet error:', e2);
-        // 🔁 Fallback : si l’AJAX échoue, on tente le submit normal
         form.removeEventListener('submit', arguments.callee);
         form.submit();
       }
     });
   }
-  
+
   // Normalisation ODDS/BOOSTS
   const ODDS_SAFE = Array.from({ length: 32 }, (_, i) => {
     const v = (ODDS && Object.prototype.hasOwnProperty.call(ODDS, i)) ? Number(ODDS[i]) : NaN;
@@ -3381,32 +3326,29 @@ function initPPPCalendar(ctx){
   const BOOSTS_SAFE = (BOOSTS && typeof BOOSTS === 'object') ? BOOSTS : {};
 
   // --- Grille de 31 jours (démarre à J-3) ---
-  const START_SHIFT = -3; // ← on commence 3 jours avant aujourd’hui
+  const START_SHIFT = -3;
   const TOTAL_DAYS  = 34;
 
   for (let i = 0; i <= TOTAL_DAYS; i++) {
-    const delta = i + START_SHIFT;         // -3 … +31 vs today (34 inclus → +31)
+    const delta = i + START_SHIFT;
     const d     = addDaysLocal(today, delta);
     const key   = ymdParis(d);
 
     const el = document.createElement('div');
     el.className = 'ppp-day' + (delta === 0 ? ' today' : '');
     el.setAttribute('data-key', key);
-    el.setAttribute('data-idx', String(delta)); // idx relatif à aujourd’hui (peut être négatif)
+    el.setAttribute('data-idx', String(delta));
 
     const betInfo = (MY_BETS && MY_BETS[key]) ? MY_BETS[key] : null;
     const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
     const choice  = betInfo ? betInfo.choice : null;
 
-    // ----- Calcul du verdict (priorité LOSE s'il y a plusieurs mises) -----
     function computeVerdict(info){
       if (!info) return null;
       const norm = (v) => String(v || '').trim().toUpperCase();
-      // 1) champ agrégé éventuel côté backend
       const agg = norm(info.verdict) || norm(info.result) || norm(info.status);
       if (agg === 'LOSE' || agg === 'LOST') return 'LOSE';
       if (agg === 'WIN'  || agg === 'WON')  return 'WIN';
-      // 2) détail des mises
       const arr = Array.isArray(info.bets) ? info.bets : [];
       const results = arr.map(b => norm(b.verdict) || norm(b.result) || norm(b.status)).filter(Boolean);
       if (results.includes('LOSE') || results.includes('LOST')) return 'LOSE';
@@ -3414,42 +3356,31 @@ function initPPPCalendar(ctx){
       return null;
     }
     let verdict = computeVerdict(betInfo);
-    // Garde-fou: si on est aujourd’hui, on ne colore pas avant la dernière heure pariée
+
     if (delta === 0 && verdict && betInfo && Array.isArray(betInfo.bets)) {
-      const lastHHMM = betInfo.bets
-        .map(b => String(b.target_time || b.time || '18:00').slice(0,5))
-        .sort().at(-1) || '18:00';
+      const lastHHMM = betInfo.bets.map(b => String(b.target_time || b.time || '18:00').slice(0,5)).sort().at(-1) || '18:00';
       const [lh, lm] = lastHHMM.split(':').map(x=>parseInt(x,10));
       const nowParis = new Date(new Date().toLocaleString('en-US', { timeZone:'Europe/Paris' }));
       const afterLast = nowParis.getHours() > lh || (nowParis.getHours() === lh && nowParis.getMinutes() >= lm);
-      if (!afterLast) verdict = null; // suspend l’affichage win/lose tant que l’heure n’est pas atteinte
+      if (!afterLast) verdict = null;
     }
-  
-    // Expose au DOM pour debug/styling
-    el.dataset.verdict = verdict || '';    
 
-    // --- Jours passés : affichage clair (win / lose / pending) ---
+    el.dataset.verdict = verdict || '';
+
     if (delta < 0) {
       const hasBet = hasBetFor(key);
-      el.classList.remove('is-past','past-pending','win','lose'); // reset propre
-      if (!hasBet) {
-        el.classList.add('is-past');
-      } else if (verdict === 'LOSE') {
-        el.classList.add('lose');
-      } else if (verdict === 'WIN') {
-        el.classList.add('win');
-      } else {
-        el.classList.add('past-pending'); // pari existant, verdict non résolu
-      }
+      el.classList.remove('is-past','past-pending','win','lose');
+      if (!hasBet) el.classList.add('is-past');
+      else if (verdict === 'LOSE') el.classList.add('lose');
+      else if (verdict === 'WIN')  el.classList.add('win');
+      else el.classList.add('past-pending');
     }
 
-    // --- Aujourd’hui : conserver today-win / today-loss ---
     if (delta === 0 && verdict) {
-      if (verdict === 'LOSE') el.classList.add('today-loss'); // ❌
-      if (verdict === 'WIN')  el.classList.add('today-win');  // ✅
+      if (verdict === 'LOSE') el.classList.add('today-loss');
+      if (verdict === 'WIN')  el.classList.add('today-win');
     }
 
-    // Interdiction de mise : J+0..J+3 si aucune mise
     if (delta <= 3 && delta >= 0 && !hasBetFor(key)) {
       el.classList.add('disabled');
     }
@@ -3471,15 +3402,13 @@ function initPPPCalendar(ctx){
     `;
 
     const oddsEl   = el.querySelector('.odds');
-    // Les cotes client sont définies pour des deltas >= 0 → clamp sur [0..30]
     const baseIdx  = Math.max(0, Math.min(31, delta));
     const baseOdds = ODDS_SAFE[baseIdx];
     const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key])) ? Number(BOOSTS_SAFE[key]) : 0;
     renderOdds(oddsEl, baseOdds, boostForDay);
 
-    // Clic → modal (jours passés consultables, futur misable selon règles)
+    // Clic → modal
     el.addEventListener('click', () => {
-      // fixe le contexte actif pour le handler global
       PPP_ACTIVE.grid = grid;
       PPP_ACTIVE.ctx = ctx;
       PPP_ACTIVE.lastCell = el;
@@ -3491,16 +3420,11 @@ function initPPPCalendar(ctx){
       const oddsWrap  = document.getElementById('mOddsWrap');
       const histWrap  = document.getElementById('mHistory');
 
-      // Titre
       if (titleEl) {
-        if (isPast || (delta <= 3 && hasBetNow)) {
-          titleEl.textContent = fr(d);
-        } else {
-          titleEl.textContent = "Miser sur " + fr(d);
-        }
+        if (isPast || (delta <= 3 && hasBetNow)) titleEl.textContent = fr(d);
+        else titleEl.textContent = "Miser sur " + fr(d);
       }
 
-      // Cote (utile seulement si le formulaire est visible)
       let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
       const txt = (oddsEl.textContent || '').trim();
       if (txt) {
@@ -3508,13 +3432,10 @@ function initPPPCalendar(ctx){
         if (!isNaN(num)) shownOdds = num;
       }
 
-      // Historique (lecture seule + verdict/pluie) — AVEC AGRÉGATION
       if (histWrap) {
         histWrap.innerHTML = '';
         if (hasBetNow) {
           const list = (betInfo && Array.isArray(betInfo.bets)) ? betInfo.bets : [];
-
-          // On calcule aussi un initialOdds de secours (comme avant)
           const totalAmount = Math.round(list.reduce((acc, b) => acc + (Number(b.amount) || 0), 0) * 100) / 100;
           let weightedSum = 0;
           for (const b of list) {
@@ -3532,15 +3453,13 @@ function initPPPCalendar(ctx){
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
 
-          // 👉 GROUPE par (heure, choix, cote arrondie à 1 décimale)
           const groups = new Map(); // key: "HH:MM|CHOICE|ODD1D"
           for (const b of list) {
             const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
-            // normalise; repli sur le choix global du jour si la mise n’a pas de champ propre
             const choice = normChoice(b.choice) || normChoice(betInfo && betInfo.choice) || 'PLUIE';
             const o = Number(b.odds);
             const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
-            const odd1 = Math.round(usedOdd * 10) / 10; // 1 décimale comme l’affichage
+            const odd1 = Math.round(usedOdd * 10) / 10;
 
             const k = `${hhmm}|${choice}|${odd1}`;
             const cur = groups.get(k) || { amount: 0, hhmm, choice, odd1 };
@@ -3548,19 +3467,15 @@ function initPPPCalendar(ctx){
             groups.set(k, cur);
           }
 
-          // Affichage lignes
           const lines = [];
-          // tri par heure (HH:MM) pour un rendu stable
           const sorted = Array.from(groups.values()).sort((a,b)=> a.hhmm.localeCompare(b.hhmm));
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
             const icon = g.choice === 'PLUIE' ? '💧' : '☀️';
             lines.push(`Mises ${icon} ${g.hhmm} — ${fmtPts(g.amount)} pts — (x${oddTxt})`);
           }
-
           if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
 
-          // Gain potentiel : on repart de la somme pondérée + boosts (comme avant)
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
           lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
 
@@ -3572,30 +3487,23 @@ function initPPPCalendar(ctx){
         }
       }
 
-      // Affichage du formulaire : masqué pour jours passés, masqué pour J+0..J+3 (s'il n'y a pas déjà une mise)
       const showForm = !isPast && !(delta <= 3 && !hasBetNow);
-
       if (form) form.style.display = showForm ? 'block' : 'none';
       if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
-      if (showForm && mOddsEl) {
-        mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
-      }
+      if (showForm && mOddsEl) mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
 
-      // Préremplir date & heure si on peut miser
       if (showForm) {
         if (mDateInput) mDateInput.value = key;
-
         const hourSel = document.getElementById('mHour');
         if (hourSel) {
           const existing = (betInfo && (betInfo.target_time || (betInfo.bets?.[0]?.target_time))) || '';
           hourSel.value = existing || '18:00';
         }
-        if (mTimeHidden) mTimeHidden.value = ''; // nettoie le champ caché
+        if (mTimeHidden) mTimeHidden.value = '';
       }
-      
-      // renseigne la station de la modale depuis le calendrier courant
+
       const hidSid = document.getElementById('mStationId');
-      if (hidSid) hidSid.value = ctx.station_id || '';      
+      if (hidSid) hidSid.value = ctx.station_id || '';
 
       if (modal) modal.classList.add('open');
     });
@@ -3606,18 +3514,18 @@ function initPPPCalendar(ctx){
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
-    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
+    o.textContent = o.textContent.replace(/^[⚡\s]+/g, '').replace(/^x?/, 'x');
   });
 
-    // Réconciliation des jours passés: supprime les pointillés si un verdict existe
+  // Réconciliation des jours passés
   (function reconcilePastCells(){
     const cells = document.querySelectorAll('.ppp-day');
     const now = new Date();
     const parisNow = new Date(now.toLocaleString('en-US', { timeZone:'Europe/Paris' }));
-    const todayKey = ymdParis(parisNow); // même fabriquant de clé que pour les cellules
+    const todayKey = ymdParis(parisNow);
     for (const el of cells) {
       const key = el.getAttribute('data-key') || '';
-      if (!key || key >= todayKey) continue; // seulement passé
+      if (!key || key >= todayKey) continue;
       const v = String(el.dataset.verdict || '').toUpperCase();
       if (v === 'WIN' || v === 'LOSE') {
         el.classList.remove('past-pending','is-past');
@@ -3638,35 +3546,28 @@ function initPPPCalendar(ctx){
     return wrap;
   }
 
-  // 🔶 Effet visuel de mise : flash jaune
+  // 🔶 Effet visuel de mise
   function flashPPPcell(cell){
     if (!cell) return;
-    cell.classList.add('ppp-bet-flash');   // ← passe en jaune
-    setTimeout(() => {
-      cell.classList.remove('ppp-bet-flash'); // ← laisse le CSS gérer le fondu 2s
-    }, 3200); // plein + transition background-color
+    cell.classList.add('ppp-bet-flash');
+    setTimeout(() => { cell.classList.remove('ppp-bet-flash'); }, 3200);
   }
-  
+
   function addDaysLocal(d, n){
     const x = new Date(d.getTime());
-    x.setDate(x.getDate() + n); // gère DST correctement
+    x.setDate(x.getDate() + n);
     return x;
   }
   function ymdParis(d){
-    // fabrique la clé YYYY-MM-DD en “Europe/Paris”
     const y = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', year:'numeric' });
     const m = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', month:'2-digit' });
     const day = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', day:'2-digit' });
     return `${y}-${m}-${day}`;
   }
   function frParis(d){
-    return d.toLocaleDateString('fr-FR', {
-      timeZone:'Europe/Paris',
-      weekday:'short', day:'2-digit', month:'short'
-    });
+    return d.toLocaleDateString('fr-FR', { timeZone:'Europe/Paris', weekday:'short', day:'2-digit', month:'short' });
   }
   function clampTimeToHour(hhmm){
-    // Normalise "18" -> "18:00", "18:7" -> "18:07"
     const s = String(hhmm || '').trim();
     if (!s) return '18:00';
     const parts = s.split(':');
@@ -3686,8 +3587,6 @@ function initPPPCalendar(ctx){
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
-
-        // Détermine pluie/pas pluie (même logique que chez toi)
         let isRain = false;
         if (data.pop != null) {
           let pop = Number(data.pop); if (pop > 1) pop /= 100;
@@ -3695,15 +3594,7 @@ function initPPPCalendar(ctx){
         } else {
           isRain = (Number(data.rain_hours) >= 4) || (Number(data.code) >= 60);
         }
-
-        // Icône
         wrap.innerHTML = isRain ? svgDrop : svgSun;
-
-        // Pari du jour ?
-        const betInfo = (MY_BETS && MY_BETS[todayKey]) ? MY_BETS[todayKey] : null;
-        const hasBet  = (typeof hasBetFor === 'function') ? hasBetFor(todayKey) : !!betInfo;
-
-        // Couleur du liseré (win/lose) — logique "du jour" (conserve ton existant)
         cell.classList.remove('today-win','today-loss');
       })
       .catch(()=>{});
@@ -3747,6 +3638,7 @@ function initPPPCalendar(ctx){
       if (e.target === modal) modal.classList.remove('open');
     });
   }
+
   // --- Gestion du stock d'éclairs ---
   function setBoltCount(n){
     const bolt = document.getElementById('boltTool');
@@ -3782,13 +3674,13 @@ function initPPPCalendar(ctx){
         ev.dataTransfer.setData('text/plain', 'bolt');
         ev.dataTransfer.effectAllowed = 'copy';
       } catch (e) { /* no-op */ }
-    });    
+    });
   }
 
   // --- Utilitaire: cible -> cellule robuste ---
   function cellFromEvent(ev){
     let t = ev.target;
-    if (t && t.nodeType === 3) t = t.parentElement; // Text -> Element
+    if (t && t.nodeType === 3) t = t.parentElement;
     if (!(t instanceof Element)) return null;
     const cell = t.closest('.ppp-day');
     return (cell && grid.contains(cell)) ? cell : null;
@@ -3807,7 +3699,7 @@ function initPPPCalendar(ctx){
   grid.addEventListener('dragover', (ev) => {
     const cell = cellFromEvent(ev);
     if (!cell) return;
-    ev.preventDefault(); // indispensable
+    ev.preventDefault();
     const ok = hasBetFor(cell.dataset.key);
     try { ev.dataTransfer.dropEffect = ok ? 'copy' : 'none'; } catch (_) {}
   });
@@ -3850,18 +3742,11 @@ function initPPPCalendar(ctx){
         })
       });
 
-      // Même si le serveur ne met pas ok:true, on essaie quand même d'extraire une valeur
       let total = 0;
       try {
         const json = await resp.json();
-        // Met à jour le stock d'éclairs si fourni par le backend
-        if (json && typeof json.bolts_left !== 'undefined') {
-          setBoltCount(json.bolts_left);
-        }
-        // Liste de clés possibles renvoyées par l'API
-        const candidates = [
-          'total','new_total','boost_total','total_boost','boost','value','newTotal','cumul'
-        ];
+        if (json && typeof json.bolts_left !== 'undefined') setBoltCount(json.bolts_left);
+        const candidates = ['total','new_total','boost_total','total_boost','boost','value','newTotal','cumul'];
         for (const k of candidates) {
           if (json && json[k] != null) {
             const v = (typeof json[k] === 'string') ? parseFloat(String(json[k]).replace(',', '.')) : Number(json[k]);
@@ -3873,16 +3758,14 @@ function initPPPCalendar(ctx){
         console.warn('[ppp] boost: réponse non-JSON ou vide, fallback +5', e);
       }
 
-      // Filet de sécurité : si on n'a rien pu lire, on incrémente localement de +5
       if (!Number.isFinite(total) || total <= 0) {
         const prev = Number(BOOSTS_SAFE[key] || 0);
         total = prev + 5;
       }
 
-      BOOSTS_SAFE[key] = total;           // MAJ locale
+      BOOSTS_SAFE[key] = total;
       renderOdds(oddsEl, baseOdds, total);
 
-      // 🔊 Joue le son de boost (déclenché par un geste utilisateur: drag/drop)
       try {
         const boostAudio = document.getElementById('pppBoostAudio');
         if (boostAudio) { boostAudio.currentTime = 0; boostAudio.play().catch(()=>{}); }
@@ -3891,10 +3774,12 @@ function initPPPCalendar(ctx){
       console.error('[ppp] boost error:', e);
     }
   });
-}
-// Bootstrap: lance pour chaque calendrier collecté
+} // ← fin de initPPPCalendar(ctx)
+
+// Bootstrap: lance pour chaque calendrier collecté, encapsulé
 (function(){
-  const cals = window.__PPP_CALS__ || [];
+  const cals = Array.isArray(window.__PPP_CALS__) ? window.__PPP_CALS__ : [];
+  if (!cals.length) return;
   for (const ctx of cals) initPPPCalendar(ctx);
 })();
 
@@ -3907,7 +3792,6 @@ function initPPPCalendar(ctx){
   function closeMenu(){
     dd.classList.remove('open');
     btn.setAttribute('aria-expanded','false');
-    // ferme aussi le sous-menu Options s'il est ouvert
     const optionsMenu = document.getElementById('optionsMenu');
     if (optionsMenu) optionsMenu.setAttribute('hidden','');
   }
@@ -3921,18 +3805,11 @@ function initPPPCalendar(ctx){
     }
   }
 
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleMenu();
-  });
-
+  btn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
   document.addEventListener('click', () => closeMenu());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeMenu();
-  });
-
-  // --- Gestion du sous-menu Options ---
+  // Sous-menu Options
   const optionsBtn  = document.getElementById('optionsBtn');
   const optionsMenu = document.getElementById('optionsMenu');
   if (optionsBtn && optionsMenu){
@@ -3941,57 +3818,45 @@ function initPPPCalendar(ctx){
       const isHidden = optionsMenu.hasAttribute('hidden');
       optionsMenu.toggleAttribute('hidden', !isHidden);
     });
-
-    // clic hors du dropdown → ferme aussi le sous-menu
     document.addEventListener('click', (e) => {
-      if (!dd.contains(e.target)) {
-        optionsMenu.setAttribute('hidden', '');
-      }
+      if (!dd.contains(e.target)) optionsMenu.setAttribute('hidden', '');
     });
   }
 
-  // --- Badge “nouveau message” (PPP) basé sur /api/chat/unread-summary ---
+  // Badge “nouveau message”
   async function refreshPPPUnread() {
     try {
       const r = await fetch('/api/chat/unread-summary', { credentials: 'same-origin' });
       if (!r.ok) throw 0;
-      const arr = await r.json();  // ex: [{from_user_id: 12, count: 3}, ...]
+      const arr = await r.json();
       const total = Array.isArray(arr) ? arr.reduce((s,x)=> s + (Number(x.count)||0), 0) : 0;
-
       const badge = document.getElementById('trade-unread');
       if (!badge) return;
       badge.style.display = total > 0 ? 'inline-block' : 'none';
-    } catch(e) {
-      /* silencieux */
-    }
+    } catch(e) { /* noop */ }
   }
-
   document.addEventListener('DOMContentLoaded', () => {
     refreshPPPUnread();
     setInterval(refreshPPPUnread, 20000);
   });
-
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshPPPUnread();
   });
 })();
 </script>
+
 <script>
 window.updateTopbarSolde = function(newPts) {
   if (typeof newPts === 'undefined' || newPts === null) return;
   const el = document.querySelector('.solde-value, #solde-points');
   if (!el) return;
-  // formattage identique à format_points_fr côté Python
   const txt = Number(newPts).toFixed(1).replace('.', ',');
   el.textContent = txt;
-  // petit feedback visuel
   el.classList.add('solde-up');
   setTimeout(() => el.classList.remove('solde-up'), 600);
 };
 </script>
-<style>
-.solde-up { color: #79e7ff; transition: color .3s; }
-</style>
+<style>.solde-up { color: #79e7ff; transition: color .3s; }</style>
 <audio id="pppYogaAudio" src="/static/audio/yoga.wav" preload="auto"></audio>
 <audio id="pppBoostAudio" src="/static/audio/boost.mp3" preload="auto"></audio>
 </body></html>
@@ -5413,97 +5278,137 @@ def _first_observation_after(station_id: str | None, utc_from_iso: str):
 
 def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     """
-    Parcourt les ppp_bet sans verdict et tente de les résoudre à partir des observations.
-    Si verdict = WIN, crédite immédiatement le solde utilisateur (points).
-    station_scope: si fourni, ne traite que cette station_id (chaîne vide autorisée).
+    Résout les ppp_bet sans verdict à partir des observations ou d'un outcome déjà fixé.
+    Crédit immédiat si WIN.
+    station_scope: filtre sur station_id (chaîne vide autorisée). None = tous scopes.
     Retourne le nombre de paris mis à jour.
     """
-    q = """
-      SELECT id, user_id, COALESCE(station_id,'') AS station_id,
-             COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt,
-             UPPER(COALESCE(choice,'')) AS choice
-      FROM ppp_bet
-      WHERE (verdict IS NULL OR TRIM(verdict) = '')
-        AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
-    """
-    params = {}
-    if station_scope is not None:
-        q += " AND COALESCE(station_id,'') = :sid"
-        params["sid"] = station_scope or ""
+    from datetime import datetime
+    from sqlalchemy import text as _t
 
-    rows = db.session.execute(text(q), params).mappings().all()
+    scope = (station_scope or "")
+    where_scope = "AND COALESCE(station_id,'') = :sid" if station_scope is not None else ""
+
+    # Cible temporelle locale → UTC ISOZ si besoin
+    def _to_utc_iso(s: str) -> str | None:
+        if not s:
+            return None
+        if s.endswith("Z") or ("+" in s[10:]):
+            return s
+        try:
+            return _parse_local_iso_to_utc_iso(s)  # util existante
+        except Exception:
+            return None
+
+    rows = db.session.execute(_t(f"""
+        SELECT id,
+               user_id,
+               COALESCE(station_id,'')          AS station_id,
+               UPPER(COALESCE(choice,''))       AS choice,
+               COALESCE(outcome,'')             AS preset_outcome,
+               COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt
+        FROM ppp_bet
+        WHERE (verdict IS NULL OR TRIM(verdict) = '')
+          AND status = 'ACTIVE'
+          AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
+          {where_scope}
+    """), {"sid": scope} if station_scope is not None else {}).mappings().all()
+
     if not rows:
         return 0
 
     updated = 0
     for r in rows:
-        sid    = (r["station_id"] or "").strip()
-        tloc   = (r["target_dt"] or "").strip()   # 'YYYY-MM-DDTHH:MM[:SS][Z]'
-        choice = (r["choice"] or "").upper()       # 'PLUIE' / 'PAS_PLUIE'
-
-        if not tloc or choice not in ("PLUIE", "PAS_PLUIE"):
+        bid   = r["id"]
+        uid   = r["user_id"]
+        sid   = (r["station_id"] or "")
+        choice = (r["choice"] or "").upper()
+        if choice not in ("PLUIE", "PAS_PLUIE"):
             continue
 
-        # Normalise en UTC ISO Z si nécessaire
-        utc_from = tloc
-        if not (utc_from.endswith("Z") or ("+" in utc_from[10:])):
-            try:
-                utc_from = _parse_local_iso_to_utc_iso(utc_from)
-            except Exception:
-                continue
+        tloc = (r["target_dt"] or "").strip()
+        utc_from = _to_utc_iso(tloc)
+        if not utc_from:
+            continue
 
-        # Observation la plus proche à ts_utc >= target_dt
-        obs = _first_observation_after(sid, utc_from)
-        if not obs:
-            continue  # en attente
-
-        mm = float(obs.get("mm", 0.0))
-        verdict = "WIN" if ((choice == "PLUIE" and mm > 0.0) or
-                            (choice == "PAS_PLUIE" and mm <= 0.0)) else "LOSE"
-
-        # Écrit le verdict + observation
-        db.session.execute(
-            text("""
+        # 1) outcome déjà fixé -> verdict direct
+        preset = (r["preset_outcome"] or "").upper().strip()
+        if preset in ("PLUIE", "PAS_PLUIE"):
+            verdict = "WIN" if preset == choice else "LOSE"
+            db.session.execute(_t("""
                 UPDATE ppp_bet
-                   SET observed_at = :obs_at,
-                       observed_mm  = :mm,
-                       verdict      = :verdict
+                   SET verdict      = :v,
+                       status       = 'RESOLVED',
+                       resolved_at  = CURRENT_TIMESTAMP
                  WHERE id = :bid
-            """),
-            {"obs_at": obs["obs_utc"], "mm": mm, "verdict": verdict, "bid": r["id"]}
-        )
-        updated += 1
-
-        # Crédit des points si victoire
-        if verdict == "WIN":
-            date_key = tloc[:10] if len(tloc) >= 10 else None  # évite date() SQLite sur ISO
-            if date_key:
-                # cumul des boosts du jour et de la station pour l'utilisateur
-                boost_total = db.session.execute(
-                    text("""
-                      SELECT COALESCE(SUM(value),0)
+            """), {"v": verdict, "bid": bid})
+            # Crédit si WIN
+            if verdict == "WIN":
+                date_key = tloc[:10]
+                boost_total = db.session.execute(_t("""
+                    SELECT COALESCE(SUM(value),0)
                       FROM ppp_boosts
-                      WHERE user_id = :uid
-                        AND bet_date = :bet_date
-                        AND COALESCE(station_id,'') = :sid
-                    """),
-                    {"uid": r["user_id"], "bet_date": date_key, "sid": sid}
-                ).scalar() or 0.0
-
-                # montant et cote de CE pari
-                row_bet = db.session.execute(
-                    text("SELECT amount, odds FROM ppp_bet WHERE id = :bid"),
-                    {"bid": r["id"]}
-                ).mappings().first()
-                if row_bet:
-                    amt = float(row_bet.get("amount") or 0.0)
-                    odd = float(row_bet.get("odds") or 0.0)
+                     WHERE user_id = :uid
+                       AND bet_date = :d
+                       AND COALESCE(station_id,'') = :sid
+                """), {"uid": uid, "d": date_key, "sid": sid}).scalar() or 0.0
+                amt_odds = db.session.execute(_t("SELECT amount, odds FROM ppp_bet WHERE id=:bid"),
+                                              {"bid": bid}).mappings().first()
+                if amt_odds:
+                    amt = float(amt_odds["amount"] or 0.0)
+                    odd = float(amt_odds["odds"] or 0.0)
                     payout = amt * (odd + float(boost_total))
                     if payout > 0:
-                        db.session.execute(
-                            text('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
-                            {"p": payout, "uid": r["user_id"]}
-                        )
+                        db.session.execute(_t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
+                                           {"p": payout, "uid": uid})
+            updated += 1
+            continue
+
+        # 2) pas d’outcome -> observation >= target_dt
+        obs = _first_observation_after(sid, utc_from)  # util existante
+        if not obs:
+            continue  # encore en attente
+
+        mm = float(obs.get("mm", 0.0))
+        outcome = "PLUIE" if mm > 0.0 else "PAS_PLUIE"
+        verdict = "WIN" if outcome == choice else "LOSE"
+
+        db.session.execute(_t("""
+            UPDATE ppp_bet
+               SET observed_at = :obs_at,
+                   observed_mm  = :mm,
+                   outcome      = :outcome,
+                   verdict      = :verdict,
+                   status       = 'RESOLVED',
+                   resolved_at  = CURRENT_TIMESTAMP
+             WHERE id = :bid
+        """), {
+            "obs_at": obs["obs_utc"],
+            "mm": mm,
+            "outcome": outcome,
+            "verdict": verdict,
+            "bid": bid
+        })
+
+        if verdict == "WIN":
+            date_key = tloc[:10]
+            boost_total = db.session.execute(_t("""
+                SELECT COALESCE(SUM(value),0)
+                  FROM ppp_boosts
+                 WHERE user_id = :uid
+                   AND bet_date = :d
+                   AND COALESCE(station_id,'') = :sid
+            """), {"uid": uid, "d": date_key, "sid": sid}).scalar() or 0.0
+            amt_odds = db.session.execute(_t("SELECT amount, odds FROM ppp_bet WHERE id=:bid"),
+                                          {"bid": bid}).mappings().first()
+            if amt_odds:
+                amt = float(amt_odds["amount"] or 0.0)
+                odd = float(amt_odds["odds"] or 0.0)
+                payout = amt * (odd + float(boost_total))
+                if payout > 0:
+                    db.session.execute(_t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
+                                       {"p": payout, "uid": uid})
+        updated += 1
 
     db.session.commit()
     return updated
@@ -5511,60 +5416,96 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
 def resolve_pending_ppp_bets(max_back_days=14):
     """
-    Résout les ppp_bet sans verdict, dont target_dt est dans le passé.
-    Règle :
-      - 1ère obs horaire >= target_dt (Europe/Paris → UTC via _parse_local_iso_to_utc_iso si besoin)
-      - outcome = 'PLUIE' si mm>0 else 'PAS_PLUIE'
-      - verdict = 'WIN' si outcome == choice sinon 'LOSE'
-    NB: utilise la même table meteo_obs_hourly et _first_observation_after.
+    Résout les ppp_bet sans verdict dont target_dt est passé.
+    Règles:
+      - outcome préféré s'il est déjà renseigné.
+      - sinon, 1ère observation horaire >= target_dt.
+      - verdict = WIN si outcome == choice sinon LOSE.
     """
-    # 1) Récup bets en attente
-    rows = db.session.execute(text("""
-        SELECT id, user_id, bet_date, target_time, target_dt, choice, COALESCE(station_id,'') AS station_id
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import text as _t
+
+    now_utc = datetime.utcnow().replace(microsecond=0)
+    cutoff  = now_utc - timedelta(days=max_back_days)
+    now_iso = now_utc.isoformat() + "Z"
+    cut_iso = cutoff.isoformat() + "Z"
+
+    rows = db.session.execute(_t("""
+        SELECT id,
+               user_id,
+               COALESCE(station_id,'')          AS station_id,
+               UPPER(COALESCE(choice,''))       AS choice,
+               COALESCE(outcome,'')             AS preset_outcome,
+               COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt
         FROM ppp_bet
         WHERE (verdict IS NULL OR TRIM(verdict) = '')
+          AND status = 'ACTIVE'
           AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
     """)).mappings().all()
 
     if not rows:
         return 0
 
-    now_utc_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    cutoff_iso  = (datetime.utcnow() - timedelta(days=max_back_days)).replace(microsecond=0).isoformat() + "Z"
+    def _to_utc_iso(s: str) -> str | None:
+        if not s:
+            return None
+        if s.endswith("Z") or ("+" in s[10:]):
+            return s
+        try:
+            return _parse_local_iso_to_utc_iso(s)
+        except Exception:
+            return None
 
     resolved = 0
     for r in rows:
-        tloc = (r["target_dt"] or (str(r["bet_date"]) + "T" + (r["target_time"] or "18:00"))).strip()
-        # passé et pas trop vieux
-        try:
-            utc_from = tloc if (tloc.endswith("Z") or ("+" in tloc[10:])) else _parse_local_iso_to_utc_iso(tloc)
-        except Exception:
-            continue
-        if utc_from >= now_utc_iso or utc_from < cutoff_iso:
+        bid   = r["id"]
+        uid   = r["user_id"]
+        sid   = (r["station_id"] or "")
+        choice = (r["choice"] or "").upper()
+        if choice not in ("PLUIE", "PAS_PLUIE"):
             continue
 
-        obs = _first_observation_after(r["station_id"], utc_from)
+        tloc = (r["target_dt"] or "").strip()
+        utc_from = _to_utc_iso(tloc)
+        if not utc_from or utc_from >= now_iso or utc_from < cut_iso:
+            continue
+
+        preset = (r["preset_outcome"] or "").upper().strip()
+        if preset in ("PLUIE", "PAS_PLUIE"):
+            verdict = "WIN" if preset == choice else "LOSE"
+            db.session.execute(_t("""
+                UPDATE ppp_bet
+                   SET verdict      = :v,
+                       status       = 'RESOLVED',
+                       resolved_at  = CURRENT_TIMESTAMP
+                 WHERE id = :bid
+            """), {"v": verdict, "bid": bid})
+            resolved += 1
+            continue
+
+        obs = _first_observation_after(sid, utc_from)
         if not obs:
             continue
 
         mm = float(obs.get("mm", 0.0))
         outcome = "PLUIE" if mm > 0.0 else "PAS_PLUIE"
-        choice  = (r["choice"] or "").upper()
         verdict = "WIN" if outcome == choice else "LOSE"
 
-        db.session.execute(text("""
+        db.session.execute(_t("""
             UPDATE ppp_bet
                SET observed_at = :obs_at,
                    observed_mm  = :mm,
                    outcome      = :outcome,
-                   verdict      = :verdict
+                   verdict      = :verdict,
+                   status       = 'RESOLVED',
+                   resolved_at  = CURRENT_TIMESTAMP
              WHERE id = :bid
         """), {
             "obs_at": obs["obs_utc"],
             "mm": mm,
             "outcome": outcome,
             "verdict": verdict,
-            "bid": r["id"],
+            "bid": bid,
         })
         resolved += 1
 
