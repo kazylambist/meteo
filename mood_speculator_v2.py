@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 
-from flask import Flask, abort, flash, jsonify, jsonify, redirect, render_template_string, request, request, send_from_directory, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template_string, request, send_from_directory, url_for
 from flask import render_template_string as render
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
@@ -1421,24 +1421,44 @@ PPP_RAIN_MM_THRESHOLD = 0.2     # mm (modifiable)
 PPP_ODDS_MIN, PPP_ODDS_MAX = 1.1, 3.0
 
 def _station_latlon_from_json(station_id: str):
-    """Essaie de récupérer lat/lon depuis la ville de la station en JSON (fallback géocodage)."""
+    """Retourne (lat, lon) si possible. Tolérant aux erreurs et aux alias."""
     try:
-        stations = load_stations()
-        st = next((s for s in stations if str(s.get("id")) == str(station_id)), None)
-        if not st:
-            return None
-        city = (st.get("city") or "").strip()
-        if not city:
-            return None
-        g = geocode_city_openmeteo(city)
-        if not g:
-            return None
-        return float(g["lat"]), float(g["lon"])
+        sid = PPP_STATION_ALIAS.get(station_id) or station_id
     except Exception:
-        return None
+        sid = station_id
+    try:
+        stations = load_stations()  # doit exister dans ton code
+    except Exception as e:
+        app.logger.warning("load_stations failed: %s", e)
+        stations = []
+    st = next((s for s in stations if str(s.get("id")) == str(sid)), None)
+    # 1) Coords directes si présentes
+    if st:
+        lat = st.get("lat") or st.get("latitude")
+        lon = st.get("lon") or st.get("longitude")
+        if lat is not None and lon is not None:
+            try:
+                return float(lat), float(lon)
+            except Exception:
+                pass
+    # 2) Ville -> géocodage si fonction dispo
+    city = (st.get("city") or "").strip() if st else ""
+    geo_fn = globals().get("geocode_city_openmeteo")
+    if city and callable(geo_fn):
+        try:
+            g = geo_fn(city) or {}
+            if "lat" in g and "lon" in g:
+                return float(g["lat"]), float(g["lon"])
+        except Exception as e:
+            app.logger.warning("geocode failed for %s: %s", city, e)
+    # 3) Secours Paris si on vise Paris/CDG
+    s = str(sid).lower()
+    if any(x in s for x in ["cdg_07157","07157","lfpg","paris","montsouris","07156"]):
+        return 48.8566, 2.3522
+    return None
 
 def _openmeteo_archive_precip(lat: float, lon: float, start_date: str, end_date: str):
-    """Archive quotidienne précipitation (mm). Renvoie dict {date_iso: mm}."""
+    """Archive quotidienne précipitation (mm). Renvoie dict {date_iso: mm}. Jamais d'exception."""
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat, "longitude": lon,
@@ -1446,12 +1466,16 @@ def _openmeteo_archive_precip(lat: float, lon: float, start_date: str, end_date:
         "daily": "precipitation_sum",
         "timezone": "Europe/Paris"
     }
-    r = requests.get(url, params=params, timeout=20)
-    r.raise_for_status()
-    j = r.json()
-    dates = j.get("daily", {}).get("time", []) or []
-    vals  = j.get("daily", {}).get("precipitation_sum", []) or []
-    return {d: float(vals[i] or 0.0) for i, d in enumerate(dates)}
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        j = r.json()
+        dates = j.get("daily", {}).get("time", []) or []
+        vals  = j.get("daily", {}).get("precipitation_sum", []) or []
+        return {d: float(vals[i] or 0.0) for i, d in enumerate(dates)}
+    except Exception as e:
+        app.logger.warning("OpenMeteo archive failed lat=%s lon=%s: %s", lat, lon, e)
+        return {}
 
 def _hist_prob_pluie_for_mmdd(station_id: str, mmdd: str) -> float | None:
     """
@@ -1504,17 +1528,20 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
 
     mmdd = target_date.strftime("%m-%d")
     p = _hist_prob_pluie_for_mmdd(station_id, mmdd)
+    try:
+        p = _hist_prob_pluie_for_mmdd(station_id, mmdd)
+    except Exception as e:
+        app.logger.warning("hist_prob failed %s %s: %s", station_id, mmdd, e)
+        p = None    
     if p is None:
-        # pas d'historique -> on renvoie base_odds partout
+        b = round(base_odds, 2)
         return {
             "offset": offset,
             "historical_available": False,
-            "odds_pluie": round(base_odds, 2),
-            "odds_pas_pluie": round(base_odds, 2),
-            "combined_pluie": round(base_odds, 2),
-            "combined_pas_pluie": round(base_odds, 2),
+            "base_odds": b,
+            "combined_pluie": b,
+            "combined_pas_pluie": b,
         }
-
     odd_hist_pluie, odd_hist_dry = _odds_from_prob(p)
     # Moyenne simple avec ta cote prédéfinie
     comb_pluie = round((odd_hist_pluie + base_odds) / 2.0, 2)
@@ -3664,50 +3691,55 @@ function initPPPCalendar(ctx){
       const hidSid = document.getElementById('mStationId');
       if (hidSid) hidSid.value = ctx.station_id || '';
 
+      // --- Helpers choix + rendu cote ---
+      function currentPPPChoice(){
+        const r = document.querySelector('input[name="pppChoice"]:checked');
+        if (r && r.value) return r.value.toUpperCase();
+        const sel = document.getElementById('mChoice');
+        if (sel && sel.value) return sel.value.toUpperCase();
+        return 'PLUIE';
+      }
+
+      function renderOddsFromCache(){
+        const j = PPP_ACTIVE.__lastOdds || {};
+        const labelEl = document.getElementById('mOddsLabel');
+        const oddsEl  = document.getElementById('mOdds');
+        const c = currentPPPChoice(); // 'PLUIE' | 'PAS_PLUIE'
+        const val = Number(c === 'PLUIE' ? j.combined_pluie : j.combined_pas_pluie);
+        if (oddsEl) oddsEl.textContent = Number.isFinite(val) ? String(val.toFixed(1)).replace('.', ',') : '';
+        if (labelEl) labelEl.textContent = (c === 'PLUIE' ? 'Cote pluie' : 'Cote pas pluie');
+      }
+
       // --- Récupération cotes combinées (historique + PPP_ODDS) ---
       async function loadPPPOddsAndRender(){
         const dateStr  = (mDateInput && mDateInput.value) || '';
         const station  = (hidSid && hidSid.value) || '';
-        const choiceEl = document.getElementById('mChoice');
-        const choice   = (choiceEl && choiceEl.value) || 'PLUIE';
-        const labelEl  = document.getElementById('mOddsLabel');
-        const oddsEl   = document.getElementById('mOdds');
-        if (!dateStr || !station || !oddsEl) return;
+        if (!dateStr || !station) return;
 
         try{
-          const u = `/api/ppp/odds?date=${encodeURIComponent(dateStr)}&station_id=${encodeURIComponent(station)}&choice=${encodeURIComponent(choice)}`;
+          const u = `/api/ppp/odds?date=${encodeURIComponent(dateStr)}&station_id=${encodeURIComponent(station)}`;
           const j = await fetch(u, {credentials:'same-origin'}).then(r=>r.json());
-          // fallback si erreur
-          const val = Number(j?.combined_chosen ?? j?.base_odds ?? 0);
-          oddsEl.textContent = val > 0 ? String(val.toFixed(1)).replace('.', ',') : '';
-          if (labelEl) labelEl.textContent = (choice === 'PLUIE' ? 'Cote pluie' : 'Cote pas pluie');
-          // garde les composants en mémoire pour éviter un refetch au toggle
-          PPP_ACTIVE.__lastOdds = j;
+          PPP_ACTIVE.__lastOdds = j;   // {combined_pluie, combined_pas_pluie, ...}
+          renderOddsFromCache();
         }catch(_){
           // no-op
         }
       }
 
-      // Au changement de choix, switch sans recharger si possible
-      (function attachChoiceListener(){
-        const choiceEl = document.getElementById('mChoice');
-        if (!choiceEl || choiceEl.__pppBound) return;
-        choiceEl.__pppBound = true;
-        choiceEl.addEventListener('change', ()=>{
-          const j = PPP_ACTIVE.__lastOdds;
-          const labelEl  = document.getElementById('mOddsLabel');
-          const oddsEl   = document.getElementById('mOdds');
-          const choice   = choiceEl.value;
-          if (j && oddsEl){
-            const val = Number(choice === 'PLUIE' ? j.combined_pluie : j.combined_pas_pluie);
-            oddsEl.textContent = Number.isFinite(val) ? String(val.toFixed(1)).replace('.', ',') : '';
-            if (labelEl) labelEl.textContent = (choice === 'PLUIE' ? 'Cote pluie' : 'Cote pas pluie');
-          } else {
-            loadPPPOddsAndRender();
-          }
-        });
+      // Écouteurs de changement de choix
+      document.querySelectorAll('input[name="pppChoice"]').forEach(el=>{
+        if (el.__pppBound) return;
+        el.__pppBound = true;
+        el.addEventListener('change', renderOddsFromCache);
+      });
+      (function(){
+        const sel = document.getElementById('mChoice');
+        if (!sel || sel.__pppBound) return;
+        sel.__pppBound = true;
+        sel.addEventListener('change', renderOddsFromCache);
       })();
 
+      // Appel initial non bloquant
       loadPPPOddsAndRender();
 
       if (modal) modal.classList.add('open');
@@ -3719,7 +3751,7 @@ function initPPPCalendar(ctx){
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
-    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
+    o.textContent = o.textContent.replace(/^[⚡\s]+/g, '').replace(/^x?/, 'x');
   });
 
   // Réconciliation des jours passés
@@ -5825,28 +5857,31 @@ def api_meteo_today():
 @app.get("/api/ppp/odds")
 def api_ppp_odds():
     """
-    Query: date=YYYY-MM-DD, station_id=lfpg_95, choice=PLUIE|PAS_PLUIE
-    Retourne la cote combinée + composants.
+    Query: date=YYYY-MM-DD, station_id=..., choice=PLUIE|PAS_PLUIE (optionnel)
+    Ne lève jamais d’exception HTTP. Renvoie un JSON avec fallback.
     """
     from datetime import datetime as _dt
-    date_s  = (request.args.get("date") or "").strip()
-    sid     = (request.args.get("station_id") or "").strip()
-    choice  = (request.args.get("choice") or "PLUIE").strip().upper()
-    if not date_s or not sid:
-        return jsonify({"error":"date and station_id required"}), 400
     try:
-        target_date = _dt.strptime(date_s, "%Y-%m-%d").date()
-    except Exception:
-        return jsonify({"error":"bad date"}), 400
+        date_s  = (request.args.get("date") or "").strip()
+        sid     = (request.args.get("station_id") or "").strip()
+        choice  = (request.args.get("choice") or "PLUIE").strip().upper()
+        if not date_s or not sid:
+            return jsonify({"error": "date and station_id required"}), 200
+        try:
+            target_date = _dt.strptime(date_s, "%Y-%m-%d").date()
+        except Exception:
+            return jsonify({"error": "bad date"}), 200
 
-    res = ppp_combined_odds(sid, target_date)
-    if res.get("error"):
-        return jsonify(res), 400
-
-    # Sélectionne la cote combinée selon le choix
-    chosen = res["combined_pluie"] if choice == "PLUIE" else res["combined_pas_pluie"]
-    res["combined_chosen"] = chosen
-    return jsonify(res), 200
+        res = ppp_combined_odds(sid, target_date)
+        # même en cas d'erreur on renvoie 200 pour ne jamais casser l'UI
+        if res.get("error"):
+            return jsonify(res), 200
+        chosen = res["combined_pluie"] if choice == "PLUIE" else res["combined_pas_pluie"]
+        res["combined_chosen"] = chosen
+        return jsonify(res), 200
+    except Exception as e:
+        app.logger.exception("api_ppp_odds failed: %s", e)
+        return jsonify({"error": "internal", "details": str(e)}), 200
 
 @app.route('/api/meteo/forecast5')
 def api_meteo_forecast5():
