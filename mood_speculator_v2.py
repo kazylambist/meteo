@@ -911,7 +911,7 @@ def load_user(user_id: str) -> Optional[User]:
 
 
 def today_paris() -> date:
-    return datetime.now(APP_TZ)
+    return datetime.now(APP_TZ).date()
 
 
 def dt_paris_now() -> datetime:
