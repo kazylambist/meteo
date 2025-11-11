@@ -2794,7 +2794,22 @@ PPP_HTML = """
   .user-dropdown .item.disabled{
     opacity: .5; cursor: default; pointer-events: none;
   }
-
+  /* Bouton “Échanges 🤝” vert, cohérent avec Trade */
+  .user-dropdown .item[href="/trade/"] {
+    background: rgba(111,174,145,.22);
+    color: #0f1b17;                   /* brun-vert foncé pour contraste */
+    border: 1px solid rgba(111,174,145,.35);
+    font-weight: 800;
+  }
+  .user-dropdown .item[href="/trade/"]:hover {
+    background: rgba(111,174,145,.32);
+    border-color: rgba(111,174,145,.55);
+  }
+  /* Suppression complète de l’affichage des cotes */
+  .ppp-day .odds {
+    display: none !important;
+    visibility: hidden !important;
+  }  
   /* Pousse le lien Cabine tout à droite sur PPP */
   .topbar .nav-right { display: flex; align-items: center; }
   .topbar .nav-right a[href^="/🧢"] { margin-left: auto; }
@@ -4872,6 +4887,17 @@ CARTE_HTML = """
   .user-dropdown .item:hover{ background: rgba(120,180,255,.12); color: #79e7ff; }
   .user-dropdown .item.disabled{
     opacity: .5; cursor: default; pointer-events: none;
+  }
+  /* Bouton “Échanges 🤝” vert, cohérent avec Trade */
+  .user-dropdown .item[href="/trade/"] {
+    background: rgba(111,174,145,.22);
+    color: #0f1b17;                   /* brun-vert foncé pour contraste */
+    border: 1px solid rgba(111,174,145,.35);
+    font-weight: 800;
+  }
+  .user-dropdown .item[href="/trade/"]:hover {
+    background: rgba(111,174,145,.32);
+    border-color: rgba(111,174,145,.55);
   }
 </style>
 </head><body>
