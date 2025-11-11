@@ -1521,7 +1521,7 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
     Combine historique 20 ans (par MM-DD) + PPP_ODDS par offset.
     Retourne dict avec composants et cotes finales.
     """
-    today = today_paris().date()
+    today = today_paris()
     ok, msg, offset, base_odds = ppp_validate_can_bet(target_date, today)
     if not ok or base_odds is None:
         return {"error": msg or "indisponible"}
