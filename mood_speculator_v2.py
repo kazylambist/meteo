@@ -2798,12 +2798,12 @@ PPP_HTML = """
   .user-dropdown .item[href="/trade/"] {
     background: #2a4c42;              /* vert forêt doux */
     color: #f3f6fb;                   /* texte clair */
-    border: 1px solid rgba(255,255,255,.08);
+    border: none;
     font-weight: 800;
   }
   .user-dropdown .item[href="/trade/"]:hover {
     background: #31584d;              /* un ton plus clair au survol */
-    border-color: rgba(255,255,255,.14);
+    border: none;
   }
   /* Suppression complète de l’affichage des cotes */
   .ppp-day .odds {
