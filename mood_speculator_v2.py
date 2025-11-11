@@ -3114,7 +3114,7 @@ PPP_HTML = """
     <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
 
     <p id="mOddsWrap" style="margin:0 0 8px; font-size:28px; font-weight:900; letter-spacing:.3px;">
-      <span id="mOddsLabel">Cote</span> : x<span id="mOdds"></span>
+      <span id="mOddsLabel">Cote</span> : x<span id="mOdds">x</span>
     </p>
 
     <div id="mHistory"
@@ -3676,8 +3676,11 @@ function initPPPCalendar(ctx){
       const showForm = !isPast && !(delta <= 3 && !hasBetNow);
       if (form) form.style.display = showForm ? 'block' : 'none';
       if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
-      if (showForm && mOddsEl) mOddsEl.textContent = shownOdds.toFixed(1).replace('.', ',');
-
+      if (showForm) {
+        const labelEl = document.getElementById('mOddsLabel');
+        if (labelEl) labelEl.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
+        if (mOddsEl) mOddsEl.textContent = 'x' + String(shownOdds.toFixed(1)).replace('.', ',');
+      }
       if (showForm) {
         if (mDateInput) mDateInput.value = key;
         const hourSel = document.getElementById('mHour');
@@ -3700,14 +3703,19 @@ function initPPPCalendar(ctx){
         return 'PLUIE';
       }
 
-      function renderOddsFromCache(){
+      function renderOddsFromCache() {
         const j = PPP_ACTIVE.__lastOdds || {};
         const labelEl = document.getElementById('mOddsLabel');
         const oddsEl  = document.getElementById('mOdds');
         const c = currentPPPChoice(); // 'PLUIE' | 'PAS_PLUIE'
         const val = Number(c === 'PLUIE' ? j.combined_pluie : j.combined_pas_pluie);
-        if (oddsEl) oddsEl.textContent = Number.isFinite(val) ? String(val.toFixed(1)).replace('.', ',') : '';
-        if (labelEl) labelEl.textContent = (c === 'PLUIE' ? 'Cote pluie' : 'Cote pas pluie');
+
+        // Si valeur absente, tente combined_chosen
+        const fallback = Number(j.combined_chosen || j.base_odds || 0);
+        const v = Number.isFinite(val) && val > 0 ? val : fallback;
+
+        if (oddsEl) oddsEl.textContent = v > 0 ? 'x' + String(v.toFixed(1)).replace('.', ',') : 'x';
+        if (labelEl) labelEl.textContent = (c === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
       }
 
       // --- Récupération cotes combinées (historique + PPP_ODDS) ---
