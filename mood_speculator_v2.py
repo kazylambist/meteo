@@ -911,7 +911,7 @@ def load_user(user_id: str) -> Optional[User]:
 
 
 def today_paris() -> date:
-    return datetime.now(APP_TZ).date()
+    return datetime.now(APP_TZ)
 
 
 def dt_paris_now() -> datetime:
@@ -1482,7 +1482,7 @@ def _hist_prob_pluie_for_mmdd(station_id: str, mmdd: str) -> float | None:
     Probabilité de pluie pour un MM-DD sur les 20 dernières années [année-20 .. année-1].
     """
     from datetime import date
-    today = today_paris().date() if callable(globals().get("today_paris", None)) else date.today()
+    today = today_paris() if callable(globals().get("today_paris", None)) else date.today()
     start_year = today.year - 20
     # Fenêtre sûre: du 1er janv. (Y-20) au 31 déc. (Y-1)
     start_date = f"{start_year}-01-01"
