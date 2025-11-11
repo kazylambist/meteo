@@ -2796,14 +2796,14 @@ PPP_HTML = """
   }
   /* Bouton “Échanges 🤝” vert, cohérent avec Trade */
   .user-dropdown .item[href="/trade/"] {
-    background: rgba(111,174,145,.22);
-    color: #0f1b17;                   /* brun-vert foncé pour contraste */
-    border: 1px solid rgba(111,174,145,.35);
+    background: #2a4c42;              /* vert forêt doux */
+    color: #f3f6fb;                   /* texte clair */
+    border: 1px solid rgba(255,255,255,.08);
     font-weight: 800;
   }
   .user-dropdown .item[href="/trade/"]:hover {
-    background: rgba(111,174,145,.32);
-    border-color: rgba(111,174,145,.55);
+    background: #31584d;              /* un ton plus clair au survol */
+    border-color: rgba(255,255,255,.14);
   }
   /* Suppression complète de l’affichage des cotes */
   .ppp-day .odds {
