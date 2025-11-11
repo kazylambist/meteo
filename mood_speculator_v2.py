@@ -2794,17 +2794,37 @@ PPP_HTML = """
   .user-dropdown .item.disabled{
     opacity: .5; cursor: default; pointer-events: none;
   }
-  /* Bouton “Échanges 🤝” vert, cohérent avec Trade */
+  /* Bouton “Échanges 🤝” — vert foncé */
   .user-dropdown .item[href="/trade/"] {
-    background: #2a4c42;              /* vert forêt doux */
-    color: #f3f6fb;                   /* texte clair */
-    border: none;
+    background: #1e3b33;  /* vert forêt plus foncé */
+    color: #f3f6fb;
     font-weight: 800;
+    border: none;
   }
   .user-dropdown .item[href="/trade/"]:hover {
-    background: #31584d;              /* un ton plus clair au survol */
+    background: #25493f;  /* vert légèrement plus clair au survol */
+  }
+  /* Bouton “Profil 👔” — violet foncé */
+  .user-dropdown .item[href="/profile/"] {
+    background: #2e2246;  /* violet nuit profond */
+    color: #f3f6fb;
+    font-weight: 800;
     border: none;
   }
+  .user-dropdown .item[href="/profile/"]:hover {
+    background: #3a2b59;  /* nuance plus lumineuse au survol */
+  }
+
+  /* Bouton “Se déconnecter” — rouge foncé */
+  .user-dropdown .item[href="/logout/"] {
+    background: #4a1d1d;  /* rouge brun foncé */
+    color: #f3f6fb;
+    font-weight: 800;
+    border: none;
+  }
+  .user-dropdown .item[href="/logout/"]:hover {
+    background: #5c2323;  /* rouge un peu plus clair au survol */
+  } 
   /* Suppression complète de l’affichage des cotes */
   .ppp-day .odds {
     display: none !important;
