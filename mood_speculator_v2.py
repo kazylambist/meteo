@@ -1416,6 +1416,123 @@ def openmeteo_daily(lat, lon, start_date, end_date):
     r.raise_for_status()
     return r.json()
 
+# --- PPP: cotes historiques 20 ans ---
+PPP_RAIN_MM_THRESHOLD = 0.2     # mm (modifiable)
+PPP_ODDS_MIN, PPP_ODDS_MAX = 1.1, 3.0
+
+def _station_latlon_from_json(station_id: str):
+    """Essaie de récupérer lat/lon depuis la ville de la station en JSON (fallback géocodage)."""
+    try:
+        stations = load_stations()
+        st = next((s for s in stations if str(s.get("id")) == str(station_id)), None)
+        if not st:
+            return None
+        city = (st.get("city") or "").strip()
+        if not city:
+            return None
+        g = geocode_city_openmeteo(city)
+        if not g:
+            return None
+        return float(g["lat"]), float(g["lon"])
+    except Exception:
+        return None
+
+def _openmeteo_archive_precip(lat: float, lon: float, start_date: str, end_date: str):
+    """Archive quotidienne précipitation (mm). Renvoie dict {date_iso: mm}."""
+    url = "https://archive-api.open-meteo.com/v1/archive"
+    params = {
+        "latitude": lat, "longitude": lon,
+        "start_date": start_date, "end_date": end_date,
+        "daily": "precipitation_sum",
+        "timezone": "Europe/Paris"
+    }
+    r = requests.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    dates = j.get("daily", {}).get("time", []) or []
+    vals  = j.get("daily", {}).get("precipitation_sum", []) or []
+    return {d: float(vals[i] or 0.0) for i, d in enumerate(dates)}
+
+def _hist_prob_pluie_for_mmdd(station_id: str, mmdd: str) -> float | None:
+    """
+    Probabilité de pluie pour un MM-DD sur les 20 dernières années [année-20 .. année-1].
+    """
+    from datetime import date
+    today = today_paris().date() if callable(globals().get("today_paris", None)) else date.today()
+    start_year = today.year - 20
+    # Fenêtre sûre: du 1er janv. (Y-20) au 31 déc. (Y-1)
+    start_date = f"{start_year}-01-01"
+    end_date   = f"{today.year-1}-12-31"
+
+    ll = _station_latlon_from_json(station_id)
+    if not ll:
+        return None
+    lat, lon = ll
+
+    data = _openmeteo_archive_precip(lat, lon, start_date, end_date)
+    rainy, dry = 0, 0
+    for d_iso, mm in data.items():
+        # Filtre sur MM-DD
+        if len(d_iso) >= 10 and d_iso[5:10] == mmdd:
+            if (mm or 0.0) >= PPP_RAIN_MM_THRESHOLD:
+                rainy += 1
+            else:
+                dry += 1
+    n = rainy + dry
+    if n == 0:
+        return None
+    return rainy / float(n)
+
+def _odds_from_prob(p: float) -> tuple[float, float]:
+    """
+    Renvoie (odds_pluie, odds_dry) bornés. Fair-odds ~ 1/p.
+    """
+    eps = 1e-6
+    pluie = max(PPP_ODDS_MIN, min(PPP_ODDS_MAX, 1.0 / max(p, eps)))
+    dry   = max(PPP_ODDS_MIN, min(PPP_ODDS_MAX, 1.0 / max(1.0 - p, eps)))
+    return round(pluie, 2), round(dry, 2)
+
+def ppp_combined_odds(station_id: str, target_date: date) -> dict:
+    """
+    Combine historique 20 ans (par MM-DD) + PPP_ODDS par offset.
+    Retourne dict avec composants et cotes finales.
+    """
+    today = today_paris().date()
+    ok, msg, offset, base_odds = ppp_validate_can_bet(target_date, today)
+    if not ok or base_odds is None:
+        return {"error": msg or "indisponible"}
+
+    mmdd = target_date.strftime("%m-%d")
+    p = _hist_prob_pluie_for_mmdd(station_id, mmdd)
+    if p is None:
+        # pas d'historique -> on renvoie base_odds partout
+        return {
+            "offset": offset,
+            "historical_available": False,
+            "odds_pluie": round(base_odds, 2),
+            "odds_pas_pluie": round(base_odds, 2),
+            "combined_pluie": round(base_odds, 2),
+            "combined_pas_pluie": round(base_odds, 2),
+        }
+
+    odd_hist_pluie, odd_hist_dry = _odds_from_prob(p)
+    # Moyenne simple avec ta cote prédéfinie
+    comb_pluie = round((odd_hist_pluie + base_odds) / 2.0, 2)
+    comb_dry   = round((odd_hist_dry   + base_odds) / 2.0, 2)
+
+    return {
+        "offset": offset,
+        "historical_available": True,
+        "p_rain": round(p, 3),
+        "odd_hist_pluie": odd_hist_pluie,
+        "odd_hist_pas_pluie": odd_hist_dry,
+        "base_odds": round(base_odds, 2),
+        "odds_pluie": odd_hist_pluie,
+        "odds_pas_pluie": odd_hist_dry,
+        "combined_pluie": comb_pluie,
+        "combined_pas_pluie": comb_dry,
+    }
+
 def openmeteo_hourly_precip(lat, lon, start_iso, end_iso):
     """Retourne une liste [(iso_time, mm), ...] pour la plage [start, end] en Europe/Paris."""
     import requests
@@ -2969,8 +3086,8 @@ PPP_HTML = """
 
     <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
 
-    <p id="mOddsWrap" style="margin:0 0 8px;">
-      <strong>Cote:</strong> x<span id="mOdds"></span>
+    <p id="mOddsWrap" style="margin:0 0 8px; font-size:28px; font-weight:900; letter-spacing:.3px;">
+      <span id="mOddsLabel">Cote</span> : x<span id="mOdds"></span>
     </p>
 
     <div id="mHistory"
@@ -3546,6 +3663,52 @@ function initPPPCalendar(ctx){
 
       const hidSid = document.getElementById('mStationId');
       if (hidSid) hidSid.value = ctx.station_id || '';
+
+      // --- Récupération cotes combinées (historique + PPP_ODDS) ---
+      async function loadPPPOddsAndRender(){
+        const dateStr  = (mDateInput && mDateInput.value) || '';
+        const station  = (hidSid && hidSid.value) || '';
+        const choiceEl = document.getElementById('mChoice');
+        const choice   = (choiceEl && choiceEl.value) || 'PLUIE';
+        const labelEl  = document.getElementById('mOddsLabel');
+        const oddsEl   = document.getElementById('mOdds');
+        if (!dateStr || !station || !oddsEl) return;
+
+        try{
+          const u = `/api/ppp/odds?date=${encodeURIComponent(dateStr)}&station_id=${encodeURIComponent(station)}&choice=${encodeURIComponent(choice)}`;
+          const j = await fetch(u, {credentials:'same-origin'}).then(r=>r.json());
+          // fallback si erreur
+          const val = Number(j?.combined_chosen ?? j?.base_odds ?? 0);
+          oddsEl.textContent = val > 0 ? String(val.toFixed(1)).replace('.', ',') : '';
+          if (labelEl) labelEl.textContent = (choice === 'PLUIE' ? 'Cote pluie' : 'Cote pas pluie');
+          // garde les composants en mémoire pour éviter un refetch au toggle
+          PPP_ACTIVE.__lastOdds = j;
+        }catch(_){
+          // no-op
+        }
+      }
+
+      // Au changement de choix, switch sans recharger si possible
+      (function attachChoiceListener(){
+        const choiceEl = document.getElementById('mChoice');
+        if (!choiceEl || choiceEl.__pppBound) return;
+        choiceEl.__pppBound = true;
+        choiceEl.addEventListener('change', ()=>{
+          const j = PPP_ACTIVE.__lastOdds;
+          const labelEl  = document.getElementById('mOddsLabel');
+          const oddsEl   = document.getElementById('mOdds');
+          const choice   = choiceEl.value;
+          if (j && oddsEl){
+            const val = Number(choice === 'PLUIE' ? j.combined_pluie : j.combined_pas_pluie);
+            oddsEl.textContent = Number.isFinite(val) ? String(val.toFixed(1)).replace('.', ',') : '';
+            if (labelEl) labelEl.textContent = (choice === 'PLUIE' ? 'Cote pluie' : 'Cote pas pluie');
+          } else {
+            loadPPPOddsAndRender();
+          }
+        });
+      })();
+
+      await loadPPPOddsAndRender();
 
       if (modal) modal.classList.add('open');
     });
@@ -5658,6 +5821,32 @@ def api_meteo_today():
         "rain_hours_3d": snap.rain_hours_3d,
         "lat": snap.lat, "lon": snap.lon
     })
+
+@app.get("/api/ppp/odds")
+def api_ppp_odds():
+    """
+    Query: date=YYYY-MM-DD, station_id=lfpg_95, choice=PLUIE|PAS_PLUIE
+    Retourne la cote combinée + composants.
+    """
+    from datetime import datetime as _dt
+    date_s  = (request.args.get("date") or "").strip()
+    sid     = (request.args.get("station_id") or "").strip()
+    choice  = (request.args.get("choice") or "PLUIE").strip().upper()
+    if not date_s or not sid:
+        return jsonify({"error":"date and station_id required"}), 400
+    try:
+        target_date = _dt.strptime(date_s, "%Y-%m-%d").date()
+    except Exception:
+        return jsonify({"error":"bad date"}), 400
+
+    res = ppp_combined_odds(sid, target_date)
+    if res.get("error"):
+        return jsonify(res), 400
+
+    # Sélectionne la cote combinée selon le choix
+    chosen = res["combined_pluie"] if choice == "PLUIE" else res["combined_pas_pluie"]
+    res["combined_chosen"] = chosen
+    return jsonify(res), 200
 
 @app.route('/api/meteo/forecast5')
 def api_meteo_forecast5():
