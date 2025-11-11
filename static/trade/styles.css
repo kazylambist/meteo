@@ -25,15 +25,20 @@ body.trade-page::before{
   position:fixed;
   inset:0;
   z-index:-2;
-  background: url("/static/trade/bg.jpg") center / cover no-repeat fixed;
+  background: url("/static/trade/fondvert.jpg") center / cover no-repeat fixed;
 }
-/* Voile sombre doux pour la lisibilité */
+
+/* Voile assoupli, légèrement bleuté pour cohérence PPP */
 body.trade-page::after{
   content:"";
   position:fixed;
   inset:0;
   z-index:-1;
-  background: radial-gradient(100% 120% at 50% 0%, rgba(7,25,46,.20) 0%, rgba(7,25,46,.55) 100%);
+  background: radial-gradient(
+    100% 120% at 50% 0%,
+    rgba(15,35,60,.12) 0%,
+    rgba(15,35,60,.38) 100%
+  );
   pointer-events:none;
 }
 
