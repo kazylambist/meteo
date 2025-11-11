@@ -1975,11 +1975,15 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
   visibility: visible;
 }
 .ppp-day{
-  position:relative; padding:10px; border-radius:12px;
-  /* un cran plus sombre pour la lisibilité */
-  background: color-mix(in oklab, var(--card-bg) 96%, #000 4%);
-  border:1px solid rgba(255,255,255,.14);
-  min-height:90px; cursor:pointer;  
+  position: relative;
+  padding: 10px;
+  border-radius: 12px;
+  /* sombre et bleuté : proche d’un bleu acier nocturne */
+  background: color-mix(in oklab, #1f2a3a 85%, var(--card-bg) 15%);
+  border: 1px solid rgba(200,230,255,.08);
+  min-height: 90px;
+  cursor: pointer;
+  box-shadow: inset 0 0 10px rgba(0,0,20,.25);
 }
 .ppp-day.disabled{ cursor:not-allowed; opacity:.5; filter:grayscale(30%); }
 .ppp-day .date{ font-weight:700; }

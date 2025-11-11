@@ -1,14 +1,21 @@
 :root{
-  --ink:#e6f0ff; 
-  --ink-dim:#aac1e6; 
-  --panel:rgba(15,28,50,.6);
+  /* Palette cohérente PPP */
+  --ink:#f3f6fb;            /* texte principal */
+  --ink-dim:#c2c9d6;        /* texte atténué */
+  --panel:#14233b;          /* bleu foncé opaque (comme PPP .ppp-day) */
+  --line:rgba(255,255,255,.12);
+  --amber:#ffbf66;          /* accent ambre pastel */
+  --jade:#56c5b6;           /* accent vert jade doux */
 }
 
 /* ---- Page ---- */
 body.trade-page{
   color:var(--ink);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial;
-  background: radial-gradient(100% 120% at 50% 0%, #0b315e 0%, #07192e 100%);
+  /* fond bleu nuit avec légère touche mauve pour rappeler PPP */
+  background:
+    radial-gradient(1200px 900px at 80% -10%, rgba(111,91,95,.28) 0%, transparent 55%),
+    radial-gradient(100% 120% at 50% 0%, #0f2f59 0%, #071a30 100%);
   margin:0;
 }
 
@@ -26,7 +33,7 @@ body.trade-page::after{
   position:fixed;
   inset:0;
   z-index:-1;
-  background: radial-gradient(100% 120% at 50% 0%, rgba(7,25,46,.35) 0%, rgba(7,25,46,.75) 100%);
+  background: radial-gradient(100% 120% at 50% 0%, rgba(7,25,46,.20) 0%, rgba(7,25,46,.55) 100%);
   pointer-events:none;
 }
 
@@ -34,10 +41,10 @@ body.trade-page::after{
 .topbar {
   position: sticky;
   top: 0;
-  background: rgba(6,7,12,.55);              /* même ton que PPP */
-  backdrop-filter: saturate(120%) blur(8px); /* flou et saturation */
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  box-shadow: 0 0 20px rgba(0,0,0,.3);       /* légère profondeur comme PPP */
+  background: rgba(20,35,59,.72);            /* dérivé de --panel, semi-opaque */
+  backdrop-filter: saturate(120%) blur(8px);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 0 20px rgba(0,0,0,.3);
   z-index: 10;
 }
 .topbar .container {
@@ -48,43 +55,45 @@ body.trade-page::after{
 }
 .topbar .brand {
   font-weight: 800;
-  color: #79e7ff; /* accent cyan, cohérent avec PPP */
+  color: var(--jade);
   text-decoration: none;
-  text-shadow: 0 0 32px rgba(121,231,255,.25), 0 0 4px rgba(121,231,255,.6);
+  text-shadow: none;
 }
-.topbar .spacer {
-  flex: 1;
-}
+.topbar .spacer { flex: 1; }
 .topbar .navlink {
   color: var(--ink);
   text-decoration: none;
   padding: 8px 10px;
   border-radius: 8px;
-  transition: background .2s ease, color .2s ease;
+  transition: background .2s ease, color .2s ease, border-color .2s ease;
+  border: 1px solid transparent;
 }
 .topbar .navlink:hover {
-  color: #79e7ff;
+  color: var(--jade);
+  border-color: rgba(255,255,255,.08);
 }
 .topbar .navlink.active {
-  background: rgba(255,255,255,.08);
+  background: rgba(255,255,255,.06);
+  border-color: var(--line);
 }
 
 /* ---- Layout colonnes ---- */
 .trade-layout{
-  display:grid; 
-  grid-template-columns: 260px 1fr 280px; 
-  gap:16px; 
-  padding:16px; 
-  max-width:1200px; 
+  display:grid;
+  grid-template-columns: 260px 1fr 280px;
+  gap:16px;
+  padding:16px;
+  max-width:1200px;
   margin:0 auto;
 }
 
 /* Cartes */
 .me-card,.market,.roster{
-  background:var(--panel); 
-  border:1px solid rgba(255,255,255,.08); 
-  border-radius:14px; 
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:14px;
   padding:12px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.28);
 }
 
 /* ---- Carte “Moi” (fenêtre de gauche) ---- */
@@ -100,7 +109,7 @@ body.trade-page::after{
   width:56px;
   height:56px;
   border-radius:12px;
-  background:#051124;                 /* fond noir */
+  background:#0d1c31;                 /* bleu nuit opaque */
   position:relative;
   overflow:hidden;
   border:1px solid rgba(255,255,255,.18);
@@ -129,8 +138,8 @@ body.trade-page::after{
   margin: 0;
 }
 #me-pseudo{
-  font-weight: 800; 
-  font-size: 20px; 
+  font-weight: 800;
+  font-size: 20px;
   line-height: 1.1;
 }
 #me-points{
@@ -147,25 +156,31 @@ body.trade-page::after{
 /* ---- Marché ---- */
 .market-head{display:flex; align-items:center; justify-content:space-between}
 .btn{
-  padding:10px 12px; 
-  border-radius:10px; 
-  background:#122a48; 
-  color:var(--ink); 
-  border:1px solid rgba(255,255,255,.15); 
-  cursor:pointer; 
-  font-weight:700
+  padding:10px 12px;
+  border-radius:10px;
+  background:linear-gradient(180deg, rgba(255,191,102,.18), rgba(255,191,102,.06)); /* ambre pastel */
+  color:var(--ink);
+  border:1px solid rgba(255,255,255,.15);
+  cursor:pointer;
+  font-weight:700;
+  transition: border-color .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.btn:hover{
+  border-color: rgba(255,255,255,.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25);
+  filter: brightness(1.04);
 }
 
 .listing-list{display:flex; flex-direction:column; gap:8px; margin-top:10px}
 .listing{
-  display:flex; 
-  align-items:center; 
-  justify-content:space-between; 
-  gap:12px; 
-  padding:10px; 
-  border:1px solid rgba(255,255,255,.08); 
-  border-radius:10px; 
-  background:rgba(0,0,0,.15)
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#183054;                /* opaque, plus clair que --panel */
 }
 .meta{display:flex; flex-direction:column; gap:4px}
 .meta .title{font-weight:800}
@@ -175,11 +190,13 @@ body.trade-page::after{
 /* ---- Roster ---- */
 .roster-list{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px}
 .user-card{
-  display:flex; align-items:center; gap:8px; padding:8px; 
-  border-radius:10px; border:1px solid rgba(255,255,255,.08); 
-  background:rgba(0,0,0,.12); cursor:pointer;
+  display:flex; align-items:center; gap:8px; padding:8px;
+  border-radius:10px; border:1px solid var(--line);
+  background:#122743; cursor:pointer;
   position: relative;
+  transition: filter .12s ease, border-color .12s ease;
 }
+.user-card:hover{ filter: brightness(1.04); }
 .user-card .name{font-weight:700; font-size:14px}
 .user-card .solde{color:var(--ink-dim); font-size:12px}
 
@@ -192,14 +209,14 @@ body.trade-page::after{
   box-shadow:0 0 8px rgba(34,197,94,.7);
 }
 .user-card.offline .status-dot{
-  background:#8893a6; 
+  background:#8893a6;
   box-shadow:none;
 }
 
-/* Online = bordure verte sur l’avatar */
+/* Online = bordure jade sur l’avatar */
 .user-card.online .avatar-mini{
-  border-color:#16a34a;
-  box-shadow:0 0 0 2px rgba(22,163,74,.35);
+  border-color: var(--jade);
+  box-shadow:0 0 0 2px rgba(86,197,182,.35);
 }
 
 /* Offline = grisé */
@@ -210,27 +227,54 @@ body.trade-page::after{
 
 /* ---- Chat ---- */
 .chat-dock{position:fixed; right:12px; bottom:12px; display:flex; flex-direction:column; gap:10px; max-width:520px}
-.chat{width:320px; background:var(--panel); border:1px solid rgba(255,255,255,.12); border-radius:12px; overflow:hidden}
-.chat header{display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:rgba(255,255,255,.05)}
-.chat .log{max-height:220px; overflow:auto; padding:8px 10px; display:flex; flex-direction:column; gap:6px}
-.chat .msg.me{align-self:flex-end; background:rgba(120,180,255,.18); padding:6px 8px; border-radius:8px}
-.chat .msg.other{align-self:flex-start; background:rgba(255,255,255,.08); padding:6px 8px; border-radius:8px}
-.chat footer{display:flex; gap:6px; padding:8px 10px; border-top:1px solid rgba(255,255,255,.08)}
-.chat input{flex:1; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,.15); background:#0b2443; color:var(--ink)}
+.chat{
+  width:320px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow: 0 10px 28px rgba(0,0,0,.28);
+}
+.chat header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 10px; background:#10243f;
+  border-bottom: 1px solid var(--line);
+}
+.chat .log{
+  max-height:220px; overflow:auto; padding:8px 10px;
+  display:flex; flex-direction:column; gap:6px
+}
+.chat .msg.me{
+  align-self:flex-end; background:rgba(86,197,182,.16);
+  padding:6px 8px; border-radius:8px
+}
+.chat .msg.other{
+  align-self:flex-start; background:rgba(255,255,255,.06);
+  padding:6px 8px; border-radius:8px
+}
+.chat footer{
+  display:flex; gap:6px; padding:8px 10px;
+  border-top:1px solid var(--line)
+}
+.chat input{
+  flex:1; padding:8px 10px; border-radius:8px;
+  border:1px solid rgba(255,255,255,.15);
+  background:#10223a; color:var(--ink);
+}
 
 /* ---- Accents visuels ---- */
 .gp{
-  color:#16a34a;         /* vert */
+  color:var(--jade);
   font-weight:600;
 }
 
-/* Prix (jaune “néon”) dans l’entête d’annonce */
+/* Prix (ambre dans l’entête d’annonce) */
 .meta .title .ask-price{
-  color:#ffea00;         /* jaune fluo */
+  color:var(--amber);
   font-weight:800;
   text-transform:uppercase;
   letter-spacing:.3px;
-  text-shadow:0 0 6px rgba(255,234,0,.55);
+  text-shadow:none;
 }
 .meta .title .ask-price.muted{
   color:#a8a8a8;
@@ -263,47 +307,48 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
   opacity: .6;
   filter: none;
 }
+
 /* --- Notifications de messages non-lus --- */
 .user-card.has-unread{
-  /* annule l'effet "offline" pour que ce soit bien visible */
   opacity: 1 !important;
   filter: none !important;
-  /* si tu veux aussi surligner la carte entière, décommente la ligne suivante : */
-  /* box-shadow: 0 0 0 2px #8b5cf6, 0 0 16px rgba(139,92,246,.45); */
-  /* border-color: #5ca6f6; */
+  /* possibilité de surligner toute la carte :
+  box-shadow: 0 0 0 2px #8b5cf6, 0 0 16px rgba(139,92,246,.45); */
 }
 
-/* halo violet autour de l’avatar (préféré : plus net que outline) */
+/* halo de notification autour de l’avatar */
 .user-card.has-unread .avatar-mini{
   border-color: #5ca6f6 !important;
-  box-shadow: 0 0 0 3px rgba(245,250,255,.85), 0 0 16px rgba(245,250,255,.85);
+  box-shadow: 0 0 0 3px rgba(245,250,255,.85);
 }
 
-/* petit accent sur le nom (facultatif) */
-.user-card.has-unread .name{
-  color:#fffce9;
-}
-/* S'assurer que rien ne coupe le halo violet */
+/* accent sur le nom */
+.user-card.has-unread .name{ color:#fffce9; }
+
+/* S'assurer que rien ne coupe le halo */
 .roster-list{ overflow: visible; }
+
 .user-card .presence {
   font-size: 12px;
   line-height: 1.2;
-  min-height: 1em;     /* garde la ligne même hors-ligne */
+  min-height: 1em;
   opacity: .9;
 }
-
 .user-card .presence.on {
-  color: #16a34a;      /* vert */
+  color: var(--jade);
   font-weight: 600;
 }
+
 .me-online { font-weight:600; }
+
 .topbar .back-logo img {
-  height: 28px;      /* ajuste 24–36px selon ton header */
+  height: 28px;
   width: auto;
   display: block;
 }
 .topbar .back-logo { padding: 0; }
 .topbar .back-logo:hover img { opacity: .85; }
+
 .user-card .avatar-box { position: relative; display: inline-block; }
 .user-card .unread-badge {
   position: absolute; top: 2px; right: 2px; font-size: 14px; line-height: 1;
