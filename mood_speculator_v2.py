@@ -3708,7 +3708,7 @@ function initPPPCalendar(ctx){
         });
       })();
 
-      await loadPPPOddsAndRender();
+      loadPPPOddsAndRender();
 
       if (modal) modal.classList.add('open');
     });
@@ -6259,6 +6259,19 @@ def ppp(station_id=None):
         ok, msg, offset, odds = ppp_validate_can_bet(target, today)
         if not ok:
             return _return_error(msg or "Mise impossible pour ce jour.")
+
+        # --- Cote combinée finale selon le CHOIX (PLUIE/PAS_PLUIE) ---
+        try:
+            comb = ppp_combined_odds(scope_station_id or "", target)
+            if comb.get("error"):
+                raise ValueError(comb["error"])
+            final_odds = float(
+                comb["combined_pluie"] if (choice == "PLUIE") else comb["combined_pas_pluie"]
+            )
+            odds = final_odds   # remplace la base_odds par la cote combinée
+        except Exception:
+            # fallback sûr: garde la base_odds déjà validée
+            pass
 
         # Empêcher paris contradictoires au même horaire + limite 3 horaires
         q = PPPBet.query.filter(
