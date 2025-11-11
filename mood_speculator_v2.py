@@ -2805,24 +2805,24 @@ PPP_HTML = """
     background: #25493f;  /* vert légèrement plus clair au survol */
   }
   /* Bouton “Profil 👔” — violet foncé */
-  .user-dropdown .item[href="/profile/"] {
+  .user-dropdown .item[href="{{ url_for('cabine_page') }}"] {
     background: #2e2246;  /* violet nuit profond */
     color: #f3f6fb;
     font-weight: 800;
     border: none;
   }
-  .user-dropdown .item[href="/profile/"]:hover {
+  .user-dropdown .item[href="{{ url_for('cabine_page') }}"]:hover {
     background: #3a2b59;  /* nuance plus lumineuse au survol */
   }
 
   /* Bouton “Se déconnecter” — rouge foncé */
-  .user-dropdown .item[href="/logout/"] {
+  .user-dropdown .item[href="/logout"] {
     background: #4a1d1d;  /* rouge brun foncé */
     color: #f3f6fb;
     font-weight: 800;
     border: none;
   }
-  .user-dropdown .item[href="/logout/"]:hover {
+  .user-dropdown .item[href="/logout"]:hover {
     background: #5c2323;  /* rouge un peu plus clair au survol */
   } 
   /* Suppression complète de l’affichage des cotes */
