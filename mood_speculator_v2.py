@@ -3679,7 +3679,7 @@ function initPPPCalendar(ctx){
       if (showForm) {
         const labelEl = document.getElementById('mOddsLabel');
         if (labelEl) labelEl.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
-        if (mOddsEl) mOddsEl.textContent = 'x' + String(shownOdds.toFixed(1)).replace('.', ',');
+        if (mOddsEl) mOddsEl.textContent = String(shownOdds.toFixed(1)).replace('.', ',');
       }
       if (showForm) {
         const labelEl = document.getElementById('mOddsLabel');
@@ -3727,24 +3727,39 @@ function initPPPCalendar(ctx){
         const fallback = Number(j.combined_chosen || j.base_odds || 0);
         const v = Number.isFinite(val) && val > 0 ? val : fallback;
 
-        if (oddsEl) oddsEl.textContent = v > 0 ? 'x' + String(v.toFixed(1)).replace('.', ',') : 'x';
+        if (oddsEl) oddsEl.textContent = v > 0 ? String(v.toFixed(1)).replace('.', ',') : '';
         if (labelEl) labelEl.textContent = (c === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
       }
+
+      // Gestion anti-course
+      let oddsAbort = null;                 // AbortController courant
+      let oddsKey   = null;                 // "YYYY-MM-DD|station_id"      
 
       // --- Récupération cotes combinées (historique + PPP_ODDS) ---
       async function loadPPPOddsAndRender(){
         const dateStr  = (mDateInput && mDateInput.value) || key;
-        const station  = getPPPStationId();
-        if (!dateStr) { console.warn('[PPP] date manquante'); return; }
-        if (!station) { console.error('[PPP] station_id manquant'); return; }
+        const station  = (hidSid && hidSid.value) || (ctx && ctx.station_id) || 'lfpg_75';
+        if (!dateStr || !station) return;
+
+        // Annule la requête précédente si encore en vol
+        try { oddsAbort?.abort(); } catch(_) {}
+        oddsAbort = new AbortController();
+        const reqKey = `${dateStr}|${station}`;
+        oddsKey = reqKey;
 
         try{
           const u = `/api/ppp/odds?date=${encodeURIComponent(dateStr)}&station_id=${encodeURIComponent(station)}`;
-          const j = await fetch(u, {credentials:'same-origin'}).then(r=>r.json());
+          const r = await fetch(u, { credentials:'same-origin', signal: oddsAbort.signal });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const j = await r.json();
+
+          // N’applique que si toujours la même cible
+          if (oddsKey !== reqKey) return;
           PPP_ACTIVE.__lastOdds = j;   // {combined_pluie, combined_pas_pluie, ...}
           renderOddsFromCache();
-        }catch(_){
-          // no-op
+        }catch(e){
+          if (e?.name === 'AbortError') return; // requête annulée → ignorer
+          // garde "x" si erreur
         }
       }
 
