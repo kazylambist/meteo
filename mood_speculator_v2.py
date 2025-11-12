@@ -3122,7 +3122,7 @@ PPP_HTML = """
          style="margin-bottom:10px; font-size:14px; color:#ccc; display:none;">
     </div>
 
-    <form method="post" action="{{ url_for('ppp') }}" id="pppForm">
+    <form method="post" action="/ppp/bet" id="pppForm">
       <!-- valeurs cachées -->
       <input type="hidden" name="date" id="mDateInput">
       <input type="hidden" name="target_dt" id="mTargetDt">
@@ -3336,7 +3336,7 @@ function initPPPCalendar(ctx){
 
       // Force les champs attendus par l'API
       fd.set('date', key);                               // YYYY-MM-DD
-      fd.set('choice', (document.getElementById('mChoice')?.value || currentPPPChoice() || 'PLUIE').toUpperCase());
+      fd.set('choice', choiceVal || 'PLUIE');            // déjà en majuscules plus haut
       fd.set('target_time', hhmm);                       // HH:MM
       fd.delete('target_dt');                            // évite les collisions si présent
       fd.set('station_id', (document.getElementById('mStationId')?.value || (ctx && ctx.station_id) || 'lfpg_75'));
@@ -3344,7 +3344,7 @@ function initPPPCalendar(ctx){
       // fd.set('amount', String(parseFloat((form.querySelector('[name="amount"]')?.value||'0').replace(',','.'))||0));
 
       try {
-        const resp = await fetch(form.action || '/ppp', {
+        const resp = await fetch('/ppp/bet', {
           method:'POST',
           body: fd,
           credentials:'same-origin',
@@ -7133,6 +7133,34 @@ def wet_observations():
             out[slot_iso] = None
 
     return jsonify(out), 200
+
+@app.post("/ppp/bet")
+@login_required
+def ppp_bet():
+    # Champs requis
+    date_str     = (request.form.get("date") or "").strip()
+    choice       = (request.form.get("choice") or "").strip().upper()
+    target_time  = (request.form.get("target_time") or "18:00").strip()
+    station_id   = (request.form.get("station_id") or "").strip()
+    amount_raw   = (request.form.get("amount") or "0").replace(",", ".")
+    try:
+        amount = float(amount_raw)
+    except ValueError:
+        return jsonify(error="amount invalide"), 400
+    if not (date_str and choice in ("PLUIE","PAS_PLUIE") and station_id):
+        return jsonify(error="champs manquants"), 400
+
+    # Enregistrement (adapter à ton modèle/DAO)
+    try:
+        # ex: create_or_merge_ppp_bet(user=current_user, date=date_str, hhmm=target_time,
+        #                             choice=choice, amount=amount, station_id=station_id)
+        # db.session.commit()
+        new_points = remaining_points(current_user)  # si dispo
+        return jsonify(ok=True, new_points=new_points)
+    except Exception as e:
+        app.logger.exception("ppp_bet failed")
+        db.session.rollback()
+        return jsonify(error="internal"), 500
 
 @app.get("/debug/log")
 def debug_log():
