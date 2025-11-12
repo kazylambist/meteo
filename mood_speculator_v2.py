@@ -3370,8 +3370,6 @@ function initPPPCalendar(ctx){
       const hourSel = document.getElementById('mHour');
       const hhmm = (hourSel && hourSel.value) ? hourSel.value.slice(0,5) : '18:00';
 
-      if (mTimeHidden) mTimeHidden.value = `${mDateInput.value}T${hhmm}`;
-
       const fd = new FormData(form);
       const headers = { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
 
@@ -3422,8 +3420,22 @@ function initPPPCalendar(ctx){
         }
       } catch(_) {}
 
+      // Force les champs attendus par l'API
+      fd.set('date', key);                               // YYYY-MM-DD
+      fd.set('choice', (document.getElementById('mChoice')?.value || currentPPPChoice() || 'PLUIE').toUpperCase());
+      fd.set('target_time', hhmm);                       // HH:MM
+      fd.delete('target_dt');                            // évite les collisions si présent
+      fd.set('station_id', (document.getElementById('mStationId')?.value || (ctx && ctx.station_id) || 'lfpg_75'));
+      // amount déjà présent via l’input du formulaire (sinon forcer:)
+      // fd.set('amount', String(parseFloat((form.querySelector('[name="amount"]')?.value||'0').replace(',','.'))||0));
+
       try {
-        const resp = await fetch(form.action || '/ppp/bet', { method:'POST', body:fd, credentials:'same-origin', headers });
+        const resp = await fetch(form.action || '/ppp/bet', {
+          method:'POST',
+          body: fd,
+          credentials:'same-origin',
+          headers
+        });
         if (!resp.ok) {
           let errMsg = 'La mise a été refusée.';
           try { const j = await resp.clone().json(); if (j && (j.message||j.error)) errMsg = j.message||j.error; } catch(_){}
@@ -3431,8 +3443,12 @@ function initPPPCalendar(ctx){
           return;
         }
 
+        // Sécurise le parse JSON et détecte un éventuel HTML (login, etc.)
         let payload = null;
-        try { payload = await resp.clone().json(); } catch (_){}
+        const ct = resp.headers.get('content-type') || '';
+        if (!/application\/json/i.test(ct)) { alert('Session expirée. Reconnecte-toi.'); return; }
+        try { payload = await resp.json(); } catch (_){ alert('Réponse invalide du serveur.'); return; }
+        if (payload && payload.error) { alert(payload.error); return; }
 
         try {
           const amountInput = form.querySelector('[name="amount"]');
@@ -3673,6 +3689,18 @@ function initPPPCalendar(ctx){
         }
       }
 
+      // Déterminer la dernière mise de cette date pour initialiser l'heure ET le choix
+      function normChoiceVal(x){ return String(x||'').trim().toUpperCase(); }
+      function lastBetOfDay(info){
+        const list = (info && Array.isArray(info.bets)) ? info.bets : [];
+        if (!list.length) return null;
+        // tri par HH:MM croissant, on prend la dernière
+        const sorted = list.slice().sort((a,b)=> String(a.target_time||a.time||'18:00').localeCompare(String(b.target_time||b.time||'18:00')));
+        return sorted[sorted.length-1] || null;
+      }
+      const lastBet = lastBetOfDay(betInfo);
+      const lastChoice = normChoiceVal(lastBet && lastBet.choice) || normChoiceVal(betInfo && betInfo.choice) || '';      
+
       const showForm = !isPast && !(delta <= 3 && !hasBetNow);
       if (form) form.style.display = showForm ? 'block' : 'none';
       if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
@@ -3682,17 +3710,30 @@ function initPPPCalendar(ctx){
         if (mOddsEl) mOddsEl.textContent = String(shownOdds.toFixed(1)).replace('.', ',');
       }
       if (showForm) {
+        // 2.a — Appliquer par défaut le CHOIX pluie / pas_pluie selon la dernière mise
+        if (lastChoice === 'PLUIE' || lastChoice === 'PAS_PLUIE') {
+          // radios
+          const radios = Array.from(document.querySelectorAll('input[name="pppChoice"]'));
+          if (radios.length) {
+            for (const r of radios) r.checked = (normChoiceVal(r.value) === lastChoice);
+          } else {
+            // select fallback
+            const sel = document.getElementById('mChoice');
+            if (sel) sel.value = lastChoice;
+          }
+        }
         const labelEl = document.getElementById('mOddsLabel');
         if (labelEl) labelEl.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
-        if (mOddsEl) mOddsEl.textContent = 'x'; // on attend la vraie cote serveur
-      }
+        if (mOddsEl) mOddsEl.textContent = ''; // // on attend la vraie cote serveur
+      }      
       
       if (showForm) {
         if (mDateInput) mDateInput.value = key;
         const hourSel = document.getElementById('mHour');
         if (hourSel) {
-          const existing = (betInfo && (betInfo.target_time || (betInfo.bets?.[0]?.target_time))) || '';
-          hourSel.value = existing || '18:00';
+          // 2.b — Appliquer l'heure de la dernière mise
+          const existing = (lastBet && (lastBet.target_time || lastBet.time)) || (betInfo && betInfo.target_time) || '';
+          hourSel.value = (existing || '18:00').slice(0,5);          
         }
         if (mTimeHidden) mTimeHidden.value = '';
       }
@@ -3776,8 +3817,8 @@ function initPPPCalendar(ctx){
         sel.addEventListener('change', renderOddsFromCache);
       })();
 
-      // Appel initial non bloquant
-      loadPPPOddsAndRender();
+      // Appel initial: récupère les deux cotes puis affiche selon le choix par défaut défini ci-dessus
+      loadPPPOddsAndRender();      
 
       if (modal) modal.classList.add('open');
     });
