@@ -3114,7 +3114,7 @@ PPP_HTML = """
     <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
 
     <p id="mOddsWrap" style="margin:0 0 8px; font-size:28px; font-weight:900; letter-spacing:.3px;">
-      <span id="mOddsLabel">Cote</span> : x<span id="mOdds"></span>
+      <span id="mOddsLabel">Cote</span> : <span id="mOdds"></span>
     </p>
 
     <div id="mHistory"
@@ -3176,92 +3176,6 @@ PPP_HTML = """
 <script>
 // Contexte actif partagé par tous les calendriers
 const PPP_ACTIVE = { grid:null, ctx:null, lastCell:null };
-
-// Handler unique pour le formulaire
-(function attachPPPSubmitHandlerOnce(){
-  const form = document.getElementById('pppForm');
-  if (!form || form.__pppBound) return;
-  form.__pppBound = true;
-  form.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    const grid = PPP_ACTIVE.grid;
-    if (!grid) return; // aucun calendrier ciblé
-    const modal      = document.getElementById('pppModal');
-    const mDateInput = document.getElementById('mDateInput');
-    const mTimeHidden= document.getElementById('mTargetDt');
-    const mOddsEl    = document.getElementById('mOdds');
-    const hasDate = !!(mDateInput && mDateInput.value);
-    if (!hasDate) { alert("Cliquez d'abord sur un jour."); return; }
-    const hourSel = document.getElementById('mHour');
-    const hhmm = (hourSel && hourSel.value) ? hourSel.value.slice(0,5) : '18:00';
-    if (mTimeHidden) mTimeHidden.value = `${mDateInput.value}T${hhmm}`;
-    const fd = new FormData(form);
-    const headers = { 'Accept':'application/json', 'X-Requested-With':'XMLHttpRequest' };
-    const key = mDateInput.value;
-    const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || PPP_ACTIVE.lastCell);
-    const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase();
-    // feedback immédiat
-    try{ const a=document.getElementById('pppYogaAudio'); if(a){a.currentTime=0;a.play().catch(()=>{});} }catch(_){}
-    if (modal) modal.classList.remove('open');
-    if (cell) flashPPPcell(cell);
-    // icône locale précoce
-    try {
-      if (cell) {
-        let stakeWrap = cell.querySelector('.stake-wrap');
-        const hasIcon = !!(stakeWrap && (stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️')));
-        if (!hasIcon) {
-          const iconHtml = (choiceVal === 'PLUIE')
-            ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
-            : `☀️`;
-          if (!stakeWrap) {
-            stakeWrap = document.createElement('div');
-            stakeWrap.className = 'stake-wrap';
-            stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+0</div>`;
-            cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
-          } else {
-            stakeWrap.insertAdjacentHTML('afterbegin', iconHtml);
-          }
-        }
-      }
-    } catch(_) {}
-    // POST serveur
-    let payload=null;
-    const resp = await fetch(form.action || '/ppp/bet', { method:'POST', body:fd, credentials:'same-origin', headers });
-    if (!resp.ok) {
-      let errMsg='La mise a été refusée.'; try{ const j=await resp.clone().json(); if(j&&(j.message||j.error)) errMsg=j.message||j.error; }catch(_){}
-      alert(errMsg); return;
-    }
-    try{ payload = await resp.clone().json(); }catch(_){}
-    // MAJ UI locale dans **la grille active uniquement**
-    try {
-      const amountInput = form.querySelector('[name="amount"]');
-      const delta = parseFloat(String(amountInput?.value||'0').replace(',','.')) || 0;
-      if (delta>0 && cell){
-        let stakeWrap = cell.querySelector('.stake-wrap');
-        if (!stakeWrap){
-          const iconHtml = (choiceVal==='PLUIE')
-            ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
-            : `☀️`;
-          stakeWrap = document.createElement('div');
-          stakeWrap.className = 'stake-wrap';
-          stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+${fmtPts(delta)}</div>`;
-          cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
-        } else {
-          const amtEl = stakeWrap.querySelector('.stake-amt');
-          const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
-          if (amtEl) amtEl.textContent = '+' + fmtPts(cur + delta);
-        }
-      }
-    } catch(_) {}
-    // MAJ solde
-    try {
-      if (payload && typeof payload.new_points !== 'undefined') {
-        if (window.updateTopbarSolde) window.updateTopbarSolde(payload.new_points);
-        else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
-      } else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
-    } catch(_) {}
-  });
-})();
 
 function initPPPCalendar(ctx){
   let lastClickedCell = null;
@@ -3430,7 +3344,7 @@ function initPPPCalendar(ctx){
       // fd.set('amount', String(parseFloat((form.querySelector('[name="amount"]')?.value||'0').replace(',','.'))||0));
 
       try {
-        const resp = await fetch(form.action || '/ppp/bet', {
+        const resp = await fetch(form.action || '/ppp', {
           method:'POST',
           body: fd,
           credentials:'same-origin',
