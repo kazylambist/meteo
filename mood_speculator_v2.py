@@ -2885,41 +2885,22 @@ PPP_HTML = """
   
   /* --- Animation "ciné douce" pour une mise PPP --- */
   @keyframes pppBetFlash {
-    0%   { background-color: rgba(255, 230, 0, 0.7); }  /* jaune clair, translucide */
-    30%  { background-color: rgba(255, 215, 0, 0.6); }  /* doré chaud */
-    70%  { background-color: rgba(255, 200, 80, 0.3); } /* chaleur diffuse */
-    100% { background-color: transparent; }             /* fondu naturel */
+    0%   { background-color: rgba(255, 230, 0, 0.7); }
+    30%  { background-color: rgba(255, 215, 0, 0.6); }
+    70%  { background-color: rgba(255, 200, 80, 0.3); }
+    100% { background-color: transparent; }
   }
 
-  /* PPP — titre ville centré */
-  .ppp-city{ 
-    text-align:center;
-    margin: 4px 0 8px;
-  }
-  /* Liste de calendriers PPP avec un vrai gap uniforme */
-  .ppp-list{
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 18px;
-  }
-  /* Carte de calendrier */
-  .ppp-card-wrap{
-    padding: 12px 12px 16px;
-    margin-bottom:30px;
-  }
-  .ppp-bet-flash {
-    animation: pppBetFlash 3.2s ease-out forwards;
-    box-shadow: 0 0 14px rgba(255, 220, 60, 0.45); /* halo doux */
-    z-index: 1;
-  }
+  .ppp-city{ text-align:center; margin: 4px 0 8px; }
+  .ppp-list{ display:grid; grid-template-columns:1fr; gap:18px; }
+  .ppp-card-wrap{ padding:12px 12px 16px; margin-bottom:30px; }
+  .ppp-bet-flash { animation: pppBetFlash 3.2s ease-out forwards; box-shadow:0 0 14px rgba(255,220,60,.45); z-index:1; }
+
   .user-menu { position: relative; display: inline-block; }
-  .user-trigger{
-    background: transparent; border: 0; color: #fff; font-weight: 800;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
-  }
-  .user-trigger .caret{ opacity: .8; font-size: 12px; }
+  .user-trigger{ background:transparent; border:0; color:#fff; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .user-trigger .caret{ opacity:.8; font-size:12px; }
   .user-dropdown{
-    position: absolute; right: 0; top: 120%;
+    position:absolute; right:0; top:120%;
     background: rgba(13,20,40,.98);
     border: 1px solid rgba(255,255,255,.08);
     border-radius: 12px;
@@ -2927,79 +2908,53 @@ PPP_HTML = """
     min-width: 180px; padding: 6px; display: none; z-index: 1000;
     backdrop-filter: blur(6px);
   }
-  .user-dropdown.open{ display: block; }
+  .user-dropdown.open{ display:block; }
   .user-dropdown .item{
-    display: block; width: 100%; text-align: left;
-    padding: 10px 12px; border-radius: 10px;
-    background: transparent; color: #cfe3ff; text-decoration: none;
-    border: 0; cursor: pointer; font-weight: 700;
+    display:block; width:100%; text-align:left;
+    padding:10px 12px; border-radius:10px;
+    background:transparent; color:#cfe3ff; text-decoration:none;
+    border:0; cursor:pointer; font-weight:700;
   }
-  .user-dropdown .item:hover{ background: rgba(120,180,255,.12); color: #79e7ff; }
-  .user-dropdown .item.disabled{
-    opacity: .5; cursor: default; pointer-events: none;
-  }
+  .user-dropdown .item:hover{ background:rgba(120,180,255,.12); color:#79e7ff; }
+  .user-dropdown .item.disabled{ opacity:.5; cursor:default; pointer-events:none; }
+
   /* Bouton “Échanges 🤝” — vert foncé */
   .user-dropdown .item[href="/trade/"] {
-    background: #1e3b33;  /* vert forêt plus foncé */
-    color: #f3f6fb;
-    font-weight: 800;
-    border: none;
+    background:#1e3b33; color:#f3f6fb; font-weight:800; border:none;
   }
-  .user-dropdown .item[href="/trade/"]:hover {
-    background: #25493f;  /* vert légèrement plus clair au survol */
-  }
+  .user-dropdown .item[href="/trade/"]:hover { background:#25493f; }
+
   /* Bouton “Profil 👔” — violet foncé */
   .user-dropdown .item[href="{{ url_for('cabine_page') }}"] {
-    background: #2e2246;  /* violet nuit profond */
-    color: #f3f6fb;
-    font-weight: 800;
-    border: none;
+    background:#2e2246; color:#f3f6fb; font-weight:800; border:none;
   }
-  .user-dropdown .item[href="{{ url_for('cabine_page') }}"]:hover {
-    background: #3a2b59;  /* nuance plus lumineuse au survol */
-  }
+  .user-dropdown .item[href="{{ url_for('cabine_page') }}"]:hover { background:#3a2b59; }
 
   /* Bouton “Se déconnecter” — rouge foncé */
   .user-dropdown .item[href="/logout"] {
-    background: #4a1d1d;  /* rouge brun foncé */
-    color: #f3f6fb;
-    font-weight: 800;
-    border: none;
+    background:#4a1d1d; color:#f3f6fb; font-weight:800; border:none;
   }
-  .user-dropdown .item[href="/logout"]:hover {
-    background: #5c2323;  /* rouge un peu plus clair au survol */
-  } 
+  .user-dropdown .item[href="/logout"]:hover { background:#5c2323; }
+
   /* Suppression complète de l’affichage des cotes */
-  .ppp-day .odds {
-    display: none !important;
-    visibility: hidden !important;
-  }  
-  /* Pousse le lien Cabine tout à droite sur PPP */
-  .topbar .nav-right { display: flex; align-items: center; }
-  .topbar .nav-right a[href^="/🧢"] { margin-left: auto; }
+  .ppp-day .odds { display:none !important; visibility:hidden !important; }
 
-  /* (optionnel) un petit espace fixe entre Carte et le bord avant Cabine */
-  .topbar .nav-right .brand-map { margin-right: 1px; }
+  /* Aligne Cabine à droite */
+  .topbar .nav-right { display:flex; align-items:center; }
+  .topbar .nav-right a[href^="/🧢"] { margin-left:auto; }
+  .topbar .nav-right .brand-map { margin-right:1px; }
 
-  /* Fullscreen background image allégée */
+  /* Fond fullscreen */
   body.trade-page::before{
-    content:"";
-    position:fixed;
-    inset:0;
-    z-index:-2;
-    background:
-      linear-gradient(rgba(0,0,0,0.06), rgba(0,0,0,0.06)),
-      url("/static/trade/fondbleu.jpg") center / cover no-repeat fixed;
+    content:""; position:fixed; inset:0; z-index:-2;
+    background: linear-gradient(rgba(0,0,0,.06), rgba(0,0,0,.06)), url("/static/trade/fondbleu.jpg") center / cover no-repeat fixed;
   }
   body.trade-page::after{
-  content:"";
-  position:fixed;
-  inset:0;
-  z-index:-1;
-  background: radial-gradient(100% 120% at 50% 0%,
+    content:""; position:fixed; inset:0; z-index:-1;
+    background: radial-gradient(100% 120% at 50% 0%,
               color-mix(in srgb, #40586a 35%, transparent) 0%,
               color-mix(in srgb, #40586a 75%, #000 25%) 100%);
-  pointer-events:none;
+    pointer-events:none;
   }
   .time-row{ margin-top:12px; }
   .time-row label{ display:block; font-size:12px; opacity:.8; margin-bottom:6px; }
@@ -3033,7 +2988,7 @@ PPP_HTML = """
             <div class="user-dropdown" id="userDropdown" role="menu">
               <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
               <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
-              <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>            
+              <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>
               <a class="item" href="/carte">Carte 🗺️</a>
               <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
               <div class="submenu">
@@ -3044,7 +2999,7 @@ PPP_HTML = """
                     <button type="submit" class="danger">Supprimer ce compte</button>
                   </form>
                 </div>
-              </div>       
+              </div>
               <a class="item" href="/logout">Se déconnecter</a>
             </div>
           </div>
@@ -3101,9 +3056,9 @@ PPP_HTML = """
           boosts_map: {{ cal.boosts_map | tojson }}
         });
       </script>
-    </section>      
+    </section>
   {% endfor %}
-  </div>  
+  </div>
 </div>
 
 <!-- modal -->
@@ -3123,15 +3078,11 @@ PPP_HTML = """
     </div>
 
     <form method="post" action="/ppp/bet" id="pppForm">
-      <!-- valeurs cachées -->
       <input type="hidden" name="date" id="mDateInput">
       <input type="hidden" name="target_dt" id="mTargetDt">
       <input type="hidden" name="station_id" id="mStationId" value="">
 
-      <div class="grid cols-3"
-           style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-
-        <!-- Choix pluie / pas pluie -->
+      <div class="grid cols-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
         <div>
           <label for="mChoice">Choix</label>
           <select name="choice" id="mChoice" required>
@@ -3140,28 +3091,18 @@ PPP_HTML = """
           </select>
         </div>
 
-        <!-- Choix de l’heure -->
         <div>
           <label for="mHour">Heure</label>
           <select name="target_time" id="mHour" required>
             {% for h in range(0, 24) %}
-            <option value="{{ "%02d:00" % h }}" {% if h == 15 %}selected{% endif %}>
-              {{ "%02d" % h }}h
-            </option>
+            <option value="{{ "%02d:00" % h }}" {% if h == 15 %}selected{% endif %}>{{ "%02d" % h }}h</option>
             {% endfor %}
           </select>
         </div>
 
-        <!-- Montant -->
         <div>
           <label for="mAmount">Montant (points)</label>
-          <input type="number"
-                 name="amount"
-                 id="mAmount"
-                 min="0"
-                 step="0.1"
-                 value="1.0"
-                 required>
+          <input type="number" name="amount" id="mAmount" min="0" step="0.1" value="1.0" required>
         </div>
       </div>
 
@@ -3193,12 +3134,12 @@ function initPPPCalendar(ctx){
     return '';
   }
 
-  // --- Aujourd'hui (Europe/Paris) ---
+  // Aujourd'hui (Europe/Paris)
   const now = new Date();
   const parisNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
   const today = new Date(parisNow.getFullYear(), parisNow.getMonth(), parisNow.getDate());
 
-  // Cotes de base côté client
+  // Cotes de base côté client (toujours masquées à l'écran)
   const ODDS = {
     0:null,1:1.0,2:1.0,3:1.1,4:1.2,5:1.3,6:1.4,7:1.5,8:1.6,9:1.7,10:1.8,
     11:2.0,12:2.0,13:2.0,14:2.0,15:2.0,16:2.0,17:2.0,18:2.0,19:2.5,20:2.5,
@@ -3214,22 +3155,16 @@ function initPPPCalendar(ctx){
   const form       = document.getElementById('pppForm');
   const mTimeHidden = document.getElementById('mTargetDt');
 
-  // 🔓 Débloque l'audio au premier geste utilisateur
+  // Débloque l'audio au premier geste utilisateur
   (function unlockPPP_AudioOnce(){
     function unlock() {
       const a = document.getElementById('pppYogaAudio');
       if (!a) return done();
       const p = a.play();
-      if (p && p.then) {
-        p.then(() => { a.pause(); a.currentTime = 0; done(); }).catch(done);
-      } else {
-        done();
-      }
+      if (p && p.then) { p.then(()=>{ a.pause(); a.currentTime=0; done(); }).catch(done); }
+      else { done(); }
     }
-    function done(){
-      document.removeEventListener('pointerdown', unlock, true);
-      document.removeEventListener('keydown', unlock, true);
-    }
+    function done(){ document.removeEventListener('pointerdown', unlock, true); document.removeEventListener('keydown', unlock, true); }
     document.addEventListener('pointerdown', unlock, true);
     document.addEventListener('keydown', unlock, true);
   })();
@@ -3241,18 +3176,9 @@ function initPPPCalendar(ctx){
   const BOOSTS  = ctx.boosts_map || {};
   const qCity   = ctx.city_label;
 
-  console.debug('[ppp] BOOSTS from server:', BOOSTS);
-
-  // Utils
-  function ymd(d){
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    const day = String(d.getDate()).padStart(2,'0');
-    return `${y}-${m}-${day}`;
-  }
-  function fr(d){
-    return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' });
-  }
+  // Utils date
+  function ymd(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
+  function fr(d){ return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' }); }
   function hasBetFor(key){
     const b = MY_BETS && MY_BETS[key];
     if (!b) return false;
@@ -3263,175 +3189,14 @@ function initPPPCalendar(ctx){
   const svgDrop = `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`;
   const svgSun  = "☀️";
 
-  // Rendu des cotes
+  // Rendu des cotes (cachées par CSS, mais utilisées pour le calcul)
   function renderOdds(oddsEl, baseOdds, boostVal){
     if (!oddsEl) return;
     const base  = Number.isFinite(Number(baseOdds)) ? Number(baseOdds) : 0;
     const boost = Number.isFinite(Number(boostVal)) ? Number(boostVal) : 0;
     const val   = base + boost;
-    oddsEl.textContent = val > 0 ? ('x' + val.toString().replace('.', ',')) : '';
+    oddsEl.textContent = val > 0 ? ('x' + String(val).replace('.', ',')) : '';
     oddsEl.classList.toggle('boosted', boost > 0);
-  }
-
-  // Submit guard
-  if (form) {
-    form.addEventListener('submit', async function (e) {
-      e.preventDefault(); // ❌ garde ajax
-
-      const hasDate = !!(mDateInput && mDateInput.value);
-      if (!hasDate) { alert("Cliquez d'abord sur un jour du calendrier pour choisir la date."); return; }
-
-      const hourSel = document.getElementById('mHour');
-      const hhmm = (hourSel && hourSel.value) ? hourSel.value.slice(0,5) : '18:00';
-
-      const fd = new FormData(form);
-      const headers = { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
-
-      const key = mDateInput.value;
-      const cell = (grid.querySelector(`.ppp-day[data-key="${key}"]`) || lastClickedCell);
-
-      const choiceVal = (document.getElementById('mChoice')?.value || '').toUpperCase();
-      const dayInfo = (MY_BETS && MY_BETS[key]) ? (MY_BETS[key].bets || []) : [];
-
-      const opposite = (c)=> (c === 'PLUIE' ? 'PAS_PLUIE' : 'PLUIE');
-      const conflict = dayInfo.some(b => {
-        const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
-        const bChoice = String(b.choice || '').toUpperCase();
-        return bTime === hhmm && bChoice === opposite(choiceVal);
-      });
-      if (conflict) {
-        alert(`Déjà une mise "${opposite(choiceVal) === 'PLUIE' ? 'Pluie' : 'Pas Pluie'}" à ${hhmm}. Impossible de miser l'inverse au même horaire.`);
-        return;
-      }
-
-      const uniqueHours = new Set(dayInfo.map(b => String(b.target_time || b.time || '18:00').slice(0,5)));
-      if (!uniqueHours.has(hhmm) && uniqueHours.size >= 3) {
-        const list = Array.from(uniqueHours).sort().join(', ');
-        alert(`Limite de 3 horaires atteinte pour ce jour (${list}). Vous pouvez remiser sur ces horaires, pas en ajouter un nouveau.`);
-        return;
-      }
-
-      try { const audio = document.getElementById('pppYogaAudio'); if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); } } catch(_) {}
-
-      if (modal) modal.classList.remove('open');
-      flashPPPcell(cell);
-
-      try {
-        if (cell) {
-          let stakeWrap = cell.querySelector('.stake-wrap');
-          const hasIcon = !!(stakeWrap && (stakeWrap.querySelector('.icon-drop') || (stakeWrap.textContent||'').includes('☀️')));
-          if (!hasIcon) {
-            const iconHtml = (choiceVal === 'PLUIE') ? svgDrop : `☀️`;
-            if (!stakeWrap) {
-              stakeWrap = document.createElement('div');
-              stakeWrap.className = 'stake-wrap';
-              stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+0</div>`;
-              cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
-            } else {
-              stakeWrap.insertAdjacentHTML('afterbegin', iconHtml);
-            }
-          }
-        }
-      } catch(_) {}
-
-      // Force les champs attendus par l'API
-      fd.set('date', key);                               // YYYY-MM-DD
-      fd.set('choice', choiceVal || 'PLUIE');            // déjà en majuscules plus haut
-      fd.set('target_time', hhmm);                       // HH:MM
-      fd.delete('target_dt');                            // évite les collisions si présent
-      fd.set('station_id', (document.getElementById('mStationId')?.value || (ctx && ctx.station_id) || 'lfpg_75'));
-      // amount déjà présent via l’input du formulaire (sinon forcer:)
-      // fd.set('amount', String(parseFloat((form.querySelector('[name="amount"]')?.value||'0').replace(',','.'))||0));
-
-      try {
-        const resp = await fetch('/ppp/bet', {
-          method:'POST',
-          body: fd,
-          credentials:'same-origin',
-          headers
-        });
-        if (!resp.ok) {
-          let errMsg = 'La mise a été refusée.';
-          try { const j = await resp.clone().json(); if (j && (j.message||j.error)) errMsg = j.message||j.error; } catch(_){}
-          alert(errMsg);
-          return;
-        }
-
-        // Sécurise le parse JSON et détecte un éventuel HTML (login, etc.)
-        let payload = null;
-        const ct = resp.headers.get('content-type') || '';
-        if (!/application\/json/i.test(ct)) { alert('Session expirée. Reconnecte-toi.'); return; }
-        try { payload = await resp.json(); } catch (_){ alert('Réponse invalide du serveur.'); return; }
-        if (payload && payload.error) { alert(payload.error); return; }
-
-        try {
-          const amountInput = form.querySelector('[name="amount"]');
-          if (amountInput && cell) {
-            const delta = parseFloat(String(amountInput.value).replace(',', '.')) || 0;
-            if (delta > 0) {
-              let stakeWrap = cell.querySelector('.stake-wrap');
-              if (!stakeWrap) {
-                const iconHtml = (choiceVal === 'PLUIE') ? svgDrop : `☀️`;
-                stakeWrap = document.createElement('div');
-                stakeWrap.className = 'stake-wrap';
-                stakeWrap.innerHTML = `${iconHtml}<div class="stake-amt">+${fmtPts(delta)}</div>`;
-                cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
-              } else {
-                const amtEl = stakeWrap.querySelector('.stake-amt');
-                const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
-                if (amtEl) amtEl.textContent = '+' + fmtPts(cur + delta);
-              }
-            }
-          }
-        } catch(_) {}
-
-        try {
-          const amountInput = form.querySelector('[name="amount"]');
-          const delta = parseFloat(String(amountInput?.value || '0').replace(',', '.')) || 0;
-          const choiceVal2 = (document.getElementById('mChoice')?.value || '').toUpperCase();
-          const hhmmNow = (document.getElementById('mHour')?.value || '18:00').slice(0,5);
-          const oddNow = (mOddsEl?.textContent ? parseFloat(String(mOddsEl.textContent).replace('x','').replace(',','.')) : undefined);
-          const odd1 = Math.round(((Number.isFinite(oddNow) && oddNow > 0) ? oddNow : undefined) * 10) / 10;
-
-          if (!MY_BETS[key]) MY_BETS[key] = { bets: [], amount: 0, choice: choiceVal2 };
-          const list = Array.isArray(MY_BETS[key].bets) ? MY_BETS[key].bets : (MY_BETS[key].bets = []);
-
-          let merged = false;
-          for (const b of list) {
-            const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
-            const bChoice = String(b.choice || '').toUpperCase();
-            const bOdd = Math.round(((Number.isFinite(+b.odds) && +b.odds > 0) ? +b.odds : odd1) * 10) / 10;
-            if (bTime === hhmmNow && bChoice === choiceVal2 && bOdd === odd1) {
-              b.amount = (Number(b.amount)||0) + delta;
-              merged = true;
-              break;
-            }
-          }
-          if (!merged) {
-            list.push({ amount: delta, target_time: hhmmNow, choice: choiceVal2, odds: odd1, when: new Date().toISOString() });
-          }
-          MY_BETS[key].amount = (Number(MY_BETS[key].amount)||0) + delta;
-        } catch(_) {}
-
-        try {
-          if (payload && typeof payload.new_points !== 'undefined') {
-            if (window.updateTopbarSolde) window.updateTopbarSolde(payload.new_points);
-            else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
-            else {
-              const soldeEl = document.querySelector('#solde-points, .solde-points');
-              if (soldeEl) soldeEl.textContent = Number(payload.new_points).toFixed(1).replace('.', ',');
-            }
-          } else if (window.refreshTopbarSolde) {
-            window.refreshTopbarSolde();
-          }
-        } catch(_) {}
-
-      } catch (e2) {
-        console.error('[ppp] submit bet error:', e2);
-        form.removeEventListener('submit', arguments.callee);
-        form.submit();
-      }
-    });
   }
 
   // Normalisation ODDS/BOOSTS
@@ -3441,7 +3206,7 @@ function initPPPCalendar(ctx){
   });
   const BOOSTS_SAFE = (BOOSTS && typeof BOOSTS === 'object') ? BOOSTS : {};
 
-  // --- Grille de 31 jours (démarre à J-3) ---
+  // Grille de jours
   const START_SHIFT = -3;
   const TOTAL_DAYS  = 34;
 
@@ -3560,7 +3325,7 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdx = Math.max(0, Math.min(31, Number((grid.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
+          const baseIdx = Math.max(0, Math.min(31, Number((grid.querySelector(\`.ppp-day[data-key="${key}"]\`)?.dataset.idx)||0)));
           const baseOdds = ODDS_SAFE[baseIdx];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
@@ -3569,7 +3334,7 @@ function initPPPCalendar(ctx){
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
 
-          const groups = new Map(); // key: "HH:MM|CHOICE|ODD1D"
+          const groups = new Map();
           for (const b of list) {
             const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
             const choice = normChoice(b.choice) || normChoice(betInfo && betInfo.choice) || 'PLUIE';
@@ -3577,7 +3342,7 @@ function initPPPCalendar(ctx){
             const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
             const odd1 = Math.round(usedOdd * 10) / 10;
 
-            const k = `${hhmm}|${choice}|${odd1}`;
+            const k = \`\${hhmm}|\${choice}|\${odd1}\`;
             const cur = groups.get(k) || { amount: 0, hhmm, choice, odd1 };
             cur.amount += (Number(b.amount) || 0);
             groups.set(k, cur);
@@ -3588,14 +3353,14 @@ function initPPPCalendar(ctx){
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
             const icon = g.choice === 'PLUIE' ? '💧' : '☀️';
-            lines.push(`Mises ${icon} ${g.hhmm} — ${fmtPts(g.amount)} pts — (x${oddTxt})`);
+            lines.push(\`Mises \${icon} \${g.hhmm} — \${fmtPts(g.amount)} pts — (x\${oddTxt})\`);
           }
-          if (boltCount > 0) lines.push(`Éclairs : ${boltCount} — (x5)`);
+          if (boltCount > 0) lines.push(\`Éclairs : \${boltCount} — (x5)\`);
 
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
-          lines.push(`Gains potentiels : ${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
+          lines.push(\`Gains potentiels : \${potentialWithBoosts.toFixed(2).replace('.', ',')} pts\`);
 
-          histWrap.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+          histWrap.innerHTML = lines.map(l => \`<div>\${l}</div>\`).join('');
           histWrap.style.display = 'block';
         } else {
           histWrap.innerHTML = `<div>Aucune mise pour ce jour.</div>`;
@@ -3603,17 +3368,16 @@ function initPPPCalendar(ctx){
         }
       }
 
-      // Déterminer la dernière mise de cette date pour initialiser l'heure ET le choix
+      // Choix par défaut selon la dernière mise
       function normChoiceVal(x){ return String(x||'').trim().toUpperCase(); }
       function lastBetOfDay(info){
         const list = (info && Array.isArray(info.bets)) ? info.bets : [];
         if (!list.length) return null;
-        // tri par HH:MM croissant, on prend la dernière
         const sorted = list.slice().sort((a,b)=> String(a.target_time||a.time||'18:00').localeCompare(String(b.target_time||b.time||'18:00')));
         return sorted[sorted.length-1] || null;
       }
       const lastBet = lastBetOfDay(betInfo);
-      const lastChoice = normChoiceVal(lastBet && lastBet.choice) || normChoiceVal(betInfo && betInfo.choice) || '';      
+      const lastChoice = normChoiceVal(lastBet && lastBet.choice) || normChoiceVal(betInfo && betInfo.choice) || '';
 
       const showForm = !isPast && !(delta <= 3 && !hasBetNow);
       if (form) form.style.display = showForm ? 'block' : 'none';
@@ -3624,36 +3388,31 @@ function initPPPCalendar(ctx){
         if (mOddsEl) mOddsEl.textContent = String(shownOdds.toFixed(1)).replace('.', ',');
       }
       if (showForm) {
-        // 2.a — Appliquer par défaut le CHOIX pluie / pas_pluie selon la dernière mise
         if (lastChoice === 'PLUIE' || lastChoice === 'PAS_PLUIE') {
-          // radios
           const radios = Array.from(document.querySelectorAll('input[name="pppChoice"]'));
           if (radios.length) {
             for (const r of radios) r.checked = (normChoiceVal(r.value) === lastChoice);
           } else {
-            // select fallback
             const sel = document.getElementById('mChoice');
             if (sel) sel.value = lastChoice;
           }
         }
         const labelEl = document.getElementById('mOddsLabel');
         if (labelEl) labelEl.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
-        if (mOddsEl) mOddsEl.textContent = ''; // // on attend la vraie cote serveur
-      }      
-      
+        if (mOddsEl) mOddsEl.textContent = ''; // attend la cote serveur
+      }
+
       if (showForm) {
         if (mDateInput) mDateInput.value = key;
         const hourSel = document.getElementById('mHour');
         if (hourSel) {
-          // 2.b — Appliquer l'heure de la dernière mise
           const existing = (lastBet && (lastBet.target_time || lastBet.time)) || (betInfo && betInfo.target_time) || '';
-          hourSel.value = (existing || '18:00').slice(0,5);          
+          hourSel.value = (existing || '18:00').slice(0,5);
         }
         if (mTimeHidden) mTimeHidden.value = '';
       }
 
       const hidSid = document.getElementById('mStationId');
-      // Résolution station robuste
       function getPPPStationId(){
         const fromHid  = (hidSid && hidSid.value) ? String(hidSid.value).trim() : '';
         const fromCtx  = (PPP_ACTIVE && PPP_ACTIVE.ctx && PPP_ACTIVE.ctx.station_id) ? String(PPP_ACTIVE.ctx.station_id).trim() : '';
@@ -3662,7 +3421,7 @@ function initPPPCalendar(ctx){
         return fromHid || fromCtx || fromGrid || fromBody || 'lfpg_75';
       }
       if (hidSid) hidSid.value = getPPPStationId();
-      // --- Helpers choix + rendu cote ---
+
       function currentPPPChoice(){
         const r = document.querySelector('input[name="pppChoice"]:checked');
         if (r && r.value) return r.value.toUpperCase();
@@ -3675,28 +3434,22 @@ function initPPPCalendar(ctx){
         const j = PPP_ACTIVE.__lastOdds || {};
         const labelEl = document.getElementById('mOddsLabel');
         const oddsEl  = document.getElementById('mOdds');
-        const c = currentPPPChoice(); // 'PLUIE' | 'PAS_PLUIE'
+        const c = currentPPPChoice();
         const val = Number(c === 'PLUIE' ? j.combined_pluie : j.combined_pas_pluie);
-
-        // Si valeur absente, tente combined_chosen
         const fallback = Number(j.combined_chosen || j.base_odds || 0);
         const v = Number.isFinite(val) && val > 0 ? val : fallback;
-
         if (oddsEl) oddsEl.textContent = v > 0 ? String(v.toFixed(1)).replace('.', ',') : '';
         if (labelEl) labelEl.textContent = (c === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
       }
 
-      // Gestion anti-course
-      let oddsAbort = null;                 // AbortController courant
-      let oddsKey   = null;                 // "YYYY-MM-DD|station_id"      
+      let oddsAbort = null;
+      let oddsKey   = null;
 
-      // --- Récupération cotes combinées (historique + PPP_ODDS) ---
       async function loadPPPOddsAndRender(){
         const dateStr  = (mDateInput && mDateInput.value) || key;
         const station  = (hidSid && hidSid.value) || (ctx && ctx.station_id) || 'lfpg_75';
         if (!dateStr || !station) return;
 
-        // Annule la requête précédente si encore en vol
         try { oddsAbort?.abort(); } catch(_) {}
         oddsAbort = new AbortController();
         const reqKey = `${dateStr}|${station}`;
@@ -3707,18 +3460,14 @@ function initPPPCalendar(ctx){
           const r = await fetch(u, { credentials:'same-origin', signal: oddsAbort.signal });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const j = await r.json();
-
-          // N’applique que si toujours la même cible
           if (oddsKey !== reqKey) return;
-          PPP_ACTIVE.__lastOdds = j;   // {combined_pluie, combined_pas_pluie, ...}
+          PPP_ACTIVE.__lastOdds = j;
           renderOddsFromCache();
         }catch(e){
-          if (e?.name === 'AbortError') return; // requête annulée → ignorer
-          // garde "x" si erreur
+          if (e?.name === 'AbortError') return;
         }
       }
 
-      // Écouteurs de changement de choix
       document.querySelectorAll('input[name="pppChoice"]').forEach(el=>{
         if (el.__pppBound) return;
         el.__pppBound = true;
@@ -3731,9 +3480,7 @@ function initPPPCalendar(ctx){
         sel.addEventListener('change', renderOddsFromCache);
       })();
 
-      // Appel initial: récupère les deux cotes puis affiche selon le choix par défaut défini ci-dessus
-      loadPPPOddsAndRender();      
-
+      loadPPPOddsAndRender();
       if (modal) modal.classList.add('open');
     });
 
@@ -3743,7 +3490,7 @@ function initPPPCalendar(ctx){
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(o => {
     if (!o.textContent || !o.textContent.trim()) return;
-    o.textContent = o.textContent.replace(/^[⚡\s]+/g, '').replace(/^x?/, 'x');
+    o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
   });
 
   // Réconciliation des jours passés
@@ -3775,18 +3522,14 @@ function initPPPCalendar(ctx){
     return wrap;
   }
 
-  // 🔶 Effet visuel de mise
+  // Effet visuel de mise
   function flashPPPcell(cell){
     if (!cell) return;
     cell.classList.add('ppp-bet-flash');
     setTimeout(() => { cell.classList.remove('ppp-bet-flash'); }, 3200);
   }
 
-  function addDaysLocal(d, n){
-    const x = new Date(d.getTime());
-    x.setDate(x.getDate() + n);
-    return x;
-  }
+  function addDaysLocal(d, n){ const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
   function ymdParis(d){
     const y = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', year:'numeric' });
     const m = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', month:'2-digit' });
@@ -3807,7 +3550,7 @@ function initPPPCalendar(ctx){
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
-    const cell = grid.querySelector(`.ppp-day[data-key="${todayKey}"]`);
+    const cell = grid.querySelector(\`.ppp-day[data-key="\${todayKey}"]\`);
     if (!cell) return;
 
     const wrap = ensureForecastWrap(cell);
@@ -3839,7 +3582,7 @@ function initPPPCalendar(ctx){
       for (const f of data.forecast5) {
         const dt = new Date(f.date + 'T00:00:00');
         if (dt < today || dt > limitEnd) continue;
-        const cell = grid.querySelector(`.ppp-day[data-key="${f.date}"]`);
+        const cell = grid.querySelector(\`.ppp-day[data-key="\${f.date}"]\`);
         if (!cell) continue;
         const wrap = ensureForecastWrap(cell);
         let isRain = false;
@@ -3858,17 +3601,13 @@ function initPPPCalendar(ctx){
 
   // Fermer la modale
   if (mCancel) {
-    mCancel.addEventListener('click', function () {
-      if (modal) modal.classList.remove('open');
-    });
+    mCancel.addEventListener('click', function () { if (modal) modal.classList.remove('open'); });
   }
   if (modal) {
-    modal.addEventListener('click', function (e) {
-      if (e.target === modal) modal.classList.remove('open');
-    });
+    modal.addEventListener('click', function (e) { if (e.target === modal) modal.classList.remove('open'); });
   }
 
-  // --- Gestion du stock d'éclairs ---
+  // Gestion du stock d'éclairs
   function setBoltCount(n){
     const bolt = document.getElementById('boltTool');
     if (!bolt) return;
@@ -3887,7 +3626,7 @@ function initPPPCalendar(ctx){
     }catch(_){}
   }
 
-  // --- Drag source de l’éclair (unique) ---
+  // Drag source de l’éclair
   const bolt = document.getElementById('boltTool');
   if (bolt){
     fetchBoltCount();
@@ -3895,18 +3634,12 @@ function initPPPCalendar(ctx){
     bolt.style.webkitUserDrag = 'element';
     bolt.addEventListener('dragstart', (ev) => {
       const count = Number(bolt.dataset.count || '0');
-      if (count <= 0) {
-        ev.preventDefault();
-        return;
-      }
-      try {
-        ev.dataTransfer.setData('text/plain', 'bolt');
-        ev.dataTransfer.effectAllowed = 'copy';
-      } catch (e) { /* no-op */ }
+      if (count <= 0) { ev.preventDefault(); return; }
+      try { ev.dataTransfer.setData('text/plain', 'bolt'); ev.dataTransfer.effectAllowed = 'copy'; } catch (e) {}
     });
   }
 
-  // --- Utilitaire: cible -> cellule robuste ---
+  // Util: évènement -> cellule
   function cellFromEvent(ev){
     let t = ev.target;
     if (t && t.nodeType === 3) t = t.parentElement;
@@ -3915,10 +3648,9 @@ function initPPPCalendar(ctx){
     return (cell && grid.contains(cell)) ? cell : null;
   }
 
-  // --- DnD délégué (unique) ---
+  // DnD délégué
   grid.addEventListener('dragenter', (ev) => {
-    const cell = cellFromEvent(ev);
-    if (!cell) return;
+    const cell = cellFromEvent(ev); if (!cell) return;
     const ok = hasBetFor(cell.dataset.key);
     cell.classList.add('drop-candidate');
     cell.classList.toggle('drop-ok', ok);
@@ -3926,22 +3658,19 @@ function initPPPCalendar(ctx){
   });
 
   grid.addEventListener('dragover', (ev) => {
-    const cell = cellFromEvent(ev);
-    if (!cell) return;
+    const cell = cellFromEvent(ev); if (!cell) return;
     ev.preventDefault();
     const ok = hasBetFor(cell.dataset.key);
     try { ev.dataTransfer.dropEffect = ok ? 'copy' : 'none'; } catch (_) {}
   });
 
   grid.addEventListener('dragleave', (ev) => {
-    const cell = cellFromEvent(ev);
-    if (!cell) return;
+    const cell = cellFromEvent(ev); if (!cell) return;
     cell.classList.remove('drop-candidate','drop-ok','drop-nope');
   });
 
   grid.addEventListener('drop', async (ev) => {
-    const cell = cellFromEvent(ev);
-    if (!cell) return;
+    const cell = cellFromEvent(ev); if (!cell) return;
     ev.preventDefault();
     cell.classList.remove('drop-candidate','drop-ok','drop-nope');
 
@@ -3964,11 +3693,7 @@ function initPPPCalendar(ctx){
       const resp = await fetch('/ppp/boost', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: key,
-          value: 5.0,
-          station_id: ctx.station_id
-        })
+        body: JSON.stringify({ date: key, value: 5.0, station_id: ctx.station_id })
       });
 
       let total = 0;
@@ -3982,9 +3707,9 @@ function initPPPCalendar(ctx){
             if (!Number.isNaN(v)) { total = v; break; }
           }
         }
-        console.debug('[ppp] boost resp:', json, '→ total=', total);
       } catch (e) {
-        console.warn('[ppp] boost: réponse non-JSON ou vide, fallback +5', e);
+        const prev = Number(BOOSTS_SAFE[key] || 0);
+        total = prev + 5;
       }
 
       if (!Number.isFinite(total) || total <= 0) {
@@ -4005,7 +3730,117 @@ function initPPPCalendar(ctx){
   });
 } // ← fin de initPPPCalendar(ctx)
 
-// Bootstrap: lance pour chaque calendrier collecté, encapsulé
+// ----- Handler global unique (hors init) -----
+(function attachPPPSubmitHandlerOnce(){
+  const form = document.getElementById('pppForm');
+  if (!form || form.__pppBound) return;
+  form.__pppBound = true;
+
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const grid  = PPP_ACTIVE.grid;
+    const ctx   = PPP_ACTIVE.ctx;
+    const cell  = PPP_ACTIVE.lastCell;
+
+    const modal      = document.getElementById('pppModal');
+    const mDateInput = document.getElementById('mDateInput');
+    const hourEl     = document.getElementById('mHour');
+    const choiceSel  = document.getElementById('mChoice');
+
+    if (!mDateInput || !mDateInput.value) { alert("Cliquez d'abord sur un jour du calendrier."); return; }
+    const key    = mDateInput.value;                       // YYYY-MM-DD
+    const hhmm   = (hourEl && hourEl.value ? hourEl.value : '18:00').slice(0,5);
+    const choiceVal = (choiceSel?.value || 'PLUIE').toUpperCase();
+
+    // Audio + feedback
+    try{ const a=document.getElementById('pppYogaAudio'); if(a){a.currentTime=0;a.play().catch(()=>{});} }catch(_){}
+    if (modal) modal.classList.remove('open');
+    if (cell) { cell.classList.add('ppp-bet-flash'); setTimeout(()=>cell.classList.remove('ppp-bet-flash'), 3200); }
+
+    // Payload
+    const fd = new FormData(form);
+    fd.set('date', key);
+    fd.set('choice', choiceVal);
+    fd.set('target_time', hhmm);
+    fd.delete('target_dt');
+    const sid = document.getElementById('mStationId')?.value || (PPP_ACTIVE?.ctx?.station_id) || 'lfpg_75';
+    fd.set('station_id', sid);
+
+    // Envoi
+    const resp = await fetch('/ppp/bet', {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin',
+      headers: { 'Accept':'application/json', 'X-Requested-With':'XMLHttpRequest' }
+    });
+    if (!resp.ok) {
+      let msg = 'La mise a été refusée.';
+      try{ const j=await resp.clone().json(); if(j&&(j.message||j.error)) msg=j.message||j.error; }catch(_){}
+      alert(msg); return;
+    }
+    const ct = resp.headers.get('content-type') || '';
+    if (!/application\\/json/i.test(ct)) { alert('Session expirée. Reconnecte-toi.'); return; }
+    let payload=null; try{ payload=await resp.json(); }catch(_){ alert('Réponse invalide du serveur.'); return; }
+    if (payload && payload.error){ alert(payload.error); return; }
+
+    // MAJ mémoire locale (bets_map) pour que hasBetFor(key) soit vrai tout de suite
+    try{
+      const amountInput = form.querySelector('[name="amount"]');
+      const delta = parseFloat(String(amountInput?.value||'0').replace(',','.')) || 0;
+      if (ctx && delta > 0) {
+        ctx.bets_map = ctx.bets_map || {};
+        const entry  = ctx.bets_map[key] || { bets:[], amount:0, choice:choiceVal };
+        let merged = false;
+        for (const b of entry.bets) {
+          const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
+          const bChoice = String(b.choice||'').toUpperCase();
+          if (bTime===hhmm && bChoice===choiceVal) {
+            b.amount = (Number(b.amount)||0) + delta;
+            merged = true; break;
+          }
+        }
+        if (!merged) entry.bets.push({ amount: delta, target_time: hhmm, choice: choiceVal });
+        entry.amount = (Number(entry.amount)||0) + delta;
+        entry.choice = entry.choice || choiceVal;
+        ctx.bets_map[key] = entry;
+      }
+    }catch(_){}
+
+    // MAJ visuelle (stake + solde)
+    try{
+      const amountInput = form.querySelector('[name="amount"]');
+      const delta = parseFloat(String(amountInput?.value||'0').replace(',','.')) || 0;
+      if (delta>0 && cell){
+        let stakeWrap = cell.querySelector('.stake-wrap');
+        const iconHtml = (choiceVal==='PLUIE')
+          ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
+          : `☀️`;
+        if (!stakeWrap){
+          stakeWrap = document.createElement('div');
+          stakeWrap.className = 'stake-wrap';
+          stakeWrap.innerHTML = \`\${iconHtml}<div class="stake-amt">+\${(Math.round(delta*10)/10).toString().replace('.',',')}</div>\`;
+          cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
+        }else{
+          const amtEl = stakeWrap.querySelector('.stake-amt');
+          const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
+          if (amtEl) amtEl.textContent = '+' + (Math.round((cur+delta)*10)/10).toString().replace('.',',');
+        }
+      }
+    }catch(_){}
+
+    try{
+      if (payload && typeof payload.new_points !== 'undefined') {
+        if (window.updateTopbarSolde) window.updateTopbarSolde(payload.new_points);
+        else if (window.refreshTopbarSolde) window.refreshTopbarSolde();
+      } else if (window.refreshTopbarSolde) {
+        window.refreshTopbarSolde();
+      }
+    }catch(_){}
+  });
+})();
+
+// Bootstrap: lance pour chaque calendrier
 (function(){
   const cals = Array.isArray(window.__PPP_CALS__) ? window.__PPP_CALS__ : [];
   if (!cals.length) return;
