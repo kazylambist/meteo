@@ -3114,7 +3114,7 @@ PPP_HTML = """
     <div id="pppHistory" style="margin:8px 0; font-size:14px; color:#a8b0c2;"></div>
 
     <p id="mOddsWrap" style="margin:0 0 8px; font-size:28px; font-weight:900; letter-spacing:.3px;">
-      <span id="mOddsLabel">Cote</span> : x<span id="mOdds">x</span>
+      <span id="mOddsLabel">Cote</span> : x<span id="mOdds"></span>
     </p>
 
     <div id="mHistory"
@@ -3682,6 +3682,12 @@ function initPPPCalendar(ctx){
         if (mOddsEl) mOddsEl.textContent = 'x' + String(shownOdds.toFixed(1)).replace('.', ',');
       }
       if (showForm) {
+        const labelEl = document.getElementById('mOddsLabel');
+        if (labelEl) labelEl.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
+        if (mOddsEl) mOddsEl.textContent = 'x'; // on attend la vraie cote serveur
+      }
+      
+      if (showForm) {
         if (mDateInput) mDateInput.value = key;
         const hourSel = document.getElementById('mHour');
         if (hourSel) {
@@ -3692,8 +3698,15 @@ function initPPPCalendar(ctx){
       }
 
       const hidSid = document.getElementById('mStationId');
-      if (hidSid) hidSid.value = ctx.station_id || '';
-
+      // Résolution station robuste
+      function getPPPStationId(){
+        const fromHid  = (hidSid && hidSid.value) ? String(hidSid.value).trim() : '';
+        const fromCtx  = (PPP_ACTIVE && PPP_ACTIVE.ctx && PPP_ACTIVE.ctx.station_id) ? String(PPP_ACTIVE.ctx.station_id).trim() : '';
+        const fromGrid = (PPP_ACTIVE && PPP_ACTIVE.grid && PPP_ACTIVE.grid.dataset && PPP_ACTIVE.grid.dataset.stationId) ? String(PPP_ACTIVE.grid.dataset.stationId).trim() : '';
+        const fromBody = (document.body && document.body.dataset && document.body.dataset.stationId) ? String(document.body.dataset.stationId).trim() : '';
+        return fromHid || fromCtx || fromGrid || fromBody || 'lfpg_75';
+      }
+      if (hidSid) hidSid.value = getPPPStationId();
       // --- Helpers choix + rendu cote ---
       function currentPPPChoice(){
         const r = document.querySelector('input[name="pppChoice"]:checked');
@@ -3720,9 +3733,10 @@ function initPPPCalendar(ctx){
 
       // --- Récupération cotes combinées (historique + PPP_ODDS) ---
       async function loadPPPOddsAndRender(){
-        const dateStr  = (mDateInput && mDateInput.value) || '';
-        const station  = (hidSid && hidSid.value) || '';
-        if (!dateStr || !station) return;
+        const dateStr  = (mDateInput && mDateInput.value) || key;
+        const station  = getPPPStationId();
+        if (!dateStr) { console.warn('[PPP] date manquante'); return; }
+        if (!station) { console.error('[PPP] station_id manquant'); return; }
 
         try{
           const u = `/api/ppp/odds?date=${encodeURIComponent(dateStr)}&station_id=${encodeURIComponent(station)}`;
