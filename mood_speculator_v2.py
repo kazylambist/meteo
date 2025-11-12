@@ -3342,7 +3342,7 @@ function initPPPCalendar(ctx){
             const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
             const odd1 = Math.round(usedOdd * 10) / 10;
 
-            const k = \`\${hhmm}|\${choice}|\${odd1}\`;
+            const k = `\${hhmm}|\${choice}|\${odd1}`;
             const cur = groups.get(k) || { amount: 0, hhmm, choice, odd1 };
             cur.amount += (Number(b.amount) || 0);
             groups.set(k, cur);
@@ -3353,14 +3353,14 @@ function initPPPCalendar(ctx){
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
             const icon = g.choice === 'PLUIE' ? '💧' : '☀️';
-            lines.push(\`Mises \${icon} \${g.hhmm} — \${fmtPts(g.amount)} pts — (x\${oddTxt})\`);
+            lines.push(`Mises \${icon} \${g.hhmm} — \${fmtPts(g.amount)} pts — (x\${oddTxt})`);
           }
-          if (boltCount > 0) lines.push(\`Éclairs : \${boltCount} — (x5)\`);
+          if (boltCount > 0) lines.push(`Éclairs : \${boltCount} — (x5)`);
 
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
-          lines.push(\`Gains potentiels : \${potentialWithBoosts.toFixed(2).replace('.', ',')} pts\`);
+          lines.push(`Gains potentiels : \${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
 
-          histWrap.innerHTML = lines.map(l => \`<div>\${l}</div>\`).join('');
+          histWrap.innerHTML = lines.map(l => `<div>\${l}</div>`).join('');
           histWrap.style.display = 'block';
         } else {
           histWrap.innerHTML = `<div>Aucune mise pour ce jour.</div>`;
@@ -3819,7 +3819,7 @@ function initPPPCalendar(ctx){
         if (!stakeWrap){
           stakeWrap = document.createElement('div');
           stakeWrap.className = 'stake-wrap';
-          stakeWrap.innerHTML = \`\${iconHtml}<div class="stake-amt">+\${(Math.round(delta*10)/10).toString().replace('.',',')}</div>\`;
+          stakeWrap.innerHTML = `\${iconHtml}<div class="stake-amt">+\${(Math.round(delta*10)/10).toString().replace('.',',')}</div>`;
           cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
         }else{
           const amtEl = stakeWrap.querySelector('.stake-amt');
