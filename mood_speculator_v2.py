@@ -3325,7 +3325,7 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdx = Math.max(0, Math.min(31, Number((grid.querySelector(\`.ppp-day[data-key="${key}"]\`)?.dataset.idx)||0)));
+          const baseIdx = Math.max(0, Math.min(31, Number((grid.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
           const baseOdds = ODDS_SAFE[baseIdx];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
@@ -3550,7 +3550,7 @@ function initPPPCalendar(ctx){
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
-    const cell = grid.querySelector(\`.ppp-day[data-key="\${todayKey}"]\`);
+    const cell = grid.querySelector(`.ppp-day[data-key="${todayKey}"]`);
     if (!cell) return;
 
     const wrap = ensureForecastWrap(cell);
@@ -3582,7 +3582,7 @@ function initPPPCalendar(ctx){
       for (const f of data.forecast5) {
         const dt = new Date(f.date + 'T00:00:00');
         if (dt < today || dt > limitEnd) continue;
-        const cell = grid.querySelector(\`.ppp-day[data-key="\${f.date}"]\`);
+        const cell = grid.querySelector(`.ppp-day[data-key="${f.date}"]`);
         if (!cell) continue;
         const wrap = ensureForecastWrap(cell);
         let isRain = false;
