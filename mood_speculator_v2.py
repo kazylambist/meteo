@@ -6119,10 +6119,13 @@ def ppp(station_id=None):
             PPPBet.bet_date >= today,
             PPPBet.status == 'ACTIVE',
         )
+        # On considère NULL comme "non verrouillé" ; on ne masque que True
         if hasattr(PPPBet, "locked_for_trade"):
-            rows_future_q = rows_future_q.filter(PPPBet.locked_for_trade == False)
+            rows_future_q = rows_future_q.filter(
+                (PPPBet.locked_for_trade == False) | (PPPBet.locked_for_trade.is_(None))
+            )
         rows_future = rows_future_q.all()
-
+        
         # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (verdict)
         rows_past = (
             PPPBet.query
@@ -6975,6 +6978,10 @@ def ppp_bet():
         station_id=scope_station_id,
         funded_from_balance=1,
     )
+    # S'assure que la mise n'est PAS marquée "en vente"
+    if hasattr(bet, "locked_for_trade"):
+        bet.locked_for_trade = False
+
     try:
         setattr(bet, "target_time", hhmm)
     except Exception:
