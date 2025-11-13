@@ -3177,8 +3177,15 @@ function initPPPCalendar(ctx){
   const qCity   = ctx.city_label;
 
   // Utils date
-  function ymd(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
-  function fr(d){ return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' }); }
+  function ymd(d){
+    const y=d.getFullYear();
+    const m=String(d.getMonth()+1).padStart(2,'0');
+    const day=String(d.getDate()).padStart(2,'0');
+    return y + '-' + m + '-' + day;
+  }
+  function fr(d){
+    return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' });
+  }
   function hasBetFor(key){
     const b = MY_BETS && MY_BETS[key];
     if (!b) return false;
@@ -3186,7 +3193,7 @@ function initPPPCalendar(ctx){
   }
 
   // Icônes
-  const svgDrop = `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`;
+  const svgDrop = '<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>';
   const svgSun  = "☀️";
 
   // Rendu des cotes (cachées par CSS, mais utilisées pour le calcul)
@@ -3200,7 +3207,7 @@ function initPPPCalendar(ctx){
   }
 
   // Normalisation ODDS/BOOSTS
-  const ODDS_SAFE = Array.from({ length: 32 }, (_, i) => {
+  const ODDS_SAFE = Array.from({ length: 32 }, function(_, i) {
     const v = (ODDS && Object.prototype.hasOwnProperty.call(ODDS, i)) ? Number(ODDS[i]) : NaN;
     return Number.isFinite(v) && v > 0 ? v : 1;
   });
@@ -3226,12 +3233,14 @@ function initPPPCalendar(ctx){
 
     function computeVerdict(info){
       if (!info) return null;
-      const norm = (v) => String(v || '').trim().toUpperCase();
+      const norm = function(v){ return String(v || '').trim().toUpperCase(); };
       const agg = norm(info.verdict) || norm(info.result) || norm(info.status);
       if (agg === 'LOSE' || agg === 'LOST') return 'LOSE';
       if (agg === 'WIN'  || agg === 'WON')  return 'WIN';
       const arr = Array.isArray(info.bets) ? info.bets : [];
-      const results = arr.map(b => norm(b.verdict) || norm(b.result) || norm(b.status)).filter(Boolean);
+      const results = arr.map(function(b){
+        return norm(b.verdict) || norm(b.result) || norm(b.status);
+      }).filter(Boolean);
       if (results.includes('LOSE') || results.includes('LOST')) return 'LOSE';
       if (results.includes('WIN')  || results.includes('WON'))  return 'WIN';
       return null;
@@ -3239,8 +3248,13 @@ function initPPPCalendar(ctx){
     let verdict = computeVerdict(betInfo);
 
     if (delta === 0 && verdict && betInfo && Array.isArray(betInfo.bets)) {
-      const lastHHMM = betInfo.bets.map(b => String(b.target_time || b.time || '18:00').slice(0,5)).sort().at(-1) || '18:00';
-      const [lh, lm] = lastHHMM.split(':').map(x=>parseInt(x,10));
+      const lastHHMM = betInfo.bets
+        .map(function(b){ return String(b.target_time || b.time || '18:00').slice(0,5); })
+        .sort()
+        .at(-1) || '18:00';
+      const parts = lastHHMM.split(':');
+      const lh = parseInt(parts[0] || '18', 10);
+      const lm = parseInt(parts[1] || '0', 10);
       const nowParis = new Date(new Date().toLocaleString('en-US', { timeZone:'Europe/Paris' }));
       const afterLast = nowParis.getHours() > lh || (nowParis.getHours() === lh && nowParis.getMinutes() >= lm);
       if (!afterLast) verdict = null;
@@ -3269,18 +3283,17 @@ function initPPPCalendar(ctx){
     let stakeBlock = '';
     if (amount > 0) {
       const icon = (choice === 'PLUIE') ? svgDrop : (choice === 'PAS_PLUIE') ? svgSun : '';
-      stakeBlock = `
-        <div class="stake-wrap">
-          ${icon}
-          <div class="stake-amt">+${fmtPts(amount)}</div>
-        </div>`;
+      stakeBlock =
+        '<div class="stake-wrap">' +
+          icon +
+          '<div class="stake-amt">+' + fmtPts(amount) + '</div>' +
+        '</div>';
     }
 
-    el.innerHTML = `
-      <div class="date">${fr(d)}</div>
-      ${stakeBlock}
-      <div class="odds"></div>
-    `;
+    el.innerHTML =
+      '<div class="date">' + fr(d) + '</div>' +
+      stakeBlock +
+      '<div class="odds"></div>';
 
     const oddsEl   = el.querySelector('.odds');
     const baseIdx  = Math.max(0, Math.min(31, delta));
@@ -3289,7 +3302,7 @@ function initPPPCalendar(ctx){
     renderOdds(oddsEl, baseOdds, boostForDay);
 
     // Clic → modal
-    el.addEventListener('click', () => {
+    el.addEventListener('click', function () {
       PPP_ACTIVE.grid = grid;
       PPP_ACTIVE.ctx = ctx;
       PPP_ACTIVE.lastCell = el;
@@ -3303,7 +3316,7 @@ function initPPPCalendar(ctx){
 
       if (titleEl) {
         if (isPast || (delta <= 3 && hasBetNow)) titleEl.textContent = fr(d);
-        else titleEl.textContent = "Miser sur " + fr(d);
+        else titleEl.textContent = 'Miser sur ' + fr(d);
       }
 
       let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
@@ -3317,7 +3330,9 @@ function initPPPCalendar(ctx){
         histWrap.innerHTML = '';
         if (hasBetNow) {
           const list = (betInfo && Array.isArray(betInfo.bets)) ? betInfo.bets : [];
-          const totalAmount = Math.round(list.reduce((acc, b) => acc + (Number(b.amount) || 0), 0) * 100) / 100;
+          const totalAmount = Math.round(list.reduce(function(acc, b) {
+            return acc + (Number(b.amount) || 0);
+          }, 0) * 100) / 100;
           let weightedSum = 0;
           for (const b of list) {
             const a = Number(b.amount) || 0;
@@ -3325,11 +3340,11 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdx = Math.max(0, Math.min(31, Number((grid.querySelector(`.ppp-day[data-key="${key}"]`)?.dataset.idx)||0)));
-          const baseOdds = ODDS_SAFE[baseIdx];
+          const baseIdxLocal = Math.max(0, Math.min(31, Number((grid.querySelector('.ppp-day[data-key=\"' + key + '\"]')?.dataset.idx)||0)));
+          const baseOddsLocal = ODDS_SAFE[baseIdxLocal];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
-            : baseOdds;
+            : baseOddsLocal;
 
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
@@ -3337,33 +3352,35 @@ function initPPPCalendar(ctx){
           const groups = new Map();
           for (const b of list) {
             const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
-            const choice = normChoice(b.choice) || normChoice(betInfo && betInfo.choice) || 'PLUIE';
+            const choiceLocal = normChoice(b.choice) || normChoice(betInfo && betInfo.choice) || 'PLUIE';
             const o = Number(b.odds);
             const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
             const odd1 = Math.round(usedOdd * 10) / 10;
 
-            const k = `\${hhmm}|\${choice}|\${odd1}`;
-            const cur = groups.get(k) || { amount: 0, hhmm, choice, odd1 };
+            const k = hhmm + '|' + choiceLocal + '|' + odd1;
+            const cur = groups.get(k) || { amount: 0, hhmm: hhmm, choice: choiceLocal, odd1: odd1 };
             cur.amount += (Number(b.amount) || 0);
             groups.set(k, cur);
           }
 
           const lines = [];
-          const sorted = Array.from(groups.values()).sort((a,b)=> a.hhmm.localeCompare(b.hhmm));
+          const sorted = Array.from(groups.values()).sort(function(a,b){ return a.hhmm.localeCompare(b.hhmm); });
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
-            const icon = g.choice === 'PLUIE' ? '💧' : '☀️';
-            lines.push(`Mises \${icon} \${g.hhmm} — \${fmtPts(g.amount)} pts — (x\${oddTxt})`);
+            const iconLocal = g.choice === 'PLUIE' ? '💧' : '☀️';
+            lines.push('Mises ' + iconLocal + ' ' + g.hhmm + ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')');
           }
-          if (boltCount > 0) lines.push(`Éclairs : \${boltCount} — (x5)`);
+          if (boltCount > 0) {
+            lines.push('Éclairs : ' + boltCount + ' — (x5)');
+          }
 
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
-          lines.push(`Gains potentiels : \${potentialWithBoosts.toFixed(2).replace('.', ',')} pts`);
+          lines.push('Gains potentiels : ' + potentialWithBoosts.toFixed(2).replace('.', ',') + ' pts');
 
-          histWrap.innerHTML = lines.map(l => `<div>\${l}</div>`).join('');
+          histWrap.innerHTML = lines.map(function(l){ return '<div>' + l + '</div>'; }).join('');
           histWrap.style.display = 'block';
         } else {
-          histWrap.innerHTML = `<div>Aucune mise pour ce jour.</div>`;
+          histWrap.innerHTML = '<div>Aucune mise pour ce jour.</div>';
           histWrap.style.display = 'block';
         }
       }
@@ -3373,7 +3390,9 @@ function initPPPCalendar(ctx){
       function lastBetOfDay(info){
         const list = (info && Array.isArray(info.bets)) ? info.bets : [];
         if (!list.length) return null;
-        const sorted = list.slice().sort((a,b)=> String(a.target_time||a.time||'18:00').localeCompare(String(b.target_time||b.time||'18:00')));
+        const sorted = list.slice().sort(function(a,b){
+          return String(a.target_time||a.time||'18:00').localeCompare(String(b.target_time||b.time||'18:00'));
+        });
         return sorted[sorted.length-1] || null;
       }
       const lastBet = lastBetOfDay(betInfo);
@@ -3383,8 +3402,8 @@ function initPPPCalendar(ctx){
       if (form) form.style.display = showForm ? 'block' : 'none';
       if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
       if (showForm) {
-        const labelEl = document.getElementById('mOddsLabel');
-        if (labelEl) labelEl.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
+        const labelEl0 = document.getElementById('mOddsLabel');
+        if (labelEl0) labelEl0.textContent = (currentPPPChoice() === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
         if (mOddsEl) mOddsEl.textContent = String(shownOdds.toFixed(1)).replace('.', ',');
       }
       if (showForm) {
@@ -3393,8 +3412,8 @@ function initPPPCalendar(ctx){
           if (radios.length) {
             for (const r of radios) r.checked = (normChoiceVal(r.value) === lastChoice);
           } else {
-            const sel = document.getElementById('mChoice');
-            if (sel) sel.value = lastChoice;
+            const sel0 = document.getElementById('mChoice');
+            if (sel0) sel0.value = lastChoice;
           }
         }
         const labelEl = document.getElementById('mOddsLabel');
@@ -3450,25 +3469,25 @@ function initPPPCalendar(ctx){
         const station  = (hidSid && hidSid.value) || (ctx && ctx.station_id) || 'lfpg_75';
         if (!dateStr || !station) return;
 
-        try { oddsAbort?.abort(); } catch(_) {}
+        try { if (oddsAbort) oddsAbort.abort(); } catch(_) {}
         oddsAbort = new AbortController();
-        const reqKey = `${dateStr}|${station}`;
+        const reqKey = dateStr + '|' + station;
         oddsKey = reqKey;
 
         try{
-          const u = `/api/ppp/odds?date=${encodeURIComponent(dateStr)}&station_id=${encodeURIComponent(station)}`;
+          const u = '/api/ppp/odds?date=' + encodeURIComponent(dateStr) + '&station_id=' + encodeURIComponent(station);
           const r = await fetch(u, { credentials:'same-origin', signal: oddsAbort.signal });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           const j = await r.json();
           if (oddsKey !== reqKey) return;
           PPP_ACTIVE.__lastOdds = j;
           renderOddsFromCache();
         }catch(e){
-          if (e?.name === 'AbortError') return;
+          if (e && e.name === 'AbortError') return;
         }
       }
 
-      document.querySelectorAll('input[name="pppChoice"]').forEach(el=>{
+      document.querySelectorAll('input[name="pppChoice"]').forEach(function(el){
         if (el.__pppBound) return;
         el.__pppBound = true;
         el.addEventListener('change', renderOddsFromCache);
@@ -3488,7 +3507,7 @@ function initPPPCalendar(ctx){
   }
 
   // Nettoyage cotes
-  document.querySelectorAll('.ppp-day .odds').forEach(o => {
+  document.querySelectorAll('.ppp-day .odds').forEach(function(o){
     if (!o.textContent || !o.textContent.trim()) return;
     o.textContent = o.textContent.replace(/^[⚡\\s]+/g, '').replace(/^x?/, 'x');
   });
@@ -3526,15 +3545,19 @@ function initPPPCalendar(ctx){
   function flashPPPcell(cell){
     if (!cell) return;
     cell.classList.add('ppp-bet-flash');
-    setTimeout(() => { cell.classList.remove('ppp-bet-flash'); }, 3200);
+    setTimeout(function () { cell.classList.remove('ppp-bet-flash'); }, 3200);
   }
 
-  function addDaysLocal(d, n){ const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+  function addDaysLocal(d, n){
+    const x = new Date(d.getTime());
+    x.setDate(x.getDate() + n);
+    return x;
+  }
   function ymdParis(d){
     const y = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', year:'numeric' });
     const m = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', month:'2-digit' });
     const day = d.toLocaleString('en-CA', { timeZone: 'Europe/Paris', day:'2-digit' });
-    return `${y}-${m}-${day}`;
+    return y + '-' + m + '-' + day;
   }
   function frParis(d){
     return d.toLocaleDateString('fr-FR', { timeZone:'Europe/Paris', weekday:'short', day:'2-digit', month:'short' });
@@ -3550,14 +3573,14 @@ function initPPPCalendar(ctx){
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
-    const cell = grid.querySelector(`.ppp-day[data-key="${todayKey}"]`);
+    const cell = grid.querySelector('.ppp-day[data-key=\"' + todayKey + '\"]');
     if (!cell) return;
 
     const wrap = ensureForecastWrap(cell);
 
     fetch('/api/meteo/today?city=' + encodeURIComponent(qCity))
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(data){
         if (!data) return;
         let isRain = false;
         if (data.pop != null) {
@@ -3569,7 +3592,7 @@ function initPPPCalendar(ctx){
         wrap.innerHTML = isRain ? svgDrop : svgSun;
         cell.classList.remove('today-win','today-loss');
       })
-      .catch(()=>{});
+      .catch(function(){});
   })();
 
   (async function loadForecastIcons(){
@@ -3582,7 +3605,7 @@ function initPPPCalendar(ctx){
       for (const f of data.forecast5) {
         const dt = new Date(f.date + 'T00:00:00');
         if (dt < today || dt > limitEnd) continue;
-        const cell = grid.querySelector(`.ppp-day[data-key="${f.date}"]`);
+        const cell = grid.querySelector('.ppp-day[data-key=\"' + f.date + '\"]');
         if (!cell) continue;
         const wrap = ensureForecastWrap(cell);
         let isRain = false;
@@ -3613,7 +3636,7 @@ function initPPPCalendar(ctx){
     if (!bolt) return;
     const count = Math.max(0, Number(n||0));
     bolt.dataset.count = String(count);
-    bolt.title = count > 0 ? `Éclairs restants : ${count}` : `Plus d’éclairs`;
+    bolt.title = count > 0 ? ('Éclairs restants : ' + count) : 'Plus d’éclairs';
     bolt.style.opacity = (count > 0) ? '1' : '.35';
     bolt.style.pointerEvents = (count > 0) ? 'auto' : 'none';
   }
@@ -3632,10 +3655,13 @@ function initPPPCalendar(ctx){
     fetchBoltCount();
     bolt.setAttribute('draggable','true');
     bolt.style.webkitUserDrag = 'element';
-    bolt.addEventListener('dragstart', (ev) => {
+    bolt.addEventListener('dragstart', function (ev) {
       const count = Number(bolt.dataset.count || '0');
       if (count <= 0) { ev.preventDefault(); return; }
-      try { ev.dataTransfer.setData('text/plain', 'bolt'); ev.dataTransfer.effectAllowed = 'copy'; } catch (e) {}
+      try {
+        ev.dataTransfer.setData('text/plain', 'bolt');
+        ev.dataTransfer.effectAllowed = 'copy';
+      } catch (e) {}
     });
   }
 
@@ -3649,7 +3675,7 @@ function initPPPCalendar(ctx){
   }
 
   // DnD délégué
-  grid.addEventListener('dragenter', (ev) => {
+  grid.addEventListener('dragenter', function (ev) {
     const cell = cellFromEvent(ev); if (!cell) return;
     const ok = hasBetFor(cell.dataset.key);
     cell.classList.add('drop-candidate');
@@ -3657,19 +3683,19 @@ function initPPPCalendar(ctx){
     cell.classList.toggle('drop-nope', !ok);
   });
 
-  grid.addEventListener('dragover', (ev) => {
+  grid.addEventListener('dragover', function (ev) {
     const cell = cellFromEvent(ev); if (!cell) return;
     ev.preventDefault();
     const ok = hasBetFor(cell.dataset.key);
     try { ev.dataTransfer.dropEffect = ok ? 'copy' : 'none'; } catch (_) {}
   });
 
-  grid.addEventListener('dragleave', (ev) => {
+  grid.addEventListener('dragleave', function (ev) {
     const cell = cellFromEvent(ev); if (!cell) return;
     cell.classList.remove('drop-candidate','drop-ok','drop-nope');
   });
 
-  grid.addEventListener('drop', async (ev) => {
+  grid.addEventListener('drop', async function (ev) {
     const cell = cellFromEvent(ev); if (!cell) return;
     ev.preventDefault();
     cell.classList.remove('drop-candidate','drop-ok','drop-nope');
@@ -3679,7 +3705,7 @@ function initPPPCalendar(ctx){
 
     if (!hasBetFor(key)) {
       cell.classList.add('shake');
-      setTimeout(() => cell.classList.remove('shake'), 500);
+      setTimeout(function () { cell.classList.remove('shake'); }, 500);
       return;
     }
 
@@ -3722,7 +3748,7 @@ function initPPPCalendar(ctx){
 
       try {
         const boostAudio = document.getElementById('pppBoostAudio');
-        if (boostAudio) { boostAudio.currentTime = 0; boostAudio.play().catch(()=>{}); }
+        if (boostAudio) { boostAudio.currentTime = 0; boostAudio.play().catch(function(){}); }
       } catch (_) {}
     } catch(e){
       console.error('[ppp] boost error:', e);
@@ -3749,14 +3775,20 @@ function initPPPCalendar(ctx){
     const choiceSel  = document.getElementById('mChoice');
 
     if (!mDateInput || !mDateInput.value) { alert("Cliquez d'abord sur un jour du calendrier."); return; }
-    const key    = mDateInput.value;                       // YYYY-MM-DD
+    const key    = mDateInput.value;
     const hhmm   = (hourEl && hourEl.value ? hourEl.value : '18:00').slice(0,5);
-    const choiceVal = (choiceSel?.value || 'PLUIE').toUpperCase();
+    const choiceVal = (choiceSel && choiceSel.value ? choiceSel.value : 'PLUIE').toUpperCase();
 
     // Audio + feedback
-    try{ const a=document.getElementById('pppYogaAudio'); if(a){a.currentTime=0;a.play().catch(()=>{});} }catch(_){}
+    try{
+      const a = document.getElementById('pppYogaAudio');
+      if(a){ a.currentTime=0; a.play().catch(function(){}); }
+    }catch(_){}
     if (modal) modal.classList.remove('open');
-    if (cell) { cell.classList.add('ppp-bet-flash'); setTimeout(()=>cell.classList.remove('ppp-bet-flash'), 3200); }
+    if (cell) {
+      cell.classList.add('ppp-bet-flash');
+      setTimeout(function(){ cell.classList.remove('ppp-bet-flash'); }, 3200);
+    }
 
     // Payload
     const fd = new FormData(form);
@@ -3764,7 +3796,8 @@ function initPPPCalendar(ctx){
     fd.set('choice', choiceVal);
     fd.set('target_time', hhmm);
     fd.delete('target_dt');
-    const sid = document.getElementById('mStationId')?.value || (PPP_ACTIVE?.ctx?.station_id) || 'lfpg_75';
+    const sidEl = document.getElementById('mStationId');
+    const sid = (sidEl && sidEl.value) || (PPP_ACTIVE && PPP_ACTIVE.ctx && PPP_ACTIVE.ctx.station_id) || 'lfpg_75';
     fd.set('station_id', sid);
 
     // Envoi
@@ -3776,7 +3809,10 @@ function initPPPCalendar(ctx){
     });
     if (!resp.ok) {
       let msg = 'La mise a été refusée.';
-      try{ const j=await resp.clone().json(); if(j&&(j.message||j.error)) msg=j.message||j.error; }catch(_){}
+      try{
+        const j = await resp.clone().json();
+        if(j && (j.message || j.error)) msg = j.message || j.error;
+      }catch(_){}
       alert(msg); return;
     }
     const ct = resp.headers.get('content-type') || '';
@@ -3784,10 +3820,10 @@ function initPPPCalendar(ctx){
     let payload=null; try{ payload=await resp.json(); }catch(_){ alert('Réponse invalide du serveur.'); return; }
     if (payload && payload.error){ alert(payload.error); return; }
 
-    // MAJ mémoire locale (bets_map) pour que hasBetFor(key) soit vrai tout de suite
+    // MAJ mémoire locale (bets_map)
     try{
       const amountInput = form.querySelector('[name="amount"]');
-      const delta = parseFloat(String(amountInput?.value||'0').replace(',','.')) || 0;
+      const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',','.')) || 0;
       if (ctx && delta > 0) {
         ctx.bets_map = ctx.bets_map || {};
         const entry  = ctx.bets_map[key] || { bets:[], amount:0, choice:choiceVal };
@@ -3810,21 +3846,26 @@ function initPPPCalendar(ctx){
     // MAJ visuelle (stake + solde)
     try{
       const amountInput = form.querySelector('[name="amount"]');
-      const delta = parseFloat(String(amountInput?.value||'0').replace(',','.')) || 0;
+      const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',','.')) || 0;
       if (delta>0 && cell){
         let stakeWrap = cell.querySelector('.stake-wrap');
-        const iconHtml = (choiceVal==='PLUIE')
-          ? `<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>`
-          : `☀️`;
+        const iconHtml = (choiceVal==='PLUIE') ? (
+          '<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>'
+        ) : '☀️';
         if (!stakeWrap){
           stakeWrap = document.createElement('div');
           stakeWrap.className = 'stake-wrap';
-          stakeWrap.innerHTML = `\${iconHtml}<div class="stake-amt">+\${(Math.round(delta*10)/10).toString().replace('.',',')}</div>`;
-          cell.querySelector('.date')?.insertAdjacentElement('afterend', stakeWrap);
+          const amtStr = (Math.round(delta*10)/10).toString().replace('.',',');
+          stakeWrap.innerHTML = iconHtml + '<div class="stake-amt">+' + amtStr + '</div>';
+          const dateEl = cell.querySelector('.date');
+          if (dateEl) dateEl.insertAdjacentElement('afterend', stakeWrap);
         }else{
           const amtEl = stakeWrap.querySelector('.stake-amt');
           const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
-          if (amtEl) amtEl.textContent = '+' + (Math.round((cur+delta)*10)/10).toString().replace('.',',');
+          if (amtEl) {
+            const newVal = (Math.round((cur+delta)*10)/10).toString().replace('.',',');
+            amtEl.textContent = '+' + newVal;
+          }
         }
       }
     }catch(_){}
@@ -3869,20 +3910,20 @@ function initPPPCalendar(ctx){
     }
   }
 
-  btn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
-  document.addEventListener('click', () => closeMenu());
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+  btn.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
+  document.addEventListener('click', function () { closeMenu(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
 
   // Sous-menu Options
   const optionsBtn  = document.getElementById('optionsBtn');
   const optionsMenu = document.getElementById('optionsMenu');
   if (optionsBtn && optionsMenu){
-    optionsBtn.addEventListener('click', (e) => {
+    optionsBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       const isHidden = optionsMenu.hasAttribute('hidden');
       optionsMenu.toggleAttribute('hidden', !isHidden);
     });
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', function (e) {
       if (!dd.contains(e.target)) optionsMenu.setAttribute('hidden', '');
     });
   }
@@ -3893,17 +3934,17 @@ function initPPPCalendar(ctx){
       const r = await fetch('/api/chat/unread-summary', { credentials: 'same-origin' });
       if (!r.ok) throw 0;
       const arr = await r.json();
-      const total = Array.isArray(arr) ? arr.reduce((s,x)=> s + (Number(x.count)||0), 0) : 0;
+      const total = Array.isArray(arr) ? arr.reduce(function(s,x){ return s + (Number(x.count)||0); }, 0) : 0;
       const badge = document.getElementById('trade-unread');
       if (!badge) return;
       badge.style.display = total > 0 ? 'inline-block' : 'none';
-    } catch(e) { /* noop */ }
+    } catch(e) {}
   }
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', function () {
     refreshPPPUnread();
     setInterval(refreshPPPUnread, 20000);
   });
-  document.addEventListener('visibilitychange', () => {
+  document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') refreshPPPUnread();
   });
 })();
@@ -3917,7 +3958,7 @@ window.updateTopbarSolde = function(newPts) {
   const txt = Number(newPts).toFixed(1).replace('.', ',');
   el.textContent = txt;
   el.classList.add('solde-up');
-  setTimeout(() => el.classList.remove('solde-up'), 600);
+  setTimeout(function(){ el.classList.remove('solde-up'); }, 600);
 };
 </script>
 <style>.solde-up { color: #79e7ff; transition: color .3s; }</style>
@@ -5967,9 +6008,9 @@ def station_by_id(sid):
 from sqlalchemy import text, func
 from sqlalchemy.exc import OperationalError
 
-@app.route('/ppp', methods=['GET', 'POST'])
-@app.route('/ppp/', methods=['GET', 'POST'])  
-@app.route('/ppp/<station_id>', methods=['GET', 'POST'])
+@app.route('/ppp', methods=['GET'])
+@app.route('/ppp/', methods=['GET'])
+@app.route('/ppp/<station_id>', methods=['GET'])
 @login_required
 def ppp(station_id=None):
     # -- ensure table my_stations exists (SQLite-safe)
@@ -6053,167 +6094,6 @@ def ppp(station_id=None):
         app.logger.warning("resolve_ppp_open_bets failed: %r", e)
 
     page_title = "Zeus — Pluie ou Pas Pluie"
-
-    def _ppp_url(scope_id):
-        return url_for('ppp', station_id=scope_id) if scope_id else url_for('ppp')
-
-    # ------------------ POST: créer une mise ------------------
-    if request.method == 'POST':
-        wants_json = (
-            request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-            or 'application/json' in (request.headers.get('Accept') or '')
-        )
-
-        # scope station pour la mise POST: champ caché > URL
-        scope_station_id = (request.form.get('station_id') or station_id or "").strip()
-
-        def _return_error(msg):
-            if wants_json:
-                return jsonify({"ok": False, "error": msg}), 400
-            flash(msg)
-            return redirect(_ppp_url(scope_station_id))
-
-        try:
-            target_str = (request.form.get('date') or '').strip()
-            choice     = (request.form.get('choice') or '').strip().upper()
-            amount     = round(float(str(request.form.get('amount') or 0).replace(',', '.')), 2)
-            raw_hhmm   = (request.form.get('target_time') or '').strip() or '18:00'
-        except Exception:
-            return _return_error("Entrées invalides.")
-
-        if not target_str:
-            return _return_error("Cliquez sur une case du calendrier pour choisir la date.")
-        if choice not in ('PLUIE', 'PAS_PLUIE') or amount <= 0:
-            return _return_error("Choix ou montant invalides.")
-
-        # parse date choisie
-        try:
-            y, m, d = [int(x) for x in target_str.split('-')]
-            target = date(y, m, d)
-        except Exception:
-            return _return_error("Date invalide.")
-
-        # clamp/valide l'heure HH:MM
-        def clamp_hhmm(s: str) -> str:
-            try:
-                parts = str(s).split(':')
-                h = max(0, min(23, int(parts[0])))
-                m = max(0, min(59, int(parts[1]) if len(parts) > 1 else 0))
-                return f"{h:02d}:{m:02d}"
-            except Exception:
-                return "18:00"
-
-        hhmm = clamp_hhmm(raw_hhmm)
-
-        # Compose target_dt (Europe/Paris)
-        try:
-            from datetime import datetime as _dt
-            import pytz
-            tz_paris = pytz.timezone("Europe/Paris")
-            hh, mm = hhmm.split(":")
-            naive = _dt(target.year, target.month, target.day, int(hh), int(mm), 0)
-            target_dt = tz_paris.localize(naive)
-        except Exception:
-            target_dt = None  # ne bloque pas le flux
-
-        # validations métier (J+3..J+31)
-        today = today_paris_date()
-        ok, msg, offset, odds = ppp_validate_can_bet(target, today)
-        if not ok:
-            return _return_error(msg or "Mise impossible pour ce jour.")
-
-        # --- Cote combinée finale selon le CHOIX (PLUIE/PAS_PLUIE) ---
-        try:
-            comb = ppp_combined_odds(scope_station_id or "", target)
-            if comb.get("error"):
-                raise ValueError(comb["error"])
-            final_odds = float(
-                comb["combined_pluie"] if (choice == "PLUIE") else comb["combined_pas_pluie"]
-            )
-            odds = final_odds   # remplace la base_odds par la cote combinée
-        except Exception:
-            # fallback sûr: garde la base_odds déjà validée
-            pass
-
-        # Empêcher paris contradictoires au même horaire + limite 3 horaires
-        q = PPPBet.query.filter(
-            PPPBet.user_id == current_user.id,
-            PPPBet.bet_date == target,
-            func.coalesce(PPPBet.station_id, '') == (scope_station_id or ''),
-            PPPBet.status == 'ACTIVE'
-        )
-        existing_bets = q.order_by(PPPBet.id.asc()).all()
-
-        opposite = 'PAS_PLUIE' if choice == 'PLUIE' else 'PLUIE'
-        for b in existing_bets:
-            b_hhmm = getattr(b, "target_time", None) or "18:00"
-            if b_hhmm[:5] == hhmm and (b.choice or '').upper() == opposite:
-                return _return_error(
-                    f"Déjà une mise « {opposite.replace('_',' ')} » à {hhmm}. "
-                    f"Impossible de miser l'inverse au même horaire."
-                )
-
-        hours_set = set((getattr(b, "target_time", None) or "18:00")[:5] for b in existing_bets)
-        if hhmm not in hours_set and len(hours_set) >= 3:
-            listed = ", ".join(sorted(hours_set))
-            return _return_error(
-                f"Limite de 3 horaires atteinte pour ce jour ({listed}). "
-                f"Vous pouvez remiser sur ces horaires, pas en ajouter un nouveau."
-            )
-
-        # budget
-        grem = remaining_points(current_user)
-        if amount > grem + 1e-6:
-            return _return_error(f"Budget insuffisant. Points restants : {grem:.3f}.")
-
-        # insertion
-        bet = PPPBet(
-            user_id=current_user.id,
-            bet_date=target,
-            choice=choice,
-            amount=amount,
-            odds=float(odds),
-            status='ACTIVE',
-            station_id=scope_station_id,
-            funded_from_balance=1,
-        )
-        try:
-            setattr(bet, "target_time", hhmm)
-        except Exception:
-            pass
-        try:
-            if target_dt is not None and hasattr(PPPBet, "target_dt"):
-                setattr(bet, "target_dt", target_dt)
-        except Exception:
-            pass
-
-        db.session.add(bet)
-
-        # Débit immédiat du solde stocké (NULL → 500.0 bootstrap)
-        db.session.execute(
-            text("""
-                UPDATE "user"
-                   SET points = COALESCE(points, :base) - :amt
-                 WHERE id = :uid
-            """),
-            {"base": 500.0, "amt": float(amount), "uid": int(current_user.id)},
-        )
-        db.session.commit()
-
-        if wants_json:
-            try:
-                new_pts = remaining_points(current_user)
-            except Exception:
-                new_pts = None
-            return jsonify({
-                "ok": True,
-                "new_points": new_pts,
-                "target_time": hhmm,
-                "choice": choice
-            })
-
-        flash(f"Mise enregistrée pour le {target.isoformat()} à {hhmm} — {choice.replace('_',' ')} à x{odds:.1f}.")
-        return redirect(url_for('you_bet', back=_ppp_url(scope_station_id)))
 
     # ------------------ GET: afficher la page ------------------
     from datetime import timedelta
@@ -6972,30 +6852,173 @@ def wet_observations():
 @app.post("/ppp/bet")
 @login_required
 def ppp_bet():
-    # Champs requis
-    date_str     = (request.form.get("date") or "").strip()
-    choice       = (request.form.get("choice") or "").strip().upper()
-    target_time  = (request.form.get("target_time") or "18:00").strip()
-    station_id   = (request.form.get("station_id") or "").strip()
-    amount_raw   = (request.form.get("amount") or "0").replace(",", ".")
-    try:
-        amount = float(amount_raw)
-    except ValueError:
-        return jsonify(error="amount invalide"), 400
-    if not (date_str and choice in ("PLUIE","PAS_PLUIE") and station_id):
-        return jsonify(error="champs manquants"), 400
+    """
+    Endpoint AJAX pour créer une mise PPP.
+    Reprend les règles métier du POST /ppp mais renvoie toujours du JSON.
+    Form fields:
+      - date: YYYY-MM-DD
+      - choice: PLUIE | PAS_PLUIE
+      - target_time: HH:MM
+      - station_id: scope PPP (chaine vide = Paris)
+      - amount: float
+    """
+    from datetime import datetime as _dt
+    import pytz
 
-    # Enregistrement (adapter à ton modèle/DAO)
+    def err(msg, status=400):
+        return jsonify({"ok": False, "error": msg}), status
+
+    # scope station pour la mise : champ caché
+    scope_station_id = (request.form.get('station_id') or "").strip()
+
+    # --- Entrées brutes ---
     try:
-        # ex: create_or_merge_ppp_bet(user=current_user, date=date_str, hhmm=target_time,
-        #                             choice=choice, amount=amount, station_id=station_id)
-        # db.session.commit()
-        new_points = remaining_points(current_user)  # si dispo
-        return jsonify(ok=True, new_points=new_points)
+        target_str = (request.form.get('date') or '').strip()
+        choice     = (request.form.get('choice') or '').strip().upper()
+        amount     = round(float(str(request.form.get('amount') or 0).replace(',', '.')), 2)
+        raw_hhmm   = (request.form.get('target_time') or '').strip() or '18:00'
+    except Exception:
+        return err("Entrées invalides.")
+
+    if not target_str:
+        return err("Cliquez sur une case du calendrier pour choisir la date.")
+    if choice not in ('PLUIE', 'PAS_PLUIE') or amount <= 0:
+        return err("Choix ou montant invalides.")
+
+    # --- Parse date ---
+    try:
+        y, m, d = [int(x) for x in target_str.split('-')]
+        target = date(y, m, d)
+    except Exception:
+        return err("Date invalide.")
+
+    # --- Clamp HH:MM ---
+    def clamp_hhmm(s: str) -> str:
+        try:
+            parts = str(s).split(':')
+            h = max(0, min(23, int(parts[0])))
+            m = max(0, min(59, int(parts[1]) if len(parts) > 1 else 0))
+            return f"{h:02d}:{m:02d}"
+        except Exception:
+            return "18:00"
+
+    hhmm = clamp_hhmm(raw_hhmm)
+
+    # --- target_dt Europe/Paris (si colonne présente) ---
+    try:
+        tz_paris = pytz.timezone("Europe/Paris")
+        hh, mm = hhmm.split(":")
+        naive = _dt(target.year, target.month, target.day, int(hh), int(mm), 0)
+        target_dt = tz_paris.localize(naive)
+    except Exception:
+        target_dt = None
+
+    # --- règles métier J+3..J+31 ---
+    today = today_paris_date()
+    ok, msg, offset, odds = ppp_validate_can_bet(target, today)
+    if not ok:
+        return err(msg or "Mise impossible pour ce jour.")
+
+    # --- Cote combinée finale selon le choix ---
+    try:
+        comb = ppp_combined_odds(scope_station_id or "", target)
+        if comb.get("error"):
+            raise ValueError(comb["error"])
+        final_odds = float(
+            comb["combined_pluie"] if (choice == "PLUIE") else comb["combined_pas_pluie"]
+        )
+        odds = final_odds
+    except Exception:
+        # fallback : on garde la base_odds déjà validée par ppp_validate_can_bet
+        pass
+
+    # --- Mises déjà existantes sur ce jour/scope ---
+    q = PPPBet.query.filter(
+        PPPBet.user_id == current_user.id,
+        PPPBet.bet_date == target,
+        func.coalesce(PPPBet.station_id, '') == (scope_station_id or ''),
+        PPPBet.status == 'ACTIVE'
+    )
+    # (on ne filtre pas locked_for_trade ici, comme dans l'ancienne logique POST /ppp)
+    existing_bets = q.order_by(PPPBet.id.asc()).all()
+
+    opposite = 'PAS_PLUIE' if choice == 'PLUIE' else 'PLUIE'
+    for b in existing_bets:
+        b_hhmm = getattr(b, "target_time", None) or "18:00"
+        if b_hhmm[:5] == hhmm and (b.choice or '').upper() == opposite:
+            return err(
+                f"Déjà une mise « {opposite.replace('_',' ')} » à {hhmm}. "
+                f"Impossible de miser l'inverse au même horaire."
+            )
+
+    hours_set = set((getattr(b, "target_time", None) or "18:00")[:5] for b in existing_bets)
+    if hhmm not in hours_set and len(hours_set) >= 3:
+        listed = ", ".join(sorted(hours_set))
+        return err(
+            f"Limite de 3 horaires atteinte pour ce jour ({listed}). "
+            f"Vous pouvez remiser sur ces horaires, pas en ajouter un nouveau."
+        )
+
+    # --- Budget ---
+    grem = remaining_points(current_user)
+    if amount > grem + 1e-6:
+        return err(f"Budget insuffisant. Points restants : {grem:.3f}.")
+
+    # --- Insertion PPPBet ---
+    bet = PPPBet(
+        user_id=current_user.id,
+        bet_date=target,
+        choice=choice,
+        amount=amount,
+        odds=float(odds),
+        status='ACTIVE',
+        station_id=scope_station_id,
+        funded_from_balance=1,
+    )
+    try:
+        setattr(bet, "target_time", hhmm)
+    except Exception:
+        pass
+    try:
+        if target_dt is not None and hasattr(PPPBet, "target_dt"):
+            setattr(bet, "target_dt", target_dt)
+    except Exception:
+        pass
+
+    db.session.add(bet)
+
+    # --- Débit immédiat du solde stocké (NULL → 500.0 bootstrap) ---
+    db.session.execute(
+        text("""
+            UPDATE "user"
+               SET points = COALESCE(points, :base) - :amt
+             WHERE id = :uid
+        """),
+        {"base": 500.0, "amt": float(amount), "uid": int(current_user.id)},
+    )
+
+    try:
+        db.session.commit()
     except Exception as e:
-        app.logger.exception("ppp_bet failed")
         db.session.rollback()
-        return jsonify(error="internal"), 500
+        app.logger.exception("ppp_bet: commit failed")
+        return err("Erreur serveur, la mise n'a pas été enregistrée.", status=500)
+
+    # --- Nouveau solde pour la topbar ---
+    try:
+        new_pts = remaining_points(current_user)
+    except Exception:
+        new_pts = None
+
+    return jsonify({
+        "ok": True,
+        "new_points": new_pts,
+        "date": target.isoformat(),
+        "target_time": hhmm,
+        "choice": choice,
+        "station_id": scope_station_id,
+        "odds": float(odds),
+    }), 200
 
 @app.get("/debug/log")
 def debug_log():
@@ -7085,22 +7108,7 @@ def _touch_online():
         g._last_touch_ts = now
         g._touch_done = True
     except Exception:
-        db.session.rollback()
-
-# --- 1b) Ping: met à jour last_seen ---
-from datetime import datetime, timezone
-
-@app.post('/api/users/ping')
-@login_required
-def api_users_ping():
-    try:
-        current_user.last_seen = datetime.now(timezone.utc)
-        db.session.commit()
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        app.logger.exception("users_ping failed")
-        db.session.rollback()
-        return jsonify({"ok": False, "error": str(e)}), 500        
+        db.session.rollback() 
    
 # === CABINE INTEGRATION (auto) ===
 import os
@@ -7858,25 +7866,6 @@ def cabine_api():
 
 from flask import send_from_directory, redirect
 
-# Sauvegarde du PNG envoyé depuis Cabine
-@app.post("/api/cabine/snapshot")
-@login_required
-def cabine_snapshot():
-    f = request.files.get("file")
-    if not f:
-        return jsonify({"ok": False, "error": "missing file"}), 400
-
-    # Dossier de sortie
-    out_dir = os.path.join(app.static_folder, "avatars")
-    os.makedirs(out_dir, exist_ok=True)
-
-    uid = str(current_user.get_id())
-    out_path = os.path.join(out_dir, f"{uid}.png")
-
-    # Écrit tel quel, pas besoin de Pillow
-    f.save(out_path)
-    return jsonify({"ok": True, "url": url_for("static", filename=f"avatars/{uid}.png")}), 200
-
 # Exposer l’avatar PNG d’un utilisateur (avec fallback)
 @app.get("/u/<user_id>/avatar.png")
 def user_avatar_png(user_id):
@@ -7887,14 +7876,23 @@ def user_avatar_png(user_id):
     # Fallback (met un petit PNG par défaut dans static/img/avatar_placeholder.png)
     return redirect(url_for("static", filename="img/avatar_placeholder.png"), code=302)
 
-# --- Cabine: réception du snapshot PNG de l'avatar ---
 @app.post("/api/cabine/snapshot")
 @login_required
-def cabine_snapshot_png():
+def cabine_snapshot_unified():
     uid = str(current_user.get_id())
+    out_dir = os.path.join(app.static_folder, "avatars")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{uid}.png")
+
+    # 1) Cas fichier uploadé (multipart/form-data)
+    f = request.files.get("file")
+    if f:
+        f.save(out_path)
+        return jsonify({"ok": True, "url": url_for("static", filename=f"avatars/{uid}.png")}), 200
+
+    # 2) Cas JSON data URL
     data = request.get_json(silent=True) or {}
     data_url = data.get("png", "")
-
     if not data_url.startswith("data:image/png;base64,"):
         return jsonify({"ok": False, "error": "invalid PNG data"}), 400
 
@@ -7905,14 +7903,10 @@ def cabine_snapshot_png():
     except Exception:
         return jsonify({"ok": False, "error": "b64 decode failed"}), 400
 
-    out_dir = os.path.join(app.static_folder, "avatars")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{uid}.png")
-
     try:
-        with open(out_path, "wb") as f:
-            f.write(raw)
-    except Exception as e:
+        with open(out_path, "wb") as f2:
+            f2.write(raw)
+    except Exception:
         app.logger.exception("write avatar png failed")
         return jsonify({"ok": False, "error": "write failed"}), 500
 
@@ -7920,6 +7914,7 @@ def cabine_snapshot_png():
         "ok": True,
         "url": url_for("static", filename=f"avatars/{uid}.png")
     }), 200
+
 
 @app.get("/api/config_ui")
 def config_ui():
