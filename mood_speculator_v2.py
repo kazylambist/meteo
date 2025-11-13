@@ -7027,6 +7027,23 @@ def ppp_bet():
         "odds": float(odds),
     }), 200
 
+@app.route("/debug/ppp_bets")
+@login_required
+def debug_ppp_bets():
+    rows = (PPPBet.query
+            .filter(PPPBet.user_id == current_user.id)
+            .order_by(PPPBet.id.desc())
+            .limit(20)
+            .all())
+    lines = []
+    for b in rows:
+        lines.append(
+            f"id={b.id} | date={b.bet_date} | choice={b.choice} | "
+            f"amount={b.amount} | station={getattr(b, 'station_id', None)} | "
+            f"locked_for_trade={getattr(b, 'locked_for_trade', None)}"
+        )
+    return "<pre>\n" + "\n".join(lines) + "\n</pre>"
+
 @app.get("/debug/log")
 def debug_log():
     app.logger.info("DEBUG_LOG: route touchée ✔")
