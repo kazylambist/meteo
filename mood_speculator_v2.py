@@ -5451,12 +5451,16 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
         SELECT id, user_id, choice, bet_date,
                COALESCE(station_id, '') as station_id,
                COALESCE(target_time,'18:00') as target_time,
+               COALESCE(
+                   target_dt,
+                   (bet_date || 'T' || COALESCE(target_time,'18:00'))
+               ) AS target_dt,
                COALESCE(verdict,'') as verdict,
                COALESCE(outcome,'') as outcome,
                COALESCE(preset_outcome,'') as preset_outcome
           FROM ppp_bet
          WHERE status = 'ACTIVE'
-           AND bet_date < :today
+           AND bet_date <= :today
            AND TRIM(COALESCE(target_time,'18:00')) <> ''
           {where_scope}
     """),
@@ -5508,8 +5512,10 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
                     odd = float(amt_odds["odds"] or 0.0)
                     payout = amt * (odd + float(boost_total))
                     if payout > 0:
-                        db.session.execute(_t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
-                                           {"p": payout, "uid": uid})
+                        db.session.execute(
+                            _t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
+                            {"p": payout, "uid": uid}
+                        )
             updated += 1
             continue
 
@@ -5555,13 +5561,14 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
                 odd = float(amt_odds["odds"] or 0.0)
                 payout = amt * (odd + float(boost_total))
                 if payout > 0:
-                    db.session.execute(_t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
-                                       {"p": payout, "uid": uid})
+                    db.session.execute(
+                        _t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
+                        {"p": payout, "uid": uid}
+                    )
         updated += 1
 
     db.session.commit()
     return updated
-
 
 def resolve_pending_ppp_bets(max_back_days=14):
     """
