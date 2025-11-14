@@ -5434,7 +5434,8 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
     scope = (station_scope or "")
     where_scope = "AND COALESCE(station_id,'') = :sid" if station_scope is not None else ""
-
+    today = today_paris_date()
+    
     # Cible temporelle locale → UTC ISOZ si besoin
     def _to_utc_iso(s: str) -> str | None:
         if not s:
@@ -5447,18 +5448,20 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
             return None
 
     rows = db.session.execute(_t(f"""
-        SELECT id,
-               user_id,
-               COALESCE(station_id,'')          AS station_id,
-               UPPER(COALESCE(choice,''))       AS choice,
-               COALESCE(outcome,'')             AS preset_outcome,
-               COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) AS target_dt
-        FROM ppp_bet
-        WHERE (verdict IS NULL OR TRIM(verdict) = '')
-          AND status = 'ACTIVE'
-          AND COALESCE(target_dt, (bet_date || 'T' || COALESCE(target_time,'18:00'))) <> ''
+        SELECT id, user_id, choice, bet_date,
+               COALESCE(station_id, '') as station_id,
+               COALESCE(target_time,'18:00') as target_time,
+               COALESCE(verdict,'') as verdict,
+               COALESCE(outcome,'') as outcome,
+               COALESCE(preset_outcome,'') as preset_outcome
+          FROM ppp_bet
+         WHERE status = 'ACTIVE'
+           AND bet_date < :today
+           AND TRIM(COALESCE(target_time,'18:00')) <> ''
           {where_scope}
-    """), {"sid": scope} if station_scope is not None else {}).mappings().all()
+    """),
+        {"sid": scope, "today": today} if station_scope is not None else {"today": today}
+    ).mappings().all()
 
     if not rows:
         return 0
