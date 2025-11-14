@@ -3282,10 +3282,23 @@ function initPPPCalendar(ctx){
 
     let stakeBlock = '';
     if (amount > 0) {
-      const icon = (choice === 'PLUIE') ? svgDrop : (choice === 'PAS_PLUIE') ? svgSun : '';
+      // emojis en fonction de toutes les mises du jour (triées par heure)
+      const emojiStr = pppCellEmojisForDay(betInfo);
+
+      // fallback si jamais pas d'emojis calculés
+      const norm = normChoice(choice);
+      const fallbackIcon =
+        norm === 'PLUIE'     ? svgDrop :
+        norm === 'PAS_PLUIE' ? svgSun  :
+        '';
+
+      const iconHtml = emojiStr
+        ? '<span class="ppp-icons">' + emojiStr + '</span>'
+        : fallbackIcon;
+
       stakeBlock =
         '<div class="stake-wrap">' +
-          icon +
+          iconHtml +
           '<div class="stake-amt">+' + fmtPts(amount) + '</div>' +
         '</div>';
     }
@@ -3570,6 +3583,36 @@ function initPPPCalendar(ctx){
     const m = Math.max(0, Math.min(59, parseInt(parts[1]||'0',10)));
     return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
   }
+  
+  function pppCellEmojisForDay(entry) {
+    if (!entry || !Array.isArray(entry.bets) || entry.bets.length === 0) {
+      return '';
+    }
+
+    // Tri par heure croissante
+    const sorted = entry.bets.slice().sort((a, b) => {
+      const ta = String(a.target_time || a.time || '18:00').slice(0, 5);
+      const tb = String(b.target_time || b.time || '18:00').slice(0, 5);
+      return ta.localeCompare(tb);
+    });
+
+    function emojiForChoice(c) {
+      const u = String(c || '').toUpperCase();
+      if (u === 'PLUIE') return '💧';
+      if (u === 'PAS_PLUIE') return '☀️';
+      return '';
+    }
+
+    const parts = [];
+    for (const bet of sorted) {
+      const em = emojiForChoice(bet.choice);
+      if (!em) continue;
+      parts.push(em);
+      if (parts.length >= 3) break;  // max 3 emojis comme ta règle métier
+    }
+
+    return parts.join('');
+  }
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
@@ -3826,7 +3869,7 @@ function initPPPCalendar(ctx){
       const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',','.')) || 0;
       if (ctx && delta > 0) {
         ctx.bets_map = ctx.bets_map || {};
-        const entry  = ctx.bets_map[key] || { bets:[], amount:0, choice:choiceVal };
+        const entry = ctx.bets_map[key] || { bets: [], amount: 0, choice: null };
         let merged = false;
         for (const b of entry.bets) {
           const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
@@ -3843,33 +3886,57 @@ function initPPPCalendar(ctx){
       }
     }catch(_){}
 
-    // MAJ visuelle (stake + solde)
-    try{
+    // MAJ mémoire locale (bets_map)
+    try {
       const amountInput = form.querySelector('[name="amount"]');
-      const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',','.')) || 0;
-      if (delta>0 && cell){
-        let stakeWrap = cell.querySelector('.stake-wrap');
-        const iconHtml = (choiceVal==='PLUIE') ? (
-          '<svg viewBox="0 0 24 24" class="stake-icon icon-drop" aria-hidden="true"><path d="M12 2 C12 2, 6 8, 6 12 a6 6 0 0 0 12 0 C18 8, 12 2, 12 2z"></path></svg>'
-        ) : '☀️';
-        if (!stakeWrap){
-          stakeWrap = document.createElement('div');
-          stakeWrap.className = 'stake-wrap';
-          const amtStr = (Math.round(delta*10)/10).toString().replace('.',',');
-          stakeWrap.innerHTML = iconHtml + '<div class="stake-amt">+' + amtStr + '</div>';
-          const dateEl = cell.querySelector('.date');
-          if (dateEl) dateEl.insertAdjacentElement('afterend', stakeWrap);
-        }else{
-          const amtEl = stakeWrap.querySelector('.stake-amt');
-          const cur = amtEl ? parseFloat((amtEl.textContent||'0').replace('+','').replace(',','.'))||0 : 0;
-          if (amtEl) {
-            const newVal = (Math.round((cur+delta)*10)/10).toString().replace('.',',');
-            amtEl.textContent = '+' + newVal;
+      const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',', '.')) || 0;
+
+      if (ctx && delta > 0) {
+        ctx.bets_map = ctx.bets_map || {};
+
+        // Si l'entrée existe déjà, on la réutilise, sinon on crée une nouvelle
+        const entry = ctx.bets_map[key] || { bets: [], amount: 0, choice: null };
+
+        let merged = false;
+        for (const b of entry.bets) {
+          const bTime   = String(b.target_time || b.time || '18:00').slice(0, 5);
+          const bChoice = String(b.choice || '').toUpperCase();
+
+          if (bTime === hhmm && bChoice === choiceVal) {
+            b.amount = (Number(b.amount) || 0) + delta;
+            merged = true;
+            break;
           }
         }
-      }
-    }catch(_){}
 
+        // Nouvelle mise à cet horaire ou choix différent → on ajoute une ligne
+        if (!merged) {
+          entry.bets.push({
+            amount:      delta,
+            target_time: hhmm,
+            choice:      choiceVal,   // choix par mise (PLUIE / PAS_PLUIE)
+          });
+        }
+
+        // Montant total de la journée
+        entry.amount = (Number(entry.amount) || 0) + delta;
+
+        // Agrégat de choix au niveau du jour (PLUIE / PAS_PLUIE / MIXED)
+        const prev = (entry.choice || '').toUpperCase();
+        const neu  = choiceVal; // déjà uppercased plus haut dans le code
+
+        if (prev && neu && prev !== neu && prev !== 'MIXED') {
+          entry.choice = 'MIXED';
+        } else if (!prev && neu) {
+          entry.choice = neu;
+        }
+
+        ctx.bets_map[key] = entry;
+      }
+    } catch (e) {
+      console.error('PPP: erreur MAJ bets_map', e);
+    }
+    
     try{
       if (payload && typeof payload.new_points !== 'undefined') {
         if (window.updateTopbarSolde) window.updateTopbarSolde(payload.new_points);
@@ -6153,14 +6220,25 @@ def ppp(station_id=None):
         bets_map: dict[str, dict] = {}
         for r in rows:
             key = r.bet_date.isoformat()
-            entry = bets_map.get(key, {"amount": 0.0, "choice": r.choice, "bets": []})
+            # entry["choice"] = choix agrégé de la journée (PLUIE / PAS_PLUIE / MIXED)
+            entry = bets_map.get(key, {"amount": 0.0, "choice": None, "bets": []})
 
             entry["amount"] += float(r.amount or 0.0)
-            if r.choice:
-                entry["choice"] = r.choice
+
+            # Agrégat de choix au niveau du jour
+            c_prev = (entry.get("choice") or "").upper()
+            c_new  = (r.choice or "").upper()
+            if c_prev and c_new and c_prev != c_new:
+                entry["choice"] = "MIXED"   # journée mixte
+            elif c_new and not c_prev:
+                entry["choice"] = c_new     # 1er choix vu pour ce jour
 
             try:
-                when_iso = (r.created_at.isoformat() if getattr(r, "created_at", None) else key + "T00:00:00")
+                when_iso = (
+                    r.created_at.isoformat()
+                    if getattr(r, "created_at", None)
+                    else key + "T00:00:00"
+                )
             except Exception:
                 when_iso = key + "T00:00:00"
 
@@ -6182,6 +6260,7 @@ def ppp(station_id=None):
                 "verdict": v,
                 "result": v,  # compat
                 "outcome": getattr(r, "outcome", None),
+                "choice": (r.choice or "").upper(),  # <<< NOUVEAU: choix par mise
                 "observed_mm": (
                     float(getattr(r, "observed_mm", 0.0))
                     if getattr(r, "observed_mm", None) not in (None, "")
@@ -6191,7 +6270,10 @@ def ppp(station_id=None):
             entry["bets"].append(bet_dict)
 
             # verdict agrégé du jour (priorité LOSE)
-            results_upper = [str((b.get("verdict") or b.get("result") or "")).upper() for b in entry["bets"]]
+            results_upper = [
+                str((b.get("verdict") or b.get("result") or "")).upper()
+                for b in entry["bets"]
+            ]
             if "LOSE" in results_upper:
                 entry["verdict"] = "LOSE"
             elif "WIN" in results_upper:
