@@ -6079,7 +6079,7 @@ def ppp(station_id=None):
         return out
 
     # Paris par défaut en tête
-    stations = [{"id": "", "city_label": "Paris, France", "city": "Paris"}]
+    stations = [{"id": "lfpg_75", "city_label": "Paris, France", "city": "Paris"}]
     stations += _user_stations(current_user.id)
 
     # /ppp/<station_id> : remonte si présent, sinon ajoute en tête
@@ -6218,13 +6218,18 @@ def ppp(station_id=None):
             key = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
             boosts_map[key] = float(total or 0.0)
 
+        app.logger.info(
+            "PPP build_context_for_station: scope=%r, future_rows=%d, past_rows=%d",
+            scope_station_id, len(rows_future), len(rows_past)
+        )
+
         return {
             "gridId": f"pppGrid-{idx}",
             "city_label": city_label,
             "station_id": scope_station_id,
             "bets_map": bets_map,
             "boosts_map": boosts_map,
-        }
+        }    
 
     # Construit tous les calendriers: Paris + stations suivies
     cals = []
