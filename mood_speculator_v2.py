@@ -2966,6 +2966,171 @@ PPP_HTML = """
     font-size: 1.1rem;
     line-height: 1;
   }
+  /* --- Responsive PPP / mobile --- */
+
+  /* Tablettes & petits laptops */
+  @media (max-width: 900px) {
+    body {
+      font-size: 15px;
+    }
+
+    /* Topbar qui passe sur plusieurs lignes */
+    .container.topbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      row-gap: 6px;
+    }
+
+    .nav-left,
+    .nav-center,
+    .nav-right {
+      display: flex;
+      align-items: center;
+    }
+
+    .nav-left {
+      justify-content: flex-start;
+      flex: 1 0 30%;
+    }
+
+    .nav-center {
+      justify-content: center;
+      flex: 1 0 40%;
+      text-align: center;
+    }
+
+    .nav-right {
+      justify-content: flex-end;
+      flex: 1 0 30%;
+    }
+
+    .center-box {
+      gap: 8px;
+    }
+
+    .ppp-card-wrap {
+      padding: 10px 10px 14px;
+      margin-bottom: 22px;
+    }
+  }
+
+  /* Smartphones : largeur réduite */
+  @media (max-width: 600px) {
+    body {
+      font-size: 14px;
+    }
+
+    .container.topbar {
+      row-gap: 4px;
+    }
+
+    .nav-left,
+    .nav-center,
+    .nav-right {
+      flex: 1 0 100%;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .nav-right {
+      margin-top: 4px;
+    }
+
+    .center-box {
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    /* Conteneur principal un peu moins large */
+    .container {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+
+    /* Grille PPP scrollable horizontalement si besoin */
+    .ppp-grid-wrapper {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 6px;
+    }
+
+    .ppp-grid {
+      min-width: 620px; /* garde des cases lisibles, scroll si écran trop petit */
+    }
+
+    .ppp-day {
+      padding: 4px 3px;
+    }
+
+    .ppp-day .date {
+      font-size: 11px;
+    }
+
+    .stake-emojis {
+      font-size: 1rem;
+    }
+
+    .stake-wrap .stake-amt {
+      font-size: 11px;
+    }
+
+    .ppp-day .forecast-wrap {
+      top: 4px;
+      right: 4px;
+      width: 18px;
+      height: 18px;
+    }
+    .ppp-day .forecast-wrap svg {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  /* Petits smartphones : modale plus adaptée */
+  @media (max-width: 480px) {
+    .ppp-modal .ppp-card {
+      width: 92vw;
+      max-height: 90vh;
+      margin: 5vh auto;
+      padding: 10px 10px 12px;
+      overflow-y: auto;
+    }
+
+    .ppp-modal h3 {
+      font-size: 16px;
+    }
+
+    #mOddsWrap {
+      font-size: 22px;
+    }
+
+    #mHistory {
+      font-size: 13px;
+    }
+
+    .ppp-modal .grid.cols-3 {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .ppp-modal label {
+      font-size: 13px;
+    }
+
+    .ppp-modal input,
+    .ppp-modal select {
+      font-size: 14px;
+      min-height: 36px;
+    }
+
+    .ppp-modal button.btn {
+      min-height: 36px;
+      padding: 6px 12px;
+      font-size: 14px;
+    }
+  }  
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -3052,7 +3217,9 @@ PPP_HTML = """
       </h2>
       <div class="muted"></div>
 
-      <div id="{{ cal.gridId or ('pppGrid-' ~ loop.index0) }}" class="ppp-grid"></div>
+      <div class="ppp-grid-wrapper">
+        <div id="{{ cal.gridId or ('pppGrid-' ~ loop.index0) }}" class="ppp-grid"></div>
+      </div>
 
       <script>
         window.__PPP_CALS__ = window.__PPP_CALS__ || [];

@@ -50,3 +50,17 @@
 .canvas-col .stage{
   max-height: calc(100vh - var(--topbar-h) - 120px); /* garde la preview dans l'écran autant que possible */
 }
+/* --- Ajustement mobile : la colonne de droite n'est plus sticky ----------- */
+@media (max-width: 900px) {
+  .controls-col{
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .cabine{
+    align-items: stretch;
+  }
+}

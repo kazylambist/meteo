@@ -143,3 +143,113 @@ header,main,footer{position:relative;z-index:1}
 .controls-col .reset-all:active{
   transform: translateY(1px);
 }
+/* --- Responsive Cabine : desktop → mobile --------------------------------- */
+
+/* Tablettes et petits laptops */
+@media (max-width: 900px) {
+  .cabine{
+    grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+    gap: 20px;
+    max-width: 1100px;
+    margin: 22px auto;
+    padding: 0 14px;
+  }
+
+  .canvas-col{
+    gap: 12px;
+  }
+
+  .stage{
+    max-width: 460px;
+    margin: 0 auto;
+  }
+
+  .controls-col{
+    font-size: 0.95rem;
+  }
+
+  .actions{
+    justify-content: flex-end;
+  }
+}
+
+/* Smartphones “classiques” */
+@media (max-width: 600px) {
+  /* Topbar sur plusieurs lignes, centrée */
+  .topbar{
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+    row-gap: 6px;
+  }
+
+  .brand{
+    flex: 1 0 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .spacer{
+    display: none; /* on supprime le grand espace central sur mobile */
+  }
+
+  .navlink{
+    flex: 0 0 auto;
+  }
+
+  /* Colonne avatar + colonne contrôles empilées */
+  .cabine{
+    grid-template-columns: 1fr;
+    max-width: 540px;
+    margin: 16px auto;
+    padding: 0 10px;
+  }
+
+  .canvas-col,
+  .controls-col{
+    max-width: 540px;
+    margin: 0 auto;
+  }
+
+  .controls-col{
+    margin-top: 4px;
+  }
+
+  /* Boutons en pleine largeur pour le pouce */
+  .actions{
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions .btn{
+    width: 100%;
+    text-align: center;
+  }
+
+  .footnote{
+    text-align: center;
+    padding: 8px 0 16px;
+  }
+}
+
+/* Petits smartphones */
+@media (max-width: 480px) {
+  .stage{
+    max-width: 100%;
+    aspect-ratio: 3 / 4;
+  }
+
+  .controls-col label{
+    font-size: 13px;
+  }
+
+  .controls-col select{
+    font-size: 14px;
+    min-height: 36px;
+  }
+
+  .btn{
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+}
