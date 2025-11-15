@@ -2956,6 +2956,16 @@ PPP_HTML = """
   }
   .time-row{ margin-top:12px; }
   .time-row label{ display:block; font-size:12px; opacity:.8; margin-bottom:6px; }
+  .stake-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .stake-emojis {
+    font-size: 1.1rem;
+    line-height: 1;
+  }
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -3227,7 +3237,14 @@ function initPPPCalendar(ctx){
 
     const betInfo = (MY_BETS && MY_BETS[key]) ? MY_BETS[key] : null;
     const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
-    const choice  = betInfo ? betInfo.choice : null;
+
+    // Boost total pour ce jour (⚡)
+    const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key]))
+      ? Number(BOOSTS_SAFE[key])
+      : 0;
+
+    // Suite d’émojis météo triées + ⚡
+    const emojiStr = pppCellEmojisForDay(betInfo, boostForDay);
 
     function computeVerdict(info){
       if (!info) return null;
@@ -3235,31 +3252,40 @@ function initPPPCalendar(ctx){
       const agg = norm(info.verdict) || norm(info.result) || norm(info.status);
       if (agg === 'LOSE' || agg === 'LOST') return 'LOSE';
       if (agg === 'WIN'  || agg === 'WON')  return 'WIN';
+
       const arr = Array.isArray(info.bets) ? info.bets : [];
       const results = arr.map(function(b){
         return norm(b.verdict) || norm(b.result) || norm(b.status);
       }).filter(Boolean);
+
       if (results.includes('LOSE') || results.includes('LOST')) return 'LOSE';
       if (results.includes('WIN')  || results.includes('WON'))  return 'WIN';
       return null;
     }
+
     let verdict = computeVerdict(betInfo);
 
+    // Vérification "dernier horaire atteint" pour aujourd'hui
     if (delta === 0 && verdict && betInfo && Array.isArray(betInfo.bets)) {
       const lastHHMM = betInfo.bets
         .map(function(b){ return String(b.target_time || b.time || '18:00').slice(0,5); })
         .sort()
         .at(-1) || '18:00';
+
       const parts = lastHHMM.split(':');
       const lh = parseInt(parts[0] || '18', 10);
       const lm = parseInt(parts[1] || '0', 10);
+
       const nowParis = new Date(new Date().toLocaleString('en-US', { timeZone:'Europe/Paris' }));
-      const afterLast = nowParis.getHours() > lh || (nowParis.getHours() === lh && nowParis.getMinutes() >= lm);
+      const afterLast = nowParis.getHours() > lh ||
+                        (nowParis.getHours() === lh && nowParis.getMinutes() >= lm);
+
       if (!afterLast) verdict = null;
     }
 
     el.dataset.verdict = verdict || '';
 
+    // Jours passés
     if (delta < 0) {
       const hasBet = hasBetFor(key);
       el.classList.remove('is-past','past-pending','win','lose');
@@ -3269,35 +3295,31 @@ function initPPPCalendar(ctx){
       else el.classList.add('past-pending');
     }
 
+    // Aujourd'hui gagné/perdu
     if (delta === 0 && verdict) {
       if (verdict === 'LOSE') el.classList.add('today-loss');
       if (verdict === 'WIN')  el.classList.add('today-win');
     }
 
+    // J + 0 à J + 3 → désactivés si aucun pari
     if (delta <= 3 && delta >= 0 && !hasBetFor(key)) {
       el.classList.add('disabled');
     }
 
+    // Bloc affichage des mises + icônes
     let stakeBlock = '';
-    if (amount > 0) {
-      // emojis en fonction de toutes les mises du jour (triées par heure)
-      const emojiStr = pppCellEmojisForDay(betInfo);
-
-      // fallback si jamais pas d'emojis calculés
-      const norm = normChoice(choice);
-      const fallbackIcon =
-        norm === 'PLUIE'     ? svgDrop :
-        norm === 'PAS_PLUIE' ? svgSun  :
-        '';
-
-      const iconHtml = emojiStr
-        ? '<span class="ppp-icons">' + emojiStr + '</span>'
-        : fallbackIcon;
+    if (amount > 0 || boostForDay > 0) {
 
       stakeBlock =
         '<div class="stake-wrap">' +
-          iconHtml +
-          '<div class="stake-amt">+' + fmtPts(amount) + '</div>' +
+          (emojiStr
+            ? '<div class="stake-emojis">' + emojiStr + '</div>'
+            : ''
+          ) +
+          (amount > 0
+            ? '<div class="stake-amt">+' + fmtPts(amount) + '</div>'
+            : ''
+          ) +
         '</div>';
     }
 
@@ -3309,7 +3331,6 @@ function initPPPCalendar(ctx){
     const oddsEl   = el.querySelector('.odds');
     const baseIdx  = Math.max(0, Math.min(31, delta));
     const baseOdds = ODDS_SAFE[baseIdx];
-    const boostForDay = Number.isFinite(Number(BOOSTS_SAFE[key])) ? Number(BOOSTS_SAFE[key]) : 0;
     renderOdds(oddsEl, baseOdds, boostForDay);
 
     // Clic → modal
@@ -3582,40 +3603,59 @@ function initPPPCalendar(ctx){
     return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
   }
   
-  function pppCellEmojisForDay(entry) {
-    if (!entry || !Array.isArray(entry.bets) || entry.bets.length === 0) {
-      return '';
+  function pppCellEmojisForDay(entry, boostTotal) {
+    // Icônes météo + boosts pour une case de calendrier
+
+    // 1) Émojis météo (💧 / ☀️), au maximum 3, mais
+    //    on n'ajoute un second émoji que si l'heure est différente.
+    const weather = [];
+
+    if (entry && Array.isArray(entry.bets) && entry.bets.length > 0) {
+      // Tri par heure croissante
+      const sorted = entry.bets.slice().sort(function (a, b) {
+        const ta = String(a.target_time || a.time || '18:00').slice(0, 5);
+        const tb = String(b.target_time || b.time || '18:00').slice(0, 5);
+        return ta.localeCompare(tb);
+      });
+
+      function emojiForChoice(c) {
+        const u = String(c || '').toUpperCase();
+        if (u === 'PLUIE') return '💧';
+        if (u === 'PAS_PLUIE') return '☀️';
+        return '';
+      }
+
+      const seenSlots = new Set(); // évite doublons (même choix, même heure)
+
+      for (const bet of sorted) {
+        const hhmm   = String(bet.target_time || bet.time || '18:00').slice(0, 5);
+        const choice = String(bet.choice || '').toUpperCase();
+        const slotKey = choice + '@' + hhmm;
+
+        // On ignore les doublons de même choix à la même heure
+        if (seenSlots.has(slotKey)) continue;
+        seenSlots.add(slotKey);
+
+        const em = emojiForChoice(choice);
+        if (!em) continue;
+
+        weather.push(em);
+        if (weather.length >= 3) break;  // max 3 émojis météo (3 horaires max)
+      }
     }
 
-    // Tri par heure croissante
-    const sorted = entry.bets.slice().sort((a, b) => {
-      const ta = String(a.target_time || a.time || '18:00').slice(0, 5);
-      const tb = String(b.target_time || b.time || '18:00').slice(0, 5);
-      return ta.localeCompare(tb);
-    });
-
-    function emojiForChoice(c) {
-      const u = String(c || '').toUpperCase();
-      if (u === 'PLUIE') return '💧';
-      if (u === 'PAS_PLUIE') return '☀️';
-      return '';
+    // 2) Émojis de boost ⚡
+    const val = Number(boostTotal || 0);
+    let boltCount = 0;
+    if (Number.isFinite(val) && val > 0) {
+      // Chaque boost = +5 → approx nombre de boosts
+      boltCount = Math.round(val / 5);
+      if (boltCount < 1) boltCount = 1; // au moins 1 ⚡ si boost > 0
     }
+    const bolts = boltCount > 0 ? '⚡'.repeat(boltCount) : '';
 
-    const parts = [];
-    const seenTimes = new Set();
-
-    for (const bet of sorted) {
-      const hhmm = String(bet.target_time || bet.time || '18:00').slice(0, 5);
-      if (seenTimes.has(hhmm)) continue;   // déjà un emoji pour cette heure
-      seenTimes.add(hhmm);
-
-      const em = emojiForChoice(bet.choice);
-      if (!em) continue;
-      parts.push(em);
-      if (parts.length >= 3) break;        // max 3 emojis par jour
-    }
-
-    return parts.join('');
+    // 3) Concaténation météo puis boosts
+    return weather.join('') + bolts;
   }
 
   // Reconstruit le contenu visuel d'une cellule après une nouvelle mise
