@@ -253,3 +253,29 @@ header,main,footer{position:relative;z-index:1}
     font-size: 14px;
   }
 }
+/* --- Cabine : version mobile --- */
+@media (max-width: 768px) {
+  .cabine {
+    grid-template-columns: minmax(0, 1fr); /* une seule colonne */
+    max-width: 100%;
+    padding: 16px 12px 32px;
+  }
+
+  .canvas-col {
+    order: 1;              /* avatar en haut */
+    margin-bottom: 16px;
+  }
+
+  .controls-col {
+    order: 2;
+  }
+
+  .stage {
+    max-width: 360px;      /* taille lisible sur téléphone */
+    margin: 0 auto;        /* centré */
+  }
+
+  .topbar {
+    padding-inline: 12px;
+  }
+}

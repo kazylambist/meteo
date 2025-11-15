@@ -64,3 +64,13 @@
     align-items: stretch;
   }
 }
+/* --- Cabine : annule le sticky sur mobile --- */
+@media (max-width: 768px) {
+  .controls-col {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+}
