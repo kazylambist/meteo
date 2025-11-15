@@ -3623,10 +3623,16 @@ function initPPPCalendar(ctx){
   // Reconstruit le contenu visuel d'une cellule après une nouvelle mise
   ctx.rebuildDayCell = function(cell, key) {
     if (!cell) return;
+
     const betInfo = (ctx.bets_map && ctx.bets_map[key]) ? ctx.bets_map[key] : null;
     const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
 
-    let stakeBlock = '';
+    // On récupère la div.date et la div.odds existantes,
+    // mais on ne les modifie pas.
+    const oddsEl = cell.querySelector('.odds');
+
+    // Prépare le HTML interne de la stake-wrap
+    let stakeInner = '';
     if (amount > 0) {
       const emojiStr = pppCellEmojisForDay(betInfo);
 
@@ -3640,21 +3646,28 @@ function initPPPCalendar(ctx){
         ? '<span class="ppp-icons">' + emojiStr + '</span>'
         : fallbackIcon;
 
-      stakeBlock =
-        '<div class="stake-wrap">' +
-          iconHtml +
-          '<div class="stake-amt">+' + fmtPts(amount) + '</div>' +
-        '</div>';
+      stakeInner =
+        iconHtml +
+        '<div class="stake-amt">+' + fmtPts(amount) + '</div>';
     }
 
-    const dateText = (cell.querySelector('.date') && cell.querySelector('.date').textContent) || '';
-    const oddsText = (cell.querySelector('.odds') && cell.querySelector('.odds').textContent) || '';
+    // Trouve ou crée la stake-wrap sans toucher au reste
+    let stakeEl = cell.querySelector('.stake-wrap');
 
-    cell.innerHTML =
-      '<div class="date">' + dateText + '</div>' +
-      stakeBlock +
-      '<div class="odds">' + oddsText + '</div>';
-  };  
+    if (amount > 0) {
+      if (!stakeEl) {
+        stakeEl = document.createElement('div');
+        stakeEl.className = 'stake-wrap';
+        // On l’insère juste avant .odds s’il existe, sinon à la fin
+        if (oddsEl) cell.insertBefore(stakeEl, oddsEl);
+        else cell.appendChild(stakeEl);
+      }
+      stakeEl.innerHTML = stakeInner;
+    } else {
+      // Plus de mise ce jour-là → on supprime le bloc stake
+      if (stakeEl) stakeEl.remove();
+    }
+  };
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
