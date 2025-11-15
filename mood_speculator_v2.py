@@ -3604,15 +3604,57 @@ function initPPPCalendar(ctx){
     }
 
     const parts = [];
+    const seenTimes = new Set();
+
     for (const bet of sorted) {
+      const hhmm = String(bet.target_time || bet.time || '18:00').slice(0, 5);
+      if (seenTimes.has(hhmm)) continue;   // déjà un emoji pour cette heure
+      seenTimes.add(hhmm);
+
       const em = emojiForChoice(bet.choice);
       if (!em) continue;
       parts.push(em);
-      if (parts.length >= 3) break;  // max 3 emojis comme ta règle métier
+      if (parts.length >= 3) break;        // max 3 emojis par jour
     }
 
     return parts.join('');
   }
+
+  // Reconstruit le contenu visuel d'une cellule après une nouvelle mise
+  ctx.rebuildDayCell = function(cell, key) {
+    if (!cell) return;
+    const betInfo = (ctx.bets_map && ctx.bets_map[key]) ? ctx.bets_map[key] : null;
+    const amount  = betInfo ? (Number(betInfo.amount) || 0) : 0;
+
+    let stakeBlock = '';
+    if (amount > 0) {
+      const emojiStr = pppCellEmojisForDay(betInfo);
+
+      const norm = normChoice(betInfo && betInfo.choice);
+      const fallbackIcon =
+        norm === 'PLUIE'     ? svgDrop :
+        norm === 'PAS_PLUIE' ? svgSun  :
+        '';
+
+      const iconHtml = emojiStr
+        ? '<span class="ppp-icons">' + emojiStr + '</span>'
+        : fallbackIcon;
+
+      stakeBlock =
+        '<div class="stake-wrap">' +
+          iconHtml +
+          '<div class="stake-amt">+' + fmtPts(amount) + '</div>' +
+        '</div>';
+    }
+
+    const dateText = (cell.querySelector('.date') && cell.querySelector('.date').textContent) || '';
+    const oddsText = (cell.querySelector('.odds') && cell.querySelector('.odds').textContent) || '';
+
+    cell.innerHTML =
+      '<div class="date">' + dateText + '</div>' +
+      stakeBlock +
+      '<div class="odds">' + oddsText + '</div>';
+  };  
 
   (function loadTodayIcon(){
     const todayKey = ymdParis(today);
@@ -3864,29 +3906,6 @@ function initPPPCalendar(ctx){
     if (payload && payload.error){ alert(payload.error); return; }
 
     // MAJ mémoire locale (bets_map)
-    try{
-      const amountInput = form.querySelector('[name="amount"]');
-      const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',','.')) || 0;
-      if (ctx && delta > 0) {
-        ctx.bets_map = ctx.bets_map || {};
-        const entry = ctx.bets_map[key] || { bets: [], amount: 0, choice: null };
-        let merged = false;
-        for (const b of entry.bets) {
-          const bTime = String(b.target_time || b.time || '18:00').slice(0,5);
-          const bChoice = String(b.choice||'').toUpperCase();
-          if (bTime===hhmm && bChoice===choiceVal) {
-            b.amount = (Number(b.amount)||0) + delta;
-            merged = true; break;
-          }
-        }
-        if (!merged) entry.bets.push({ amount: delta, target_time: hhmm, choice: choiceVal });
-        entry.amount = (Number(entry.amount)||0) + delta;
-        entry.choice = entry.choice || choiceVal;
-        ctx.bets_map[key] = entry;
-      }
-    }catch(_){}
-
-    // MAJ mémoire locale (bets_map)
     try {
       const amountInput = form.querySelector('[name="amount"]');
       const delta = parseFloat(String(amountInput && amountInput.value || '0').replace(',', '.')) || 0;
@@ -3932,7 +3951,12 @@ function initPPPCalendar(ctx){
         }
 
         ctx.bets_map[key] = entry;
-      }
+        
+        // Rafraîchit l'affichage de la cellule sans reload
+        if (typeof ctx.rebuildDayCell === 'function' && cell) {
+          ctx.rebuildDayCell(cell, key);
+        }
+      }        
     } catch (e) {
       console.error('PPP: erreur MAJ bets_map', e);
     }
