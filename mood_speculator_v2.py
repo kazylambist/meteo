@@ -2140,9 +2140,7 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 .ppp-day.today.today-win{ box-shadow: 0 0 0 2px #30d158, 0 0 18px rgba(48,209,88,.35); }
 .ppp-day.today.today-loss{ box-shadow: 0 0 0 2px #ff3b30, 0 0 18px rgba(255,59,48,.35); }
 .ppp-day.disabled:after{
-  content:"✖";
-  position:absolute; inset:auto 6px 6px auto;
-  font-size:20px; color:#ff4d4d; text-shadow:0 0 8px rgba(255,77,77,.6);
+  content:"";
 }
 /* PPP — halo générique pour passé/futur résolus */
 .ppp-day.win  { box-shadow: 0 0 0 2px color-mix(in srgb, var(--good) 80%, #000 20%); }
