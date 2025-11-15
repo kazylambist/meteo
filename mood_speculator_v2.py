@@ -2966,7 +2966,8 @@ PPP_HTML = """
     font-size: 1.1rem;
     line-height: 1;
   }
-  /* --- Responsive PPP / mobile --- */
+
+  /* --- Responsive PPP --- */
 
   /* Tablettes & petits laptops */
   @media (max-width: 900px) {
@@ -2974,7 +2975,6 @@ PPP_HTML = """
       font-size: 15px;
     }
 
-    /* Topbar qui passe sur plusieurs lignes */
     .container.topbar {
       display: flex;
       flex-wrap: wrap;
@@ -3015,76 +3015,66 @@ PPP_HTML = """
     }
   }
 
-  /* Smartphones : largeur réduite */
-  @media (max-width: 600px) {
-    body {
-      font-size: 14px;
-    }
-
+  /* Smartphones : topbar 3 colonnes + grille 4 cases */
+  @media (max-width: 768px) {
     .container.topbar {
-      row-gap: 4px;
+      padding-inline: 10px;
+      display: grid;
+      grid-template-columns: auto 1fr auto; /* gauche / centre / droite */
+      column-gap: 8px;
+      align-items: center;
     }
 
-    .nav-left,
-    .nav-center,
-    .nav-right {
-      flex: 1 0 100%;
-      justify-content: center;
+    .container.topbar .nav-left,
+    .container.topbar .nav-center,
+    .container.topbar .nav-right {
+      display: flex;
+      align-items: center;
+    }
+
+    .container.topbar .nav-left {
+      justify-content: flex-start;
+    }
+
+    .container.topbar .nav-center {
+      justify-content: center;   /* solde bien centré */
+    }
+
+    .container.topbar .nav-right {
+      justify-content: flex-end;
+    }
+
+    .container.topbar .nav-center .center-box {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .bolt-tool {
+      margin-left: 4px;
+    }
+
+    .ppp-city {
       text-align: center;
-    }
-
-    .nav-right {
-      margin-top: 4px;
-    }
-
-    .center-box {
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-
-    /* Conteneur principal un peu moins large */
-    .container {
-      padding-left: 8px;
-      padding-right: 8px;
-    }
-
-    /* Grille PPP scrollable horizontalement si besoin */
-    .ppp-grid-wrapper {
-      width: 100%;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      padding-bottom: 6px;
-    }
-
-    .ppp-grid {
-      min-width: 620px; /* garde des cases lisibles, scroll si écran trop petit */
-    }
-
-    .ppp-day {
-      padding: 4px 3px;
-    }
-
-    .ppp-day .date {
-      font-size: 11px;
-    }
-
-    .stake-emojis {
+      margin: 0 0 6px;
       font-size: 1rem;
     }
 
-    .stake-wrap .stake-amt {
-      font-size: 11px;
+    .ppp-card-wrap {
+      padding: 10px 8px 14px;
+      margin-bottom: 16px;
     }
 
-    .ppp-day .forecast-wrap {
-      top: 4px;
-      right: 4px;
-      width: 18px;
-      height: 18px;
+    /* Calendrier : 4 cases par ligne */
+    .ppp-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
     }
-    .ppp-day .forecast-wrap svg {
-      width: 16px;
-      height: 16px;
+
+    .ppp-day {
+      min-width: 0;
     }
   }
 
@@ -3130,7 +3120,7 @@ PPP_HTML = """
       padding: 6px 12px;
       font-size: 14px;
     }
-  }  
+  }
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
