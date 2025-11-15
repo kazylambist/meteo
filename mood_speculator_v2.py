@@ -3015,7 +3015,7 @@ PPP_HTML = """
     }
   }
 
-  /* Smartphones : topbar 3 colonnes + grille 4 cases */
+  /* Smartphones : topbar 3 colonnes + grille 3 cases */
   @media (max-width: 768px) {
     .container.topbar {
       padding-inline: 10px;
@@ -3066,10 +3066,10 @@ PPP_HTML = """
       margin-bottom: 16px;
     }
 
-    /* Calendrier : 4 cases par ligne */
+    /* Calendrier : 3 cases par ligne */
     .ppp-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }
 
@@ -3348,9 +3348,25 @@ function initPPPCalendar(ctx){
     const day=String(d.getDate()).padStart(2,'0');
     return y + '-' + m + '-' + day;
   }
+
+  // Format “normal” avec mois (utilisé par la modale, etc.)
   function fr(d){
     return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' });
   }
+
+  // Label spécifique pour les cases du calendrier
+  function cellLabelForDay(d, delta){
+    if (delta === 0)  return 'ce jour';
+    if (delta === -1) return 'hier';
+    if (delta === 1)  return 'demain';
+
+    // ex: "mer. 12" (sans mois)
+    return d.toLocaleDateString('fr-FR', {
+      weekday: 'short',
+      day:     '2-digit'
+    });
+  }
+
   function hasBetFor(key){
     const b = MY_BETS && MY_BETS[key];
     if (!b) return false;
@@ -3379,8 +3395,24 @@ function initPPPCalendar(ctx){
   const BOOSTS_SAFE = (BOOSTS && typeof BOOSTS === 'object') ? BOOSTS : {};
 
   // Grille de jours
-  const START_SHIFT = -3;
+  let START_SHIFT = -3;
   const TOTAL_DAYS  = 34;
+
+  // Si aucune mise sur les 3 derniers jours, on commence à aujourd'hui (delta = 0)
+  (function adjustStartShiftForPastBets(){
+    let hasRecentPastBet = false;
+    for (let offset = -1; offset >= -3; offset--) {
+      const d   = addDaysLocal(today, offset);
+      const key = ymdParis(d);
+      if (hasBetFor(key)) {
+        hasRecentPastBet = true;
+        break;
+      }
+    }
+    if (!hasRecentPastBet) {
+      START_SHIFT = 0;
+    }
+  })();
 
   for (let i = 0; i <= TOTAL_DAYS; i++) {
     const delta = i + START_SHIFT;
@@ -3480,8 +3512,10 @@ function initPPPCalendar(ctx){
         '</div>';
     }
 
+    const labelText = cellLabelForDay(d, delta);
+
     el.innerHTML =
-      '<div class="date">' + fr(d) + '</div>' +
+      '<div class="date">' + labelText + '</div>' +
       stakeBlock +
       '<div class="odds"></div>';
 
