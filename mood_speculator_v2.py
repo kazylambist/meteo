@@ -1516,25 +1516,61 @@ def _odds_from_prob(p: float) -> tuple[float, float]:
     dry   = max(PPP_ODDS_MIN, min(PPP_ODDS_MAX, 1.0 / max(1.0 - p, eps)))
     return round(pluie, 2), round(dry, 2)
 
+def ppp_forecast_signal_for_day(station_id: str, target_date: date) -> str | None:
+    """
+    Renvoie 'PLUIE' ou 'PAS_PLUIE' pour une station et une date future.
+    On utilise la même source que /api/meteo/forecast5 via WeatherSnapshot.
+    """
+    # → Paris / CDG par défaut si pas de station
+    city = station_id
+    if not city or city.lower() in ("", "cdg_07157", "lfpg", "paris"):
+        city = "Paris"
+
+    # snapshot du jour (contient forecast5)
+    snap = get_city_snapshot(city, today_paris())
+    if not snap:
+        return None
+
+    try:
+        j = json.loads(snap.forecast_json or "{}")
+        lst = j.get("forecast5", [])
+        tgt_iso = target_date.isoformat()
+
+        # chercher la bonne entrée forecast
+        found = next((x for x in lst if x.get("date") == tgt_iso), None)
+        if not found:
+            return None
+
+        rain_h = float(found.get("rain_hours", 0) or 0.0)
+
+        # règle simple : pluie si ≥ 2h de pluie
+        if rain_h >= 2.0:
+            return "PLUIE"
+        return "PAS_PLUIE"
+    except Exception:
+        return None
+
 def ppp_combined_odds(station_id: str, target_date: date) -> dict:
     """
-    Combine historique 20 ans (par MM-DD) + PPP_ODDS par offset.
-    Retourne dict avec composants et cotes finales.
+    Combine historique 20 ans + PPP_ODDS + prévision J+1/J+2/J+3.
+    Renvoie dict {combined_pluie, combined_pas_pluie, ...}
     """
     today = today_paris()
     ok, msg, offset, base_odds = ppp_validate_can_bet(target_date, today)
+
     if not ok or base_odds is None:
         return {"error": msg or "indisponible"}
 
+    # === 1) COTE HISTORIQUE 20 ANS ===
     mmdd = target_date.strftime("%m-%d")
-    p = _hist_prob_pluie_for_mmdd(station_id, mmdd)
     try:
         p = _hist_prob_pluie_for_mmdd(station_id, mmdd)
-    except Exception as e:
-        app.logger.warning("hist_prob failed %s %s: %s", station_id, mmdd, e)
-        p = None    
+    except Exception:
+        p = None
+
     if p is None:
-        b = round(base_odds, 2)
+        # fallback : aucune stat, on retourne base_odds partout
+        b = round(float(base_odds), 2)
         return {
             "offset": offset,
             "historical_available": False,
@@ -1542,20 +1578,83 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
             "combined_pluie": b,
             "combined_pas_pluie": b,
         }
+
     odd_hist_pluie, odd_hist_dry = _odds_from_prob(p)
-    # Moyenne simple avec ta cote prédéfinie
-    comb_pluie = round((odd_hist_pluie + base_odds) / 2.0, 2)
-    comb_dry   = round((odd_hist_dry   + base_odds) / 2.0, 2)
+
+    # === 2) COTE PRÉDÉFINIE (PPP_ODDS) ===
+    predef = float(base_odds)
+
+    # === 3) MÉLANGE standard (fallback hors J+1..J+3) ===
+    comb_pluie_std = round((odd_hist_pluie + predef) / 2.0, 2)
+    comb_dry_std   = round((odd_hist_dry   + predef) / 2.0, 2)
+
+    # === 4) PRÉVISION MÉTÉO (J+1..J+3 uniquement) ===
+    if offset not in (1, 2, 3):
+        return {
+            "offset": offset,
+            "historical_available": True,
+            "p_rain": round(p, 3),
+            "odd_hist_pluie": odd_hist_pluie,
+            "odd_hist_pas_pluie": odd_hist_dry,
+            "base_odds": round(predef, 2),
+            "combined_pluie": comb_pluie_std,
+            "combined_pas_pluie": comb_dry_std,
+        }
+
+    # Prévision binaire
+    signal = ppp_forecast_signal_for_day(station_id, target_date)
+    if signal is None:
+        # pas de prévision = fallback
+        return {
+            "offset": offset,
+            "historical_available": True,
+            "p_rain": round(p, 3),
+            "odd_hist_pluie": odd_hist_pluie,
+            "odd_hist_pas_pluie": odd_hist_dry,
+            "base_odds": round(predef, 2),
+            "combined_pluie": comb_pluie_std,
+            "combined_pas_pluie": comb_dry_std,
+        }
+
+    # Cote prévision selon ton barème
+    if signal == "PLUIE":
+        forecast_pluie = 1.0
+        forecast_pas = 2.0
+    else:  # PAS_PLUIE
+        forecast_pluie = 2.0
+        forecast_pas = 1.0
+
+    # Poids selon offset
+    if offset == 1:
+        k_hist, k_pred, k_fore, denom = 1, 1, 3, 5.0
+    elif offset == 2:
+        k_hist, k_pred, k_fore, denom = 1, 1, 2, 4.0
+    else:  # offset == 3
+        k_hist, k_pred, k_fore, denom = 1, 1, 1, 3.0
+
+    comb_pluie = (
+        k_hist * odd_hist_pluie +
+        k_pred * predef +
+        k_fore * forecast_pluie
+    ) / denom
+
+    comb_dry = (
+        k_hist * odd_hist_dry +
+        k_pred * predef +
+        k_fore * forecast_pas
+    ) / denom
+
+    comb_pluie = round(comb_pluie, 2)
+    comb_dry   = round(comb_dry, 2)
 
     return {
         "offset": offset,
+        "forecast_signal": signal,
         "historical_available": True,
         "p_rain": round(p, 3),
         "odd_hist_pluie": odd_hist_pluie,
         "odd_hist_pas_pluie": odd_hist_dry,
-        "base_odds": round(base_odds, 2),
-        "odds_pluie": odd_hist_pluie,
-        "odds_pas_pluie": odd_hist_dry,
+        "base_odds": round(predef, 2),
         "combined_pluie": comb_pluie,
         "combined_pas_pluie": comb_dry,
     }

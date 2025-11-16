@@ -275,7 +275,7 @@ header,main,footer{position:relative;z-index:1}
 
   .canvas-col {
     order: 1;              /* avatar en haut */
-    margin-bottom: 16px;
+    margin-bottom: 8px;
   }
 
   .controls-col {
@@ -283,8 +283,10 @@ header,main,footer{position:relative;z-index:1}
   }
 
   .stage {
-    max-width: 360px;      /* taille lisible sur téléphone */
-    margin: 0 auto;        /* centré */
+    max-width: 420px;        /* avatar plus grand */
+    margin: 0 auto;
+    aspect-ratio: 3/4;
+    min-height: 320px;       /* assure une belle taille même si aspect-ratio bug */
   }
 
   .topbar {
