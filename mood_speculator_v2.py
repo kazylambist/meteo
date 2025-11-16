@@ -3790,12 +3790,26 @@ function initPPPCalendar(ctx){
         const j = PPP_ACTIVE.__lastOdds || {};
         const labelEl = document.getElementById('mOddsLabel');
         const oddsEl  = document.getElementById('mOdds');
-        const c = currentPPPChoice();
-        const val = Number(c === 'PLUIE' ? j.combined_pluie : j.combined_pas_pluie);
+        const c = currentPPPChoice(); // 'PLUIE' ou 'PAS_PLUIE'
+
+        // On lit directement les cotes combinées calculées par l’API
+        const combined = (c === 'PLUIE') ? j.combined_pluie : j.combined_pas_pluie;
+        const val = Number(combined);
+
+        // Fallback : combined_chosen → base_odds → 0
         const fallback = Number(j.combined_chosen || j.base_odds || 0);
-        const v = Number.isFinite(val) && val > 0 ? val : fallback;
-        if (oddsEl) oddsEl.textContent = v > 0 ? String(v.toFixed(1)).replace('.', ',') : '';
-        if (labelEl) labelEl.textContent = (c === 'PLUIE' ? 'Cote 💧' : 'Cote ☀️');
+
+        const v = (Number.isFinite(val) && val > 0) ? val : fallback;
+
+        if (oddsEl) {
+          oddsEl.textContent = (v > 0)
+            ? 'x' + String(v.toFixed(1)).replace('.', ',')
+            : '';
+        }
+
+        if (labelEl) {
+          labelEl.textContent = (c === 'PLUIE') ? 'Cote 💧' : 'Cote ☀️';
+        }
       }
 
       let oddsAbort = null;
