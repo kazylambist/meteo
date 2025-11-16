@@ -1432,7 +1432,7 @@ def openmeteo_daily(lat, lon, start_date, end_date):
 
 # --- PPP: cotes historiques 20 ans ---
 PPP_RAIN_MM_THRESHOLD = 0.2     # mm (modifiable)
-PPP_ODDS_MIN, PPP_ODDS_MAX = 1.1, 3.0
+PPP_ODDS_MIN, PPP_ODDS_MAX = 1.0, 3.0
 
 def _station_latlon_from_json(station_id: str):
     """Retourne (lat, lon) si possible. Tolérant aux erreurs et aux alias."""
