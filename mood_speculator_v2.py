@@ -2922,7 +2922,7 @@ PPP_HTML = """
   }
   .user-dropdown .item[href="/trade/"]:hover { background:#25493f; }
 
-  /* Bouton “Profil 👔” — violet foncé */
+  /* Bouton “Cabine 👔” — violet foncé */
   .user-dropdown .item[href="{{ url_for('cabine_page') }}"] {
     background:#2e2246; color:#f3f6fb; font-weight:800; border:none;
   }
@@ -3145,13 +3145,13 @@ PPP_HTML = """
 
           <div class="user-menu">
             <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
-              <strong>{{ current_user.username }}</strong>
+              <strong>Menu</strong>
               <span class="caret">▾</span>
             </button>
             <div class="user-dropdown" id="userDropdown" role="menu">
               <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
               <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
-              <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>
+              <a class="item" href="{{ url_for('cabine_page') }}">Cabine 👔</a>
               <a class="item" href="/carte">Carte 🗺️</a>
               <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
               <div class="submenu">
@@ -3490,8 +3490,9 @@ function initPPPCalendar(ctx){
       if (verdict === 'WIN')  el.classList.add('today-win');
     }
 
-    // J + 0 à J + 3 → désactivés si aucun pari
-    if (delta <= 3 && delta >= 0 && !hasBetFor(key)) {
+    // J+1 et au-delà : cliquable
+    // Seul le jour J est interdit (delta == 0)
+    if (delta === 0 && !hasBetFor(key)) {
       el.classList.add('disabled');
     }
 
@@ -4456,7 +4457,7 @@ WET_HTML = """
       {% if current_user.is_authenticated %}
         <div class="user-menu">
           <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
-            <strong>{{ current_user.username }}</strong>
+            <strong>Menu</strong>
             <span class="caret">▾</span>
           </button>
           <div class="user-dropdown" id="userDropdown" role="menu">
@@ -5338,13 +5339,13 @@ CARTE_HTML = """
       {% if current_user.is_authenticated %}
         <div class="user-menu">
           <button class="user-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
-            <strong>{{ current_user.username }}</strong>
+            <strong>Menu</strong>
             <span class="caret">▾</span>
           </button>
           <div class="user-dropdown" id="userDropdown" role="menu">
             <a class="item" href="{{ url_for('trade_page') }}">Échanges 🤝</a>
             <a class="item" href="/static/dessin/dessin.html">Offrandes 🎨</a>
-            <a class="item" href="{{ url_for('cabine_page') }}">Profil 👔</a>            
+            <a class="item" href="{{ url_for('cabine_page') }}">Cabine 👔</a>            
             <a class="item" href="/carte">Carte 🗺️</a>
             <a class="item" href="{{ url_for('wet') }}">Humidité 💧</a>
             <a class="item" href="/logout">Se déconnecter</a>
@@ -7279,23 +7280,34 @@ def ppp_bet():
     except Exception:
         target_dt = None
 
-    # --- règles métier J+3..J+31 ---
+    # --- Règles métier : autorisé de J+1 à J+31 ---
     today = today_paris_date()
-    ok, msg, offset, odds = ppp_validate_can_bet(target, today)
-    if not ok:
-        return err(msg or "Mise impossible pour ce jour.")
+    delta_days = (target - today).days
+    if delta_days < 1:
+        # J0 ou passé : interdit
+        return err("Mise interdite pour aujourd’hui.")
+    if delta_days > 31:
+        # On garde la limite lointaine à 31 jours
+        return err("Mise trop lointaine. Maximum : 31 jours à l’avance.")
+
+    # Cote de base par défaut (sera raffinée ci-dessous)
+    odds = 1.0
 
     # --- Cote combinée finale selon le choix ---
     try:
         comb = ppp_combined_odds(scope_station_id or "", target)
         if comb.get("error"):
             raise ValueError(comb["error"])
-        final_odds = float(
-            comb["combined_pluie"] if (choice == "PLUIE") else comb["combined_pas_pluie"]
-        )
-        odds = final_odds
+
+        if choice == "PLUIE":
+            final_odds = float(comb.get("combined_pluie") or comb.get("base_odds") or 0.0)
+        else:
+            final_odds = float(comb.get("combined_pas_pluie") or comb.get("base_odds") or 0.0)
+
+        if final_odds > 0:
+            odds = final_odds
     except Exception:
-        # fallback : on garde la base_odds déjà validée par ppp_validate_can_bet
+        # fallback : on garde la cote de base (1.0) si calcul combiné impossible
         pass
 
     # --- Mises déjà existantes sur ce jour/scope ---
