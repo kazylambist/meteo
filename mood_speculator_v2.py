@@ -959,18 +959,32 @@ PPP_ODDS = {
 def ppp_odds_for_offset(d: int):
     return PPP_ODDS.get(d, None)
 
-def ppp_validate_can_bet(target: date, today: date) -> tuple[bool,str|None,int|None,float|None]:
-    """Return (ok, msg, offset, odds). First 3 days disabled; allow from +3..+31."""
+def ppp_validate_can_bet(target: date, today: date) -> tuple[bool, str | None, int | None, float | None]:
+    """
+    Return (ok, msg, offset, odds).
+
+    Nouvelle règle métier :
+      - interdit pour les jours passés
+      - interdit pour aujourd'hui (offset < 1)
+      - autorisé de J+1 jusqu'à J+31 inclus
+    """
     if target < today:
         return False, "Jour passé.", None, None
+
     offset = (target - today).days
-    if offset <= 3:
-        return False, "Mise interdite sur les 3 prochains jours.", offset, None
+
+    # J0 ou avant : interdit
+    if offset < 1:
+        return False, "Mise interdite pour aujourd’hui.", offset, None
+
+    # Limite haute du calendrier
     if offset > 31:
         return False, "Calendrier limité à 31 jours.", offset, None
+
     odds = ppp_odds_for_offset(offset)
     if odds is None:
         return False, "Aucun taux disponible.", offset, None
+
     return True, None, offset, odds
 
 def get_value_for(d: date, asset: str) -> Optional[float]:
