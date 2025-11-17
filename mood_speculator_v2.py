@@ -275,6 +275,14 @@ if RUN_MIG:
             except Exception:
                 pass
 
+            # PPP : flag de versement journalier (0 = non réglé, 1 = déjà réglé)
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE ppp_bet ADD COLUMN day_payout_done INTEGER NOT NULL DEFAULT 0"
+                ))
+            except Exception:
+                pass
+
             # Index PPP pour accélérer la page
             try:
                 db.session.execute(text(
@@ -1567,7 +1575,7 @@ def ppp_forecast_signal_for_day(station_id: str, target_date: date) -> str | Non
 
 def ppp_combined_odds(station_id: str, target_date: date) -> dict:
     """
-    Combine historique 20 ans + PPP_ODDS + prévision J+1/J+2/J+3.
+    Combine historique 20 ans + PPP_ODDS + prévision (J+1 à J+5).
     Renvoie dict {combined_pluie, combined_pas_pluie, ...}
     """
     today = today_paris()
@@ -1599,12 +1607,12 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
     # === 2) COTE PRÉDÉFINIE (PPP_ODDS) ===
     predef = float(base_odds)
 
-    # === 3) MÉLANGE standard (fallback hors J+1..J+3) ===
+    # === 3) MÉLANGE standard (fallback hors J+1..J+5 ou sans prévision) ===
     comb_pluie_std = round((odd_hist_pluie + predef) / 2.0, 2)
     comb_dry_std   = round((odd_hist_dry   + predef) / 2.0, 2)
 
-    # === 4) PRÉVISION MÉTÉO (J+1..J+3 uniquement) ===
-    if offset not in (1, 2, 3):
+    # === 4) PRÉVISION MÉTÉO (J+1..J+5 uniquement) ===
+    if offset not in (1, 2, 3, 4, 5):
         return {
             "offset": offset,
             "historical_available": True,
@@ -1616,10 +1624,10 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
             "combined_pas_pluie": comb_dry_std,
         }
 
-    # Prévision binaire
+    # Prévision binaire pour le jour cible
     signal = ppp_forecast_signal_for_day(station_id, target_date)
     if signal is None:
-        # pas de prévision = fallback
+        # pas de prévision = fallback standard
         return {
             "offset": offset,
             "historical_available": True,
@@ -1631,7 +1639,7 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
             "combined_pas_pluie": comb_dry_std,
         }
 
-    # Cote prévision selon ton barème
+    # Cote prévision selon ton barème binaire
     if signal == "PLUIE":
         forecast_pluie = 1.0
         forecast_pas = 2.0
@@ -1639,13 +1647,22 @@ def ppp_combined_odds(station_id: str, target_date: date) -> dict:
         forecast_pluie = 2.0
         forecast_pas = 1.0
 
-    # Poids selon offset
+    # Poids selon offset (J+1 à J+5) : prévision très forte à J+1 puis décroissante
     if offset == 1:
-        k_hist, k_pred, k_fore, denom = 1, 1, 3, 5.0
+        # Prévision dominante
+        k_hist, k_pred, k_fore, denom = 1, 1, 4, 6.0   # ~67% forecast
     elif offset == 2:
-        k_hist, k_pred, k_fore, denom = 1, 1, 2, 4.0
-    else:  # offset == 3
-        k_hist, k_pred, k_fore, denom = 1, 1, 1, 3.0
+        # Prévision encore très importante
+        k_hist, k_pred, k_fore, denom = 1, 1, 3, 5.0   # 60% forecast
+    elif offset == 3:
+        # Équilibre entre les trois sources
+        k_hist, k_pred, k_fore, denom = 2, 2, 2, 6.0   # ~33% chacune
+    elif offset == 4:
+        # Historique + PPP_ODDS dominent, prévision faible
+        k_hist, k_pred, k_fore, denom = 3, 3, 1, 7.0   # ~14% forecast
+    else:  # offset == 5
+        # Prévision résiduelle, surtout pour la tendance
+        k_hist, k_pred, k_fore, denom = 4, 4, 1, 9.0   # ~11% forecast
 
     comb_pluie = (
         k_hist * odd_hist_pluie +
@@ -5899,9 +5916,9 @@ def _ppp_is_rain_from_humidity(values: list[float]) -> bool:
 def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     """
     Résout les ppp_bet sans verdict à partir des observations ou d'un outcome déjà fixé.
-    Crédit immédiat si WIN.
+    Les crédits de points sont effectués au niveau « journée » (Win_day) et non pari par pari.
     station_scope: filtre sur station_id (chaîne vide autorisée). None = tous scopes.
-    Retourne le nombre de paris mis à jour.
+    Retourne le nombre de paris mis à jour (RESOLVED).
     """
     from datetime import datetime
     from sqlalchemy import text as _t
@@ -5909,7 +5926,7 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
     scope = (station_scope or "")
     where_scope = "AND COALESCE(station_id,'') = :sid" if station_scope is not None else ""
     today = today_paris_date()
-    
+
     # Cible temporelle locale → UTC ISOZ si besoin
     def _to_utc_iso(s: str) -> str | None:
         if not s:
@@ -5946,9 +5963,9 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
 
     updated = 0
     for r in rows:
-        bid   = r["id"]
-        uid   = r["user_id"]
-        sid   = (r["station_id"] or "")
+        bid    = r["id"]
+        uid    = r["user_id"]
+        sid    = (r["station_id"] or "")
         choice = (r["choice"] or "").upper()
         if choice not in ("PLUIE", "PAS_PLUIE"):
             continue
@@ -5958,7 +5975,7 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
         if not utc_from:
             continue
 
-        # 1) outcome déjà fixé -> verdict direct
+        # 1) outcome déjà fixé -> verdict direct (sans crédit immédiat)
         preset = (r["preset_outcome"] or "").upper().strip()
         if preset in ("PLUIE", "PAS_PLUIE"):
             verdict = "WIN" if preset == choice else "LOSE"
@@ -5969,27 +5986,6 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
                        resolved_at  = CURRENT_TIMESTAMP
                  WHERE id = :bid
             """), {"v": verdict, "bid": bid})
-            # Crédit si WIN
-            if verdict == "WIN":
-                date_key = tloc[:10]
-                boost_total = db.session.execute(_t("""
-                    SELECT COALESCE(SUM(value),0)
-                      FROM ppp_boosts
-                     WHERE user_id = :uid
-                       AND bet_date = :d
-                       AND COALESCE(station_id,'') = :sid
-                """), {"uid": uid, "d": date_key, "sid": sid}).scalar() or 0.0
-                amt_odds = db.session.execute(_t("SELECT amount, odds FROM ppp_bet WHERE id=:bid"),
-                                              {"bid": bid}).mappings().first()
-                if amt_odds:
-                    amt = float(amt_odds["amount"] or 0.0)
-                    odd = float(amt_odds["odds"] or 0.0)
-                    payout = amt * (odd + float(boost_total))
-                    if payout > 0:
-                        db.session.execute(
-                            _t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
-                            {"p": payout, "uid": uid}
-                        )
             updated += 1
             continue
 
@@ -6018,28 +6014,101 @@ def resolve_ppp_open_bets(station_scope: str | None = None) -> int:
             "verdict": verdict,
             "bid": bid
         })
+        updated += 1
 
-        if verdict == "WIN":
-            date_key = tloc[:10]
-            boost_total = db.session.execute(_t("""
-                SELECT COALESCE(SUM(value),0)
-                  FROM ppp_boosts
+    # --- Règlement « par journée » (Win_day / Lose_day) ---
+    # On traite les (user_id, bet_date, station_id) dont tous les paris sont RESOLVED
+    # et qui n'ont pas encore été réglés au niveau jour (day_payout_done = 0).
+
+    day_rows = db.session.execute(_t("""
+        SELECT user_id,
+               bet_date,
+               COALESCE(station_id,'') AS station_id
+          FROM ppp_bet
+         WHERE status = 'RESOLVED'
+           AND bet_date <= :today
+           AND COALESCE(day_payout_done, 0) = 0
+         GROUP BY user_id, bet_date, COALESCE(station_id,'')
+    """), {"today": today}).mappings().all()
+
+    for dr in day_rows:
+        uid = dr["user_id"]
+        d   = dr["bet_date"]
+        sid = dr["station_id"] or ""
+
+        # S'il reste des paris actifs sur cette journée/station pour cet utilisateur,
+        # on ne règle pas encore (journée pas complète).
+        pending = db.session.execute(_t("""
+            SELECT COUNT(*) AS n
+              FROM ppp_bet
+             WHERE user_id = :uid
+               AND bet_date = :d
+               AND COALESCE(station_id,'') = :sid
+               AND status = 'ACTIVE'
+        """), {"uid": uid, "d": d, "sid": sid}).scalar() or 0
+
+        if pending:
+            continue  # journée encore incomplète
+
+        # On récupère tous les paris de la journée
+        bets_day = db.session.execute(_t("""
+            SELECT id, verdict, amount, odds
+              FROM ppp_bet
+             WHERE user_id = :uid
+               AND bet_date = :d
+               AND COALESCE(station_id,'') = :sid
+        """), {"uid": uid, "d": d, "sid": sid}).mappings().all()
+
+        if not bets_day:
+            continue
+
+        verdicts = [(b["verdict"] or "").upper().strip() for b in bets_day]
+
+        # Lose_day : au moins un LOSE -> pas de crédit, on marque juste comme réglé
+        if any(v == "LOSE" for v in verdicts):
+            db.session.execute(_t("""
+                UPDATE ppp_bet
+                   SET day_payout_done = 1
                  WHERE user_id = :uid
                    AND bet_date = :d
                    AND COALESCE(station_id,'') = :sid
-            """), {"uid": uid, "d": date_key, "sid": sid}).scalar() or 0.0
-            amt_odds = db.session.execute(_t("SELECT amount, odds FROM ppp_bet WHERE id=:bid"),
-                                          {"bid": bid}).mappings().first()
-            if amt_odds:
-                amt = float(amt_odds["amount"] or 0.0)
-                odd = float(amt_odds["odds"] or 0.0)
-                payout = amt * (odd + float(boost_total))
-                if payout > 0:
-                    db.session.execute(
-                        _t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
-                        {"p": payout, "uid": uid}
-                    )
-        updated += 1
+            """), {"uid": uid, "d": d, "sid": sid})
+            continue
+
+        # Win_day : tous les verdicts sont WIN (aucun LOSE)
+        if not verdicts or not all(v == "WIN" for v in verdicts):
+            # Cas théorique : verdict manquant/incohérent -> on ne règle pas
+            continue
+
+        # Calcul du montant global à créditer pour la journée
+        boost_total = db.session.execute(_t("""
+            SELECT COALESCE(SUM(value),0)
+              FROM ppp_boosts
+             WHERE user_id = :uid
+               AND bet_date = :d
+               AND COALESCE(station_id,'') = :sid
+        """), {"uid": uid, "d": d, "sid": sid}).scalar() or 0.0
+
+        total_payout = 0.0
+        for b in bets_day:
+            amt = float(b["amount"] or 0.0)
+            odd = float(b["odds"] or 0.0)
+            total_payout += amt * (odd + float(boost_total))
+
+        if total_payout > 0:
+            db.session.execute(
+                _t('UPDATE "user" SET points = COALESCE(points,0) + :p WHERE id = :uid'),
+                {"p": total_payout, "uid": uid}
+            )
+
+        # On marque toutes les lignes de cette journée comme « réglées au niveau jour »
+        db.session.execute(_t("""
+            UPDATE ppp_bet
+               SET day_payout_done = 1
+             WHERE user_id = :uid
+               AND bet_date = :d
+               AND COALESCE(station_id,'') = :sid
+        """), {"uid": uid, "d": d, "sid": sid})
 
     db.session.commit()
     return updated
