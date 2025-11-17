@@ -1535,10 +1535,12 @@ def ppp_forecast_signal_for_day(station_id: str, target_date: date) -> str | Non
     Renvoie 'PLUIE' ou 'PAS_PLUIE' pour une station et une date future.
     On utilise la même source que /api/meteo/forecast5 via WeatherSnapshot.
     """
-    # → Paris / CDG par défaut si pas de station
-    city = station_id
-    if not city or city.lower() in ("", "cdg_07157", "lfpg", "paris"):
+    # Normalisation des alias “Paris / CDG”
+    s = (station_id or "").strip().lower()
+    if s in ("", "cdg_07157", "lfpg", "lfpg_75", "paris", "paris-montsouris", "07157"):
         city = "Paris"
+    else:
+        city = station_id
 
     # snapshot du jour (contient forecast5)
     snap = get_city_snapshot(city, today_paris())
@@ -1550,7 +1552,6 @@ def ppp_forecast_signal_for_day(station_id: str, target_date: date) -> str | Non
         lst = j.get("forecast5", [])
         tgt_iso = target_date.isoformat()
 
-        # chercher la bonne entrée forecast
         found = next((x for x in lst if x.get("date") == tgt_iso), None)
         if not found:
             return None
