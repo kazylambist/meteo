@@ -4060,21 +4060,30 @@ function initPPPCalendar(ctx){
       if (!r5.ok) return;
       const data = await r5.json();
       if (!data || !Array.isArray(data.forecast5)) return;
+
       const limitEnd = new Date(today.getTime() + 13*24*3600*1000);
+
       for (const f of data.forecast5) {
         const dt = new Date(f.date + 'T00:00:00');
         if (dt < today || dt > limitEnd) continue;
-        const cell = grid.querySelector('.ppp-day[data-key=\"' + f.date + '\"]');
+
+        const cell = grid.querySelector('.ppp-day[data-key="' + f.date + '"]');
         if (!cell) continue;
+
         const wrap = ensureForecastWrap(cell);
-        let isRain = false;
-        if (f.pop != null) {
-          let pop = +f.pop; if (pop > 1) pop /= 100;
-          isRain = pop >= 0.45;
-        } else {
-          isRain = (f.rain_hours >= 4) || (f.code >= 60);
-        }
-        wrap.innerHTML = isRain ? svgDrop : svgSun;
+
+        // --- Nouvelle règle icônes météo ---
+        // f.rain_hours >= 0 ⇒ ☀️
+        // f.rain_hours >= 1 ⇒ ☁️
+        // f.rain_hours >= 5 ⇒ 🌧️
+        let icon = '☀️';
+        const rh = Number(f.rain_hours || 0);
+
+        if (rh >= 5)      icon = '🌧️';
+        else if (rh >= 1) icon = '☁️';
+        else              icon = '☀️';
+
+        wrap.textContent = icon;
       }
     } catch(e){
       console.error('[ppp] forecast icons error:', e);
