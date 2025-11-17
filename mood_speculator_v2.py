@@ -3652,8 +3652,7 @@ function initPPPCalendar(ctx){
       const histWrap  = document.getElementById('mHistory');
 
       if (titleEl) {
-        if (isPast || (delta <= 3 && hasBetNow)) titleEl.textContent = fr(d);
-        else titleEl.textContent = 'Miser sur ' + fr(d);
+        titleEl.textContent = isPast ? fr(d) : 'Miser sur ' + fr(d);
       }
 
       let shownOdds = baseOdds + (BOOSTS_SAFE[key] || 0);
@@ -3733,9 +3732,14 @@ function initPPPCalendar(ctx){
         return sorted[sorted.length-1] || null;
       }
       const lastBet = lastBetOfDay(betInfo);
-      const lastChoice = normChoiceVal(lastBet && lastBet.choice) || normChoiceVal(betInfo && betInfo.choice) || '';
+      const lastChoice =
+        normChoiceVal(lastBet && lastBet.choice) ||
+        normChoiceVal(betInfo && betInfo.choice) ||
+        '';
 
-      const showForm = !isPast && !(delta <= 3 && !hasBetNow);
+      // Nouvelle règle : mises autorisées de J+1 à J+31 uniquement
+      const canBet  = (delta >= 1 && delta <= 31);
+      const showForm = canBet;
       if (form) form.style.display = showForm ? 'block' : 'none';
       if (oddsWrap) oddsWrap.style.display = showForm ? 'block' : 'none';
       if (showForm) {
