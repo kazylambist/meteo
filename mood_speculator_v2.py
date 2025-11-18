@@ -4257,7 +4257,6 @@ function initPPPCalendar(ctx){
           isRain = (Number(data.rain_hours) >= 4) || (Number(data.code) >= 60);
         }
         wrap.innerHTML = isRain ? svgDrop : svgSun;
-        cell.classList.remove('today-win','today-loss');
       })
       .catch(function(){});
   })();
