@@ -3239,6 +3239,21 @@ PPP_HTML = """
     line-height: 1;
   }
 
+  .today-gain {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+    font-weight: 800;
+    color: #ffd92c;
+    font-variant-numeric: tabular-nums;
+    animation: todayGainPulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes todayGainPulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.08); }
+  }  
+
   /* --- Responsive PPP --- */
 
   /* Tablettes & petits laptops */
@@ -3413,7 +3428,7 @@ PPP_HTML = """
     text-align: center;
     border-radius: 8px;
     font-size: 14px;
-  }  
+  }
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -3789,7 +3804,7 @@ function initPPPCalendar(ctx){
       el.classList.add('disabled');
     }
 
-    // Bloc affichage des mises + icônes
+    // Bloc affichage des mises + icônes (en bas à gauche)
     let stakeBlock = '';
     if (amount > 0 || boostForDay > 0) {
       stakeBlock =
@@ -3799,10 +3814,34 @@ function initPPPCalendar(ctx){
             : ''
           ) +
           (amount > 0
-            ? '<div class="stake-amt">+' + fmtPts(amount) + '</div>'
+            ? '<div class="stake-amt">⛃ ' + fmtPts(amount) + '</div>'
             : ''
           ) +
         '</div>';
+    }
+
+    // Gain du jour (case "today" gagnante) en bas à droite
+    let todayGainHtml = '';
+    if (delta === 0 && verdict === 'WIN' && betInfo && Array.isArray(betInfo.bets) && betInfo.bets.length) {
+      let totalAmount = 0;
+      let weightedSum = 0;
+
+      for (const b of betInfo.bets) {
+        const a = Number(b.amount) || 0;
+        const o = Number(b.odds);
+        const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
+        totalAmount += a;
+        weightedSum += a * odd0;
+      }
+
+      const boostTotal = Number(BOOSTS_SAFE[key] || 0);
+      // approx du gain net crédité : mises*(odds-1) + boosts
+      const profit = (weightedSum - totalAmount) + boostTotal * totalAmount;
+
+      if (profit > 0.01) {
+        todayGainHtml =
+          '<div class="today-gain">+' + fmtPts(profit) + '</div>';
+      }
     }
 
     const labelText = cellLabelForDay(d, delta);
@@ -3810,6 +3849,7 @@ function initPPPCalendar(ctx){
     el.innerHTML =
       '<div class="date">' + labelText + '</div>' +
       stakeBlock +
+      todayGainHtml +
       '<div class="odds"></div>';
 
     const oddsEl   = el.querySelector('.odds');
@@ -4201,7 +4241,7 @@ function initPPPCalendar(ctx){
 
       stakeInner =
         iconHtml +
-        '<div class="stake-amt">+' + fmtPts(amount) + '</div>';
+        '<div class="stake-amt">⛃ ' + fmtPts(amount) + '</div>';
     }
 
     // Trouve ou crée la stake-wrap sans toucher au reste
