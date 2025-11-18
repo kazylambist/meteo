@@ -3402,6 +3402,17 @@ PPP_HTML = """
   .ppp-day.today-loss {
     border: 2px solid #e53935;          /* rouge pour Lose_day */
     box-shadow: 0 0 10px rgba(229, 57, 53, 0.55);
+  }
+  /* Bandeau de victoire sous le titre de la station */
+  .ppp-win-banner {
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: #2ecc71;
+    color: #fff;
+    font-weight: 800;
+    text-align: center;
+    border-radius: 8px;
+    font-size: 14px;
   }  
 </style>
 </head><body class="trade-page">
@@ -3753,6 +3764,35 @@ function initPPPCalendar(ctx){
 
       if (!afterLast) verdict = null;
     }
+
+    for (let i = 0; i <= TOTAL_DAYS; i++) {
+      const delta = i + START_SHIFT;
+      const d     = addDaysLocal(today, delta);
+      const key   = ymdParis(d);
+
+      const el = document.createElement('div');
+      el.className = 'ppp-day' + (delta === 0 ? ' today' : '');
+      el.setAttribute('data-key', key);
+      el.setAttribute('data-idx', String(delta));
+
+      // ... tout ton code de remplissage de el / verdict / stakeBlock / click handler ...
+
+      grid.appendChild(el);
+    }
+
+    // === Bandeau "Bravo, c’est gagné pour aujourd’hui !"
+    document.querySelectorAll('.ppp-card-wrap').forEach(card => {
+      const hasWinToday = card.querySelector('.ppp-day.today-win');
+      if (hasWinToday) {
+        const city = card.querySelector('.ppp-city');
+        if (city && !card.querySelector('.ppp-win-banner')) {
+          const banner = document.createElement('div');
+          banner.className = 'ppp-win-banner';
+          banner.textContent = "Bravo, c'est gagné pour aujourd'hui !";
+          city.insertAdjacentElement('afterend', banner);
+        }
+      }
+    });    
 
     el.dataset.verdict = verdict || '';
 
