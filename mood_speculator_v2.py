@@ -3241,18 +3241,20 @@ PPP_HTML = """
 
   .today-gain {
     position: absolute;
-    right: 10px;
-    bottom: 8px;
-    font-weight: 800;
-    color: #ffd92c;
-    font-variant-numeric: tabular-nums;
-    animation: todayGainPulse 1.8s ease-in-out infinite;
+    bottom: 4px;
+    right: 4px;
+    color: #ffd92c;            /* jaune */
+    font-weight: 700;
+    font-size: 1.15rem;        /* plus grand */
+    animation: pppGainPulse 1.6s ease-in-out infinite;
+    pointer-events: none;
   }
 
-  @keyframes todayGainPulse {
-    0%, 100% { transform: scale(1); }
-    50%      { transform: scale(1.08); }
-  }  
+  @keyframes pppGainPulse {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.18); }  /* pulse un peu plus fort */
+    100% { transform: scale(1); }
+  }
 
   /* --- Responsive PPP --- */
 
@@ -3835,12 +3837,12 @@ function initPPPCalendar(ctx){
       }
 
       const boostTotal = Number(BOOSTS_SAFE[key] || 0);
-      // approx du gain net crédité : mises*(odds-1) + boosts
-      const profit = (weightedSum - totalAmount) + boostTotal * totalAmount;
+      // approx du gain total versé : mises*odds + boosts
+      const payout = weightedSum + boostTotal * totalAmount;
 
-      if (profit > 0.01) {
+      if (payout > 0.01) {
         todayGainHtml =
-          '<div class="today-gain">+' + fmtPts(profit) + '</div>';
+          '<div class="today-gain">+' + fmtPts(payout) + '</div>';
       }
     }
 
