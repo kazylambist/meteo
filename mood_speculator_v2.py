@@ -1258,6 +1258,55 @@ def ppp_resolve():
     db.session.commit()
     print(f"✅ Résolu {len(bets)} PPP bets.")
 
+from sqlalchemy import text
+
+@app.cli.command("ppp_fetch_hourly")
+def ppp_fetch_hourly():
+    """
+    Récupère les précipitations horaires Open-Meteo pour les stations actives
+    et les stocke dans meteo_obs_hourly pour la journée d'aujourd'hui (Europe/Paris).
+    Pensé pour être lancé @hourly par Fly.
+    """
+    from datetime import date
+    from mood_speculator_v2 import fetch_and_store_hourly_obs  # si même fichier, ok
+
+    today = today_paris_date()
+
+    # 1) Stations de base (Paris/CDG) + éventuels autres ids connus
+    stations = set([
+        "lfpg_75",
+        "lfpg_95",
+    ])
+
+    # 2) Stations où il y a des paris PPP aujourd'hui (tous statuts)
+    rows = db.session.execute(text("""
+        SELECT DISTINCT COALESCE(station_id, '') AS sid
+        FROM ppp_bet
+        WHERE bet_date = :d
+    """), {"d": today}).mappings().all()
+    for r in rows:
+        sid = (r["sid"] or "").strip()
+        if sid:
+            stations.add(sid)
+
+    stations = sorted(stations)
+    if not stations:
+        print(f"Aucune station à traiter pour {today.isoformat()}.")
+        return
+
+    print(f"ppp_fetch_hourly: date={today.isoformat()} stations={stations}")
+
+    total = 0
+    for sid in stations:
+        try:
+            n = fetch_and_store_hourly_obs(sid, today)
+            total += n
+            print(f"  - {sid}: {n} lignes insérées/mises à jour")
+        except Exception as e:
+            print(f"  - {sid}: ERREUR {e}")
+
+    print(f"ppp_fetch_hourly terminé. Total insert/update = {total}")    
+
 # --- helper défensif: garantit user.bolts ---
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -6745,11 +6794,11 @@ def ppp(station_id=None):
         today = today_paris_date()
         past3 = today - timedelta(days=3)
 
-        # FUTUR (>= aujourd’hui) : seulement ACTIVE & non verrouillées
+        # FUTUR STRICT (> aujourd’hui) : seulement ACTIVE & non verrouillées
         rows_future_q = PPPBet.query.filter(
             PPPBet.user_id == current_user.id,
             func.coalesce(PPPBet.station_id, '') == scope_station_id,
-            PPPBet.bet_date >= today,
+            PPPBet.bet_date > today,
             PPPBet.status == 'ACTIVE',
         )
         # On considère NULL comme "non verrouillé" ; on ne masque que True
@@ -6758,7 +6807,18 @@ def ppp(station_id=None):
                 (PPPBet.locked_for_trade == False) | (PPPBet.locked_for_trade.is_(None))
             )
         rows_future = rows_future_q.all()
-        
+
+        # AUJOURD'HUI : tous statuts (ACTIVE, RESOLVED, etc.)
+        rows_today = (
+            PPPBet.query
+            .filter(
+                PPPBet.user_id == current_user.id,
+                func.coalesce(PPPBet.station_id, '') == scope_station_id,
+                PPPBet.bet_date == today,
+            )
+            .all()
+        )
+
         # PASSÉ RÉCENT (J-3 .. J-1) : toutes statuses (verdict)
         rows_past = (
             PPPBet.query
@@ -6771,7 +6831,10 @@ def ppp(station_id=None):
             .all()
         )
 
-        rows = sorted(rows_future + rows_past, key=lambda r: (r.bet_date, getattr(r, "id", 0)))
+        rows = sorted(
+            rows_future + rows_today + rows_past,
+            key=lambda r: (r.bet_date, getattr(r, "id", 0))
+        )
 
         bets_map: dict[str, dict] = {}
         for r in rows:
@@ -6816,7 +6879,7 @@ def ppp(station_id=None):
                 "verdict": v,
                 "result": v,  # compat
                 "outcome": getattr(r, "outcome", None),
-                "choice": (r.choice or "").upper(),  # <<< NOUVEAU: choix par mise
+                "choice": (r.choice or "").upper(),  # choix par mise
                 "observed_mm": (
                     float(getattr(r, "observed_mm", 0.0))
                     if getattr(r, "observed_mm", None) not in (None, "")
@@ -6857,8 +6920,8 @@ def ppp(station_id=None):
             boosts_map[key] = float(total or 0.0)
 
         app.logger.info(
-            "PPP build_context_for_station: scope=%r, future_rows=%d, past_rows=%d",
-            scope_station_id, len(rows_future), len(rows_past)
+            "PPP build_context_for_station: scope=%r, future_rows=%d, today_rows=%d, past_rows=%d",
+            scope_station_id, len(rows_future), len(rows_today), len(rows_past)
         )
 
         return {

@@ -37,3 +37,8 @@ primary_region = "cdg"
   memory = "1gb"
   cpu_kind = "shared"
   cpus = 1
+
+[[jobs]]
+  name = "ppp-hourly-fetch"
+  command = ["flask", "--app", "mood_speculator_v2:app", "ppp_fetch_hourly"]
+  schedule = "@hourly"
