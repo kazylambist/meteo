@@ -3245,14 +3245,14 @@ PPP_HTML = """
     right: 4px;
     color: #ffd92c;            /* jaune */
     font-weight: 700;
-    font-size: 1.15rem;        /* plus grand */
+    font-size: 0.98rem;        /* plus grand */
     animation: pppGainPulse 1.6s ease-in-out infinite;
     pointer-events: none;
   }
 
   @keyframes pppGainPulse {
     0%   { transform: scale(1); }
-    50%  { transform: scale(1.18); }  /* pulse un peu plus fort */
+    50%  { transform: scale(1.16); }  /* pulse un peu plus fort */
     100% { transform: scale(1); }
   }
 
@@ -3431,6 +3431,16 @@ PPP_HTML = """
     border-radius: 8px;
     font-size: 14px;
   }
+  /* Lignes de mises gagnantes / perdantes dans l'historique du modal */
+  .ppp-line-win {
+    color: var(--good);
+    font-weight: 700;
+  }
+
+  .ppp-line-lose {
+    color: var(--bad);
+    font-weight: 700;
+  }   
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
@@ -3897,7 +3907,11 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdxLocal = Math.max(0, Math.min(31, Number((grid.querySelector('.ppp-day[data-key=\"' + key + '\"]')?.dataset.idx)||0)));
+
+          const baseIdxLocal = Math.max(
+            0,
+            Math.min(31, Number((grid.querySelector('.ppp-day[data-key="' + key + '"]')?.dataset.idx) || 0))
+          );
           const baseOddsLocal = ODDS_SAFE[baseIdxLocal];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
@@ -3906,6 +3920,11 @@ function initPPPCalendar(ctx){
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
 
+          // Outcome du jour (PLUIE / PAS_PLUIE) pour colorer les lignes
+          const dayOutcome = normChoice(betInfo && betInfo.outcome);
+          const dayHasVerdict = !!(betInfo && (betInfo.verdict || betInfo.result));
+
+          // Regroupement par (heure, choix, cote)
           const groups = new Map();
           for (const b of list) {
             const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
@@ -3915,26 +3934,62 @@ function initPPPCalendar(ctx){
             const odd1 = Math.round(usedOdd * 10) / 10;
 
             const k = hhmm + '|' + choiceLocal + '|' + odd1;
-            const cur = groups.get(k) || { amount: 0, hhmm: hhmm, choice: choiceLocal, odd1: odd1 };
+            const cur = groups.get(k) || {
+              amount: 0,
+              hhmm: hhmm,
+              choice: choiceLocal,
+              odd1: odd1
+            };
             cur.amount += (Number(b.amount) || 0);
             groups.set(k, cur);
           }
 
           const lines = [];
-          const sorted = Array.from(groups.values()).sort(function(a,b){ return a.hhmm.localeCompare(b.hhmm); });
+          const sorted = Array.from(groups.values()).sort(function(a,b){
+            return a.hhmm.localeCompare(b.hhmm);
+          });
+
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
             const iconLocal = g.choice === 'PLUIE' ? '💧' : '☀️';
-            lines.push('Mises ' + iconLocal + ' ' + g.hhmm + ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')');
+            const text = 'Mises ' + iconLocal + ' ' + g.hhmm +
+                         ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')';
+
+            // Classe CSS en fonction du résultat (par ligne)
+            let cls = '';
+            if (dayHasVerdict && dayOutcome) {
+              if (g.choice === dayOutcome) {
+                cls = 'ppp-line-win';
+              } else {
+                cls = 'ppp-line-lose';
+              }
+            }
+
+            lines.push({ text, cls });
           }
+
           if (boltCount > 0) {
-            lines.push('Éclairs : ' + boltCount + ' — (x5)');
+            lines.push({
+              text: 'Éclairs : ' + boltCount + ' — (x5)',
+              cls: ''
+            });
           }
 
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
-          lines.push('Gains potentiels : ' + potentialWithBoosts.toFixed(2).replace('.', ',') + ' pts');
+          lines.push({
+            text: 'Gains potentiels : ' +
+                  potentialWithBoosts.toFixed(2).replace('.', ',') +
+                  ' pts',
+            cls: ''
+          });
 
-          histWrap.innerHTML = lines.map(function(l){ return '<div>' + l + '</div>'; }).join('');
+          histWrap.innerHTML = lines.map(function(l){
+            if (l.cls) {
+              return '<div class="' + l.cls + '">' + l.text + '</div>';
+            }
+            return '<div>' + l.text + '</div>';
+          }).join('');
+
           histWrap.style.display = 'block';
         } else {
           histWrap.innerHTML = '<div>Aucune mise pour ce jour.</div>';
