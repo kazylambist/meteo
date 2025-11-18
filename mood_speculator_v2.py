@@ -3765,35 +3765,6 @@ function initPPPCalendar(ctx){
       if (!afterLast) verdict = null;
     }
 
-    for (let i = 0; i <= TOTAL_DAYS; i++) {
-      const delta = i + START_SHIFT;
-      const d     = addDaysLocal(today, delta);
-      const key   = ymdParis(d);
-
-      const el = document.createElement('div');
-      el.className = 'ppp-day' + (delta === 0 ? ' today' : '');
-      el.setAttribute('data-key', key);
-      el.setAttribute('data-idx', String(delta));
-
-      // ... tout ton code de remplissage de el / verdict / stakeBlock / click handler ...
-
-      grid.appendChild(el);
-    }
-
-    // === Bandeau "Bravo, c’est gagné pour aujourd’hui !"
-    document.querySelectorAll('.ppp-card-wrap').forEach(card => {
-      const hasWinToday = card.querySelector('.ppp-day.today-win');
-      if (hasWinToday) {
-        const city = card.querySelector('.ppp-city');
-        if (city && !card.querySelector('.ppp-win-banner')) {
-          const banner = document.createElement('div');
-          banner.className = 'ppp-win-banner';
-          banner.textContent = "Bravo, c'est gagné pour aujourd'hui !";
-          city.insertAdjacentElement('afterend', banner);
-        }
-      }
-    });    
-
     el.dataset.verdict = verdict || '';
 
     // Jours passés
@@ -3813,7 +3784,7 @@ function initPPPCalendar(ctx){
     }
 
     // J+1 et au-delà : cliquable
-    // Seul le jour J est interdit (delta == 0)
+    // Seul le jour J est interdit (delta == 0 si aucune mise)
     if (delta === 0 && !hasBetFor(key)) {
       el.classList.add('disabled');
     }
@@ -3821,7 +3792,6 @@ function initPPPCalendar(ctx){
     // Bloc affichage des mises + icônes
     let stakeBlock = '';
     if (amount > 0 || boostForDay > 0) {
-
       stakeBlock =
         '<div class="stake-wrap">' +
           (emojiStr
@@ -4067,7 +4037,21 @@ function initPPPCalendar(ctx){
     });
 
     grid.appendChild(el);
-  }
+  } // ← fin de la boucle for
+
+  // === Bandeau "Bravo, c’est gagné pour aujourd’hui !" ===
+  document.querySelectorAll('.ppp-card-wrap').forEach(function(card){
+    const hasWinToday = card.querySelector('.ppp-day.today-win');
+    if (hasWinToday) {
+      const city = card.querySelector('.ppp-city');
+      if (city && !card.querySelector('.ppp-win-banner')) {
+        const banner = document.createElement('div');
+        banner.className = 'ppp-win-banner';
+        banner.textContent = "Bravo, c'est gagné pour aujourd'hui !";
+        city.insertAdjacentElement('afterend', banner);
+      }
+    }
+  });
 
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(function(o){
