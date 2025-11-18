@@ -3381,6 +3381,16 @@ PPP_HTML = """
       font-size: 14px;
     }
   }
+  /* --- Encadrement du jour PPP selon verdict agrégé --- */
+  .ppp-day.today-win {
+    border: 2px solid #2ecc71;          /* vert doux mais net */
+    box-shadow: 0 0 10px rgba(46, 204, 113, 0.6);
+  }
+
+  .ppp-day.today-loss {
+    border: 2px solid #e53935;          /* rouge pour Lose_day */
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.55);
+  }  
 </style>
 </head><body class="trade-page">
 <div class="stars"></div>
