@@ -1709,6 +1709,86 @@ def openmeteo_hourly_precip(lat, lon, start_iso, end_iso):
     precs = (j.get("hourly", {}) or {}).get("precipitation", []) or []
     return list(zip(times, precs))   
 
+from datetime import datetime
+
+def fetch_and_store_hourly_obs(station_id: str, target_date: date) -> int:
+    """
+    Récupère la pluie horaire Open-Meteo pour (station_id, target_date)
+    et stocke dans meteo_obs_hourly.
+
+    - station_id : identifiant PPP (ex: "lfpg_75", "lfpg_95", "lfml_13"...)
+    - target_date : date du jour à couvrir (en Europe/Paris)
+    Retourne le nombre de lignes insérées/mises à jour.
+    """
+    sid = (station_id or "").strip()
+    if not sid:
+        app.logger.warning("fetch_and_store_hourly_obs: station_id vide")
+        return 0
+
+    # 1) Récupérer lat/lon via ton helper (gère alias Paris/CDG etc.)
+    ll = _station_latlon_from_json(sid)
+    if not ll:
+        app.logger.warning("fetch_and_store_hourly_obs: pas de lat/lon pour %r", sid)
+        return 0
+    lat, lon = ll
+
+    # 2) Appel Open-Meteo hourly pour ce jour (en Europe/Paris)
+    start_iso = target_date.isoformat()
+    end_iso   = target_date.isoformat()
+    try:
+        pairs = openmeteo_hourly_precip(lat, lon, start_iso, end_iso)
+    except Exception as e:
+        app.logger.error("fetch_and_store_hourly_obs: openmeteo failed for %s: %s", sid, e)
+        return 0
+
+    if not pairs:
+        app.logger.warning("fetch_and_store_hourly_obs: aucune donnée hourly pour %s %s", sid, start_iso)
+        return 0
+
+    # 3) Conversion en UTC "…Z" et insertion dans meteo_obs_hourly
+    try:
+        tz_paris = TZ_PARIS
+    except NameError:
+        from zoneinfo import ZoneInfo
+        tz_paris = ZoneInfo("Europe/Paris")
+
+    from datetime import timezone
+    inserted = 0
+
+    for local_iso, mm in pairs:
+        # local_iso est en Europe/Paris (timezone=Europe/Paris demandé à Open-Meteo)
+        try:
+            dt_local = datetime.fromisoformat(local_iso)
+        except Exception:
+            app.logger.warning("fetch_and_store_hourly_obs: bad local time %r", local_iso)
+            continue
+
+        if dt_local.tzinfo is None:
+            dt_local = dt_local.replace(tzinfo=tz_paris)
+        else:
+            dt_local = dt_local.astimezone(tz_paris)
+
+        dt_utc = dt_local.astimezone(timezone.utc).replace(microsecond=0)
+        ts_utc = dt_utc.isoformat().replace("+00:00", "Z")
+
+        mm_val = float(mm or 0.0)
+        # On se contente de remplir rain_mm, code restera NULL (utilisé en fallback)
+        db.session.execute(
+            text("""
+                INSERT OR REPLACE INTO meteo_obs_hourly (station_id, ts_utc, rain_mm, code)
+                VALUES (:sid, :ts, :mm, NULL)
+            """),
+            {"sid": sid, "ts": ts_utc, "mm": mm_val}
+        )
+        inserted += 1
+
+    db.session.commit()
+    app.logger.info(
+        "fetch_and_store_hourly_obs: station=%s date=%s inserted=%d",
+        sid, target_date.isoformat(), inserted
+    )
+    return inserted
+
 def compute_last3_hours(lat, lon, ref_date):
     # last 3 full days ending at ref_date (inclusive)
     start = ref_date - timedelta(days=2)
