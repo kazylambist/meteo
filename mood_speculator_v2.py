@@ -1264,13 +1264,19 @@ from sqlalchemy import text
 def ppp_fetch_hourly():
     """
     Récupère les précipitations horaires Open-Meteo pour les stations actives
-    et les stocke dans meteo_obs_hourly pour la journée d'aujourd'hui (Europe/Paris).
+    et les stocke dans meteo_obs_hourly pour la journée d'aujourd'hui (Europe/Paris)
+    ainsi que la veille (backfill simple).
     Pensé pour être lancé @hourly par Fly.
     """
-    from datetime import date
+    from datetime import timedelta
     from mood_speculator_v2 import fetch_and_store_hourly_obs  # si même fichier, ok
 
     today = today_paris_date()
+    yesterday = today - timedelta(days=1)
+
+    # On pourra facilement ajouter avant-hier si besoin :
+    # dates_to_fetch = [today, yesterday, today - timedelta(days=2)]
+    dates_to_fetch = [yesterday, today]
 
     # 1) Stations de base (Paris/CDG) + éventuels autres ids connus
     stations = set([
@@ -1278,12 +1284,13 @@ def ppp_fetch_hourly():
         "lfpg_95",
     ])
 
-    # 2) Stations où il y a des paris PPP aujourd'hui (tous statuts)
+    # 2) Stations où il y a des paris PPP sur l’intervalle [hier, aujourd’hui]
     rows = db.session.execute(text("""
         SELECT DISTINCT COALESCE(station_id, '') AS sid
         FROM ppp_bet
-        WHERE bet_date = :d
-    """), {"d": today}).mappings().all()
+        WHERE bet_date BETWEEN :dmin AND :dmax
+    """), {"dmin": min(dates_to_fetch), "dmax": max(dates_to_fetch)}).mappings().all()
+
     for r in rows:
         sid = (r["sid"] or "").strip()
         if sid:
@@ -1291,21 +1298,23 @@ def ppp_fetch_hourly():
 
     stations = sorted(stations)
     if not stations:
-        print(f"Aucune station à traiter pour {today.isoformat()}.")
+        print(f"Aucune station à traiter pour {today.isoformat()} (ni hier).")
         return
 
-    print(f"ppp_fetch_hourly: date={today.isoformat()} stations={stations}")
-
     total = 0
-    for sid in stations:
-        try:
-            n = fetch_and_store_hourly_obs(sid, today)
-            total += n
-            print(f"  - {sid}: {n} lignes insérées/mises à jour")
-        except Exception as e:
-            print(f"  - {sid}: ERREUR {e}")
+    print(f"ppp_fetch_hourly: dates={', '.join(d.isoformat() for d in dates_to_fetch)} stations={stations}")
 
-    print(f"ppp_fetch_hourly terminé. Total insert/update = {total}")    
+    for d in dates_to_fetch:
+        print(f"  >> Date {d.isoformat()}")
+        for sid in stations:
+            try:
+                n = fetch_and_store_hourly_obs(sid, d)
+                total += n
+                print(f"    - {sid}: {n} lignes insérées/mises à jour")
+            except Exception as e:
+                print(f"    - {sid}: ERREUR {e}")
+
+    print(f"ppp_fetch_hourly terminé. Total insert/update = {total}") 
 
 # --- helper défensif: garantit user.bolts ---
 from sqlalchemy import text
