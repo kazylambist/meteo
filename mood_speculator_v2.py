@@ -3948,22 +3948,32 @@ function initPPPCalendar(ctx){
           for (const g of sorted) {
             const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
             const iconLocal = g.choice === 'PLUIE' ? '💧' : '☀️';
-            const text = 'Mises ' + iconLocal + ' ' + g.hhmm +
-                         ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')';
+            const text =
+              'Mises ' + iconLocal + ' ' + g.hhmm +
+              ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')';
 
-            // Classe CSS en fonction du résultat PAR MISE (indépendant du verdict du jour)
+            // === Classe CSS par mise (tolérant sur observed_mm) ===
             let cls = '';
-            if (typeof betInfo.observed_mm === 'number') {
-              const mm = betInfo.observed_mm;
-              if (mm > 0) {
-                // Il a plu → seules les mises PLUIE gagnent
-                cls = (g.choice === 'PLUIE') ? 'ppp-line-win' : 'ppp-line-lose';
-              } else {
-                // Il n'a pas plu → seules les mises PAS_PLUIE gagnent
-                cls = (g.choice === 'PAS_PLUIE') ? 'ppp-line-win' : 'ppp-line-lose';
+
+            if (betInfo && betInfo.observed_mm != null) {
+              // Conversion robuste : string → nombre
+              let mmRaw = betInfo.observed_mm;
+              if (typeof mmRaw === 'string') {
+                mmRaw = mmRaw.replace(',', '.');  // accepte "0,0" ou "3,2"
               }
+              const mm = Number(mmRaw);
+
+              if (Number.isFinite(mm)) {
+                if (mm > 0) {
+                  // Il a plu → PLUIE gagne
+                  cls = (g.choice === 'PLUIE') ? 'ppp-line-win' : 'ppp-line-lose';
+                } else {
+                  // Il n'a pas plu → PAS_PLUIE gagne
+                  cls = (g.choice === 'PAS_PLUIE') ? 'ppp-line-win' : 'ppp-line-lose';
+                }
+              }
+              // si mm n’est pas un nombre → cls reste vide → ligne blanche
             }
-            // Si observed_mm est absent → cls = '' → ligne neutre (blanche)
 
             lines.push({ text, cls });
           }
@@ -4050,7 +4060,7 @@ function initPPPCalendar(ctx){
 
       const hidSid = document.getElementById('mStationId');
       function getPPPStationId(){
-        const fromHid  = (hidSid && hidSid.value) ? String(fromHid.value).trim() : '';
+        const fromHid  = (hidSid && hidSid.value) ? String(hidSid.value).trim() : '';
         const fromCtx  = (PPP_ACTIVE && PPP_ACTIVE.ctx && PPP_ACTIVE.ctx.station_id) ? String(PPP_ACTIVE.ctx.station_id).trim() : '';
         const fromGrid = (PPP_ACTIVE && PPP_ACTIVE.grid && PPP_ACTIVE.grid.dataset && PPP_ACTIVE.grid.dataset.stationId) ? String(PPP_ACTIVE.grid.dataset.stationId).trim() : '';
         const fromBody = (document.body && document.body.dataset && document.body.dataset.stationId) ? String(document.body.dataset.stationId).trim() : '';
@@ -4132,7 +4142,8 @@ function initPPPCalendar(ctx){
       loadPPPOddsAndRender();
       if (modal) modal.classList.add('open');
     });
-
+    grid.appendChild(el);
+  }    
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(function(o){
     if (!o.textContent || !o.textContent.trim()) return;
