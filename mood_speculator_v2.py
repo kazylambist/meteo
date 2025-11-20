@@ -3920,10 +3920,6 @@ function initPPPCalendar(ctx){
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
 
-          // Outcome du jour (PLUIE / PAS_PLUIE) pour colorer les lignes
-          const dayOutcome = normChoice(betInfo && betInfo.outcome);
-          const dayHasVerdict = !!(betInfo && (betInfo.verdict || betInfo.result));
-
           // Regroupement par (heure, choix, cote)
           const groups = new Map();
           for (const b of list) {
@@ -3955,15 +3951,19 @@ function initPPPCalendar(ctx){
             const text = 'Mises ' + iconLocal + ' ' + g.hhmm +
                          ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')';
 
-            // Classe CSS en fonction du résultat (par ligne)
+            // Classe CSS en fonction du résultat PAR MISE (indépendant du verdict du jour)
             let cls = '';
-            if (dayHasVerdict && dayOutcome) {
-              if (g.choice === dayOutcome) {
-                cls = 'ppp-line-win';
+            if (typeof betInfo.observed_mm === 'number') {
+              const mm = betInfo.observed_mm;
+              if (mm > 0) {
+                // Il a plu → seules les mises PLUIE gagnent
+                cls = (g.choice === 'PLUIE') ? 'ppp-line-win' : 'ppp-line-lose';
               } else {
-                cls = 'ppp-line-lose';
+                // Il n'a pas plu → seules les mises PAS_PLUIE gagnent
+                cls = (g.choice === 'PAS_PLUIE') ? 'ppp-line-win' : 'ppp-line-lose';
               }
             }
+            // Si observed_mm est absent → cls = '' → ligne neutre (blanche)
 
             lines.push({ text, cls });
           }
@@ -4050,7 +4050,7 @@ function initPPPCalendar(ctx){
 
       const hidSid = document.getElementById('mStationId');
       function getPPPStationId(){
-        const fromHid  = (hidSid && hidSid.value) ? String(hidSid.value).trim() : '';
+        const fromHid  = (hidSid && hidSid.value) ? String(fromHid.value).trim() : '';
         const fromCtx  = (PPP_ACTIVE && PPP_ACTIVE.ctx && PPP_ACTIVE.ctx.station_id) ? String(PPP_ACTIVE.ctx.station_id).trim() : '';
         const fromGrid = (PPP_ACTIVE && PPP_ACTIVE.grid && PPP_ACTIVE.grid.dataset && PPP_ACTIVE.grid.dataset.stationId) ? String(PPP_ACTIVE.grid.dataset.stationId).trim() : '';
         const fromBody = (document.body && document.body.dataset && document.body.dataset.stationId) ? String(document.body.dataset.stationId).trim() : '';
@@ -4132,23 +4132,6 @@ function initPPPCalendar(ctx){
       loadPPPOddsAndRender();
       if (modal) modal.classList.add('open');
     });
-
-    grid.appendChild(el);
-  } // ← fin de la boucle for
-
-  // === Bandeau "Bravo, c’est gagné pour aujourd’hui !" ===
-  document.querySelectorAll('.ppp-card-wrap').forEach(function(card){
-    const hasWinToday = card.querySelector('.ppp-day.today-win');
-    if (hasWinToday) {
-      const city = card.querySelector('.ppp-city');
-      if (city && !card.querySelector('.ppp-win-banner')) {
-        const banner = document.createElement('div');
-        banner.className = 'ppp-win-banner';
-        banner.textContent = "Bravo, c'est gagné pour aujourd'hui !";
-        city.insertAdjacentElement('afterend', banner);
-      }
-    }
-  });
 
   // Nettoyage cotes
   document.querySelectorAll('.ppp-day .odds').forEach(function(o){
