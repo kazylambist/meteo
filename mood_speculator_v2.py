@@ -2221,6 +2221,9 @@ BASE_CSS = """
   --good:#86e3a6;            /* vert tendre */
   --bad:#ff8f8f;             /* corail doux */
   --glow: 0 0 10px rgba(86,197,182,.25);
+  --ppp-green:       #7db489;                  /* vert pastel principal */
+  --ppp-green-dark:  #5e9a73;                  /* variante un peu plus sombre */
+  --ppp-green-glow:  rgba(125, 180, 137, .55); /* halo / ombre verte */
 }
 
 *{box-sizing:border-box}
@@ -3404,24 +3407,33 @@ PPP_HTML = """
   }
   /* --- Encadrement du jour PPP selon verdict agrégé --- */
   .ppp-day.today-win {
-    border: 2px solid #2ecc71;          /* vert doux mais net */
-    box-shadow: 0 0 10px rgba(46, 204, 113, 0.6);
+    border: 2px solid var(--ppp-green);
+    box-shadow: 0 0 10px var(--ppp-green-glow);
   }
 
   .ppp-day.today-loss {
     border: 2px solid #e53935;          /* rouge pour Lose_day */
     box-shadow: 0 0 10px rgba(229, 57, 53, 0.55);
   }
-  /* Bandeau de victoire sous le titre de la station */
+  /* Bandeau de victoire – version premium pastel */
   .ppp-win-banner {
     margin-top: 4px;
     padding: 6px 10px;
-    background: #7db489;
-    color: #fff;
+    background: linear-gradient(
+      135deg,
+      var(--ppp-green) 0%,
+      var(--ppp-green-dark) 100%
+    );
+    color: #ffffff;
     font-weight: 800;
     text-align: center;
     border-radius: 8px;
     font-size: 14px;
+
+    border: 1px solid rgba(255, 255, 255, 0.20);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.15),
+      0 0 12px var(--ppp-green-glow);
   }
 
   /* Lignes détaillées des mises dans la modale */
@@ -3430,7 +3442,7 @@ PPP_HTML = """
     margin-bottom: 2px;
   }
   .ppp-bet-line.win {
-    color: #2ecc71;          /* vert WIN */
+    color: var(--ppp-green-dark);
     font-weight: 600;
   }
   .ppp-bet-line.lose {
