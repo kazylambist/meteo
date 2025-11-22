@@ -3422,6 +3422,36 @@ PPP_HTML = """
     text-align: center;
     border-radius: 8px;
     font-size: 14px;
+  }
+  /* Bandeau de victoire sous le titre de la station */
+  .ppp-win-banner {
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: #2ecc71;
+    color: #fff;
+    font-weight: 800;
+    text-align: center;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  /* Lignes détaillées des mises dans la modale */
+  .ppp-bet-line {
+    font-size: 14px;
+    margin-bottom: 2px;
+  }
+  .ppp-bet-line.win {
+    color: #2ecc71;          /* vert WIN */
+    font-weight: 600;
+  }
+  .ppp-bet-line.lose {
+    color: #e53935;          /* rouge LOSE */
+    font-weight: 600;
+  }
+  .ppp-bet-summary {
+    margin-top: 6px;
+    font-size: 13px;
+    color: #d0d4e0;
   }  
 </style>
 </head><body class="trade-page">
@@ -3874,9 +3904,13 @@ function initPPPCalendar(ctx){
         histWrap.innerHTML = '';
         if (hasBetNow) {
           const list = (betInfo && Array.isArray(betInfo.bets)) ? betInfo.bets : [];
-          const totalAmount = Math.round(list.reduce(function(acc, b) {
+
+          // Montant total de la journée
+          const totalAmount = Math.round(list.reduce(function (acc, b) {
             return acc + (Number(b.amount) || 0);
           }, 0) * 100) / 100;
+
+          // Première passe : estimation d'une cote "par défaut"
           let weightedSum = 0;
           for (const b of list) {
             const a = Number(b.amount) || 0;
@@ -3884,7 +3918,13 @@ function initPPPCalendar(ctx){
             const odd0 = (Number.isFinite(o) && o > 0) ? o : 0;
             weightedSum += a * (odd0 || 0);
           }
-          const baseIdxLocal = Math.max(0, Math.min(31, Number((grid.querySelector('.ppp-day[data-key=\"' + key + '\"]')?.dataset.idx)||0)));
+          const baseIdxLocal = Math.max(
+            0,
+            Math.min(
+              31,
+              Number((grid.querySelector('.ppp-day[data-key=\"' + key + '\"]')?.dataset.idx) || 0)
+            )
+          );
           const baseOddsLocal = ODDS_SAFE[baseIdxLocal];
           const initialOdds = (totalAmount > 0 && Number.isFinite(weightedSum / totalAmount))
             ? (weightedSum / totalAmount)
@@ -3893,35 +3933,68 @@ function initPPPCalendar(ctx){
           const boostTotal = Number(BOOSTS_SAFE[key] || 0);
           const boltCount  = Math.round(boostTotal / 5);
 
-          const groups = new Map();
-          for (const b of list) {
-            const hhmm = String(b.target_time || b.time || '18:00').slice(0,5);
+          function normVerdictField(b) {
+            const norm = function (v) { return String(v || '').trim().toUpperCase(); };
+            return norm(b.verdict) || norm(b.result) || norm(b.status) || '';
+          }
+
+          // Tri des mises par heure croissante
+          const sorted = list.slice().sort(function (a, b) {
+            const ta = String(a.target_time || a.time || '18:00').slice(0, 5);
+            const tb = String(b.target_time || b.time || '18:00').slice(0, 5);
+            return ta.localeCompare(tb);
+          });
+
+          const lines = [];
+
+          for (const b of sorted) {
+            const hhmm = String(b.target_time || b.time || '18:00').slice(0, 5);
             const choiceLocal = normChoice(b.choice) || normChoice(betInfo && betInfo.choice) || 'PLUIE';
+            const a = Number(b.amount) || 0;
+
             const o = Number(b.odds);
             const usedOdd = (Number.isFinite(o) && o > 0 ? o : initialOdds);
             const odd1 = Math.round(usedOdd * 10) / 10;
+            const oddTxt = String(odd1.toFixed(1)).replace('.', ',');
 
-            const k = hhmm + '|' + choiceLocal + '|' + odd1;
-            const cur = groups.get(k) || { amount: 0, hhmm: hhmm, choice: choiceLocal, odd1: odd1 };
-            cur.amount += (Number(b.amount) || 0);
-            groups.set(k, cur);
+            const v = normVerdictField(b);
+            let cls = 'ppp-bet-line';
+            let prefix = '';   // rien pour les pending (ligne neutre)
+
+            if (v === 'WIN' || v === 'WON') {
+              cls += ' win';
+              prefix = '✓ ';
+            } else if (v === 'LOSE' || v === 'LOST') {
+              cls += ' lose';
+              prefix = '✗ ';
+            }
+
+            const iconLocal = (choiceLocal === 'PLUIE') ? '💧' : '☀️';
+
+            const line =
+              '<div class="' + cls + '">' +
+                prefix +
+                'Mise ' + iconLocal + ' ' + hhmm +
+                ' — ' + fmtPts(a) + ' pts — (x' + oddTxt + ')' +
+              '</div>';
+
+            lines.push(line);
           }
 
-          const lines = [];
-          const sorted = Array.from(groups.values()).sort(function(a,b){ return a.hhmm.localeCompare(b.hhmm); });
-          for (const g of sorted) {
-            const oddTxt = String(g.odd1.toFixed(1)).replace('.', ',');
-            const iconLocal = g.choice === 'PLUIE' ? '💧' : '☀️';
-            lines.push('Mises ' + iconLocal + ' ' + g.hhmm + ' — ' + fmtPts(g.amount) + ' pts — (x' + oddTxt + ')');
-          }
           if (boltCount > 0) {
-            lines.push('Éclairs : ' + boltCount + ' — (x5)');
+            lines.push(
+              '<div class="ppp-bet-summary">Éclairs : ' +
+              boltCount + ' — (x5)</div>'
+            );
           }
 
           const potentialWithBoosts = weightedSum + boostTotal * totalAmount;
-          lines.push('Gains potentiels : ' + potentialWithBoosts.toFixed(2).replace('.', ',') + ' pts');
+          lines.push(
+            '<div class="ppp-bet-summary">Gains potentiels : ' +
+            potentialWithBoosts.toFixed(2).replace('.', ',') + ' pts</div>'
+          );
 
-          histWrap.innerHTML = lines.map(function(l){ return '<div>' + l + '</div>'; }).join('');
+          histWrap.innerHTML = lines.join('');
           histWrap.style.display = 'block';
         } else {
           histWrap.innerHTML = '<div>Aucune mise pour ce jour.</div>';
