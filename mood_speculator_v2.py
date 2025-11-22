@@ -3436,7 +3436,7 @@ PPP_HTML = """
     font-weight: 600;
   }
   .ppp-bet-line.lose {
-    color: #e53935;          /* rouge LOSE */
+    color: #ff8f8f;          /* rouge LOSE */
     font-weight: 600;
   }
   .ppp-bet-summary {
