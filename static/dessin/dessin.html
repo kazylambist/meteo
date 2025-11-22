@@ -353,18 +353,24 @@
       box-shadow:
         0 14px 32px rgba(0,0,0,.25),
         0 0 0 2px rgba(255,255,255,.55) inset;
-      text-align: center;
+      text-align: center;   /* ← centrer tout le contenu */
       border: 1px solid rgba(180,190,210,.8);
+
+      display: flex;               /* ← centrage vertical interne propre */
+      flex-direction: column;      /* instructions au-dessus, bouton en-dessous */
+      align-items: center;         /* ← centre horizontal */
+      justify-content: center;     /* ← centre vertical interne */
     }
 
     .instructions-list{
-      margin: 0 0 16px;
+      margin: 0 0 18px;
       padding-left: 0;
       list-style: none;
       color: #2c3e5d;
-      font-size: 16px;
-      font-weight: 600;
-      line-height: 1.55;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.6;
+      text-align: center;
     }
 
     .instructions-list li + li{
@@ -381,6 +387,8 @@
       border-radius: 12px;
       box-shadow: 0 4px 14px rgba(0,0,0,.25);
       letter-spacing: .3px;
+      text-align: center;
+      display: inline-block;
     }
 
     .instructions-ok:hover{
@@ -645,8 +653,7 @@
   <div id="instructionsModal"
        class="instructions-modal hidden"
        role="dialog"
-       aria-modal="true"
-
+       aria-modal="true">
     <div class="instructions-card">
       <ol class="instructions-list">
         <li>1. Dessine</li>
