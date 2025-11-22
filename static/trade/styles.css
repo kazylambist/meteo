@@ -45,63 +45,60 @@ body.trade-page::after{
   pointer-events:none;
 }
 
-/* ---- Topbar ---- */
-.topbar {
+/* ---- Topbar Trade : même layout que PPP, mais en vert ---- */
+body.trade-page .topbar {
   position: sticky;
   top: 0;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--trade-green-dark) 90%, #000 10%) 0%,
-    color-mix(in srgb, var(--trade-green-dark) 80%, #000 20%) 100%
-  ); /* même structure que PPP, mais en vert */
-  backdrop-filter: saturate(120%) blur(8px);
-  border-bottom: 1px solid rgba(255,255,255,.10);
-  box-shadow: 0 0 20px rgba(0,0,0,.40);
   z-index: 10;
-}
-.topbar .container {
-  display: flex;
+  background: rgba(20, 53, 44, .90); /* vert profond cohérent Trade */
+  backdrop-filter: saturate(120%) blur(8px);
+  border-bottom: 1px solid rgba(0, 0, 0, .35);
+  box-shadow: 0 0 18px rgba(0, 0, 0, .55);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr; /* gauche | centre (Solde) | droite (🤝) */
   align-items: center;
-  gap: 14px;            /* même espacement que PPP */
-  padding: 10px 16px;
-  min-height: 56px;     /* proportions de la topbar PPP */
+  gap: 12px;
+  padding: 8px 16px; /* hauteur visuelle proche de PPP */
 }
-.topbar .brand {
+
+body.trade-page .nav-left,
+body.trade-page .nav-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+body.trade-page .nav-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+body.trade-page .topbar .brand {
   font-weight: 800;
-  color: var(--trade-green-main);
+  color: #6fae91; /* vert principal doux */
   text-decoration: none;
-  text-shadow: 0 0 10px var(--trade-green-glow);
+  text-shadow: 0 0 8px rgba(111,174,145,.25);
 }
-.topbar .brand:hover {
-  color: #a5ffd0;
-  text-shadow: 0 0 12px var(--trade-green-glow);
-}
-.topbar .brand.active {
-  color: #c2ffe2;
-  text-shadow:
-    0 0 4px rgba(0,0,0,.4),
-    0 0 16px var(--trade-green-glow);
-}
-.topbar .brand.active:hover {
-  color: #c2ffe2;
-}
-.topbar .spacer { flex: 1; }
-.topbar .navlink {
+
+body.trade-page .topbar .navlink {
   color: var(--ink);
   text-decoration: none;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid transparent;
   transition: background .2s ease, color .2s ease, border-color .2s ease;
 }
-.topbar .navlink:hover {
-  color: var(--trade-green-main);
+
+body.trade-page .topbar .navlink:hover {
+  color: #6fae91;
   background: rgba(111,174,145,.10);
   border-color: rgba(255,255,255,.10);
 }
-.topbar .navlink.active {
-  background: rgba(111,174,145,.20);
-  border-color: rgba(255,255,255,.16);
+
+body.trade-page .topbar .navlink.active {
+  background: rgba(111,174,145,.18);
+  border-color: rgba(255,255,255,.18);
 }
 
 /* ---- Layout colonnes ---- */
