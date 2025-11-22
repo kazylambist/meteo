@@ -2411,7 +2411,7 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
 }
 
 .ppp-day.today.today-win{
-  box-shadow: 0 0 0 2px #30d158,
+  box-shadow: 0 0 0 2px #7bdcb5,
               0 0 18px rgba(48,209,88,.35) !important;
 }
 
@@ -3404,7 +3404,7 @@ PPP_HTML = """
   }
   /* --- Encadrement du jour PPP selon verdict agrégé --- */
   .ppp-day.today-win {
-    border: 2px solid #2ecc71;          /* vert doux mais net */
+    border: 2px solid #7bdcb5;          /* vert doux mais net */
     box-shadow: 0 0 10px rgba(46, 204, 113, 0.6);
   }
 
@@ -3416,18 +3416,7 @@ PPP_HTML = """
   .ppp-win-banner {
     margin-top: 4px;
     padding: 6px 10px;
-    background: #2ecc71;
-    color: #fff;
-    font-weight: 800;
-    text-align: center;
-    border-radius: 8px;
-    font-size: 14px;
-  }
-  /* Bandeau de victoire sous le titre de la station */
-  .ppp-win-banner {
-    margin-top: 4px;
-    padding: 6px 10px;
-    background: #2ecc71;
+    background: #7bdcb5;
     color: #fff;
     font-weight: 800;
     text-align: center;
