@@ -6,6 +6,9 @@
   --line:rgba(255,255,255,.12);
   --amber:#ffbf66;          /* accent ambre pastel */
   --jade:#56c5b6;           /* accent vert jade doux */
+  --trade-green-main:#6fae91;          /* vert principal topbar (équivalent du bleu PPP) */
+  --trade-green-dark:#213c34;          /* fond topbar verdâtre */
+  --trade-green-glow:rgba(111,174,145,.35); /* halo doux vert */
 }
 
 /* ---- Page ---- */
