@@ -2413,16 +2413,6 @@ input:focus,select:focus{ border-color: rgba(121,231,255,.5); box-shadow: 0 0 0 
               0 0 14px rgba(0,0,0,.25);
 }
 
-.ppp-day.today.today-win{
-  box-shadow: 0 0 0 2px #7bdcb5,
-              0 0 18px rgba(48,209,88,.35) !important;
-}
-
-.ppp-day.today.today-loss{
-  box-shadow: 0 0 0 2px #ff3b30,
-              0 0 18px rgba(255,59,48,.35) !important;
-}
-
 .ppp-day.disabled:after{
   content:"";
 }
