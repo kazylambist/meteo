@@ -46,23 +46,41 @@ body.trade-page::after{
 .topbar {
   position: sticky;
   top: 0;
-  background: rgba(33, 60, 52, .82); /* vert profond translucide */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--trade-green-dark) 90%, #000 10%) 0%,
+    color-mix(in srgb, var(--trade-green-dark) 80%, #000 20%) 100%
+  ); /* même structure que PPP, mais en vert */
   backdrop-filter: saturate(120%) blur(8px);
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  box-shadow: 0 0 20px rgba(0,0,0,.35);
+  border-bottom: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 0 20px rgba(0,0,0,.40);
   z-index: 10;
 }
 .topbar .container {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 14px;            /* même espacement que PPP */
+  padding: 10px 16px;
+  min-height: 56px;     /* proportions de la topbar PPP */
 }
 .topbar .brand {
   font-weight: 800;
-  color: #6fae91; /* vert principal doux */
+  color: var(--trade-green-main);
   text-decoration: none;
-  text-shadow: 0 0 8px rgba(111,174,145,.25);
+  text-shadow: 0 0 10px var(--trade-green-glow);
+}
+.topbar .brand:hover {
+  color: #a5ffd0;
+  text-shadow: 0 0 12px var(--trade-green-glow);
+}
+.topbar .brand.active {
+  color: #c2ffe2;
+  text-shadow:
+    0 0 4px rgba(0,0,0,.4),
+    0 0 16px var(--trade-green-glow);
+}
+.topbar .brand.active:hover {
+  color: #c2ffe2;
 }
 .topbar .spacer { flex: 1; }
 .topbar .navlink {
@@ -74,13 +92,13 @@ body.trade-page::after{
   transition: background .2s ease, color .2s ease, border-color .2s ease;
 }
 .topbar .navlink:hover {
-  color: #6fae91;
+  color: var(--trade-green-main);
   background: rgba(111,174,145,.10);
   border-color: rgba(255,255,255,.10);
 }
 .topbar .navlink.active {
-  background: rgba(111,174,145,.18);
-  border-color: rgba(255,255,255,.12);
+  background: rgba(111,174,145,.20);
+  border-color: rgba(255,255,255,.16);
 }
 
 /* ---- Layout colonnes ---- */
