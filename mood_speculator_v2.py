@@ -3404,7 +3404,7 @@ PPP_HTML = """
   }
   /* --- Encadrement du jour PPP selon verdict agrégé --- */
   .ppp-day.today-win {
-    border: 2px solid #7bdcb5;          /* vert doux mais net */
+    border: 2px solid #7db489;          /* vert doux mais net */
     box-shadow: 0 0 10px rgba(46, 204, 113, 0.6);
   }
 
@@ -3416,7 +3416,7 @@ PPP_HTML = """
   .ppp-win-banner {
     margin-top: 4px;
     padding: 6px 10px;
-    background: #7bdcb5;
+    background: #7db489;
     color: #fff;
     font-weight: 800;
     text-align: center;
