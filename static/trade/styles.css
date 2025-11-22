@@ -33,7 +33,7 @@ body.trade-page::after{
 }
 
 /* ---------------------------------------------------
-   TOPBAR — IDENTIQUE PPP (structure, largeur, marges)
+   TOPBAR — même structure que PPP, mais en vert
 ------------------------------------------------------*/
 .topbar {
   position: sticky;
@@ -45,28 +45,15 @@ body.trade-page::after{
   box-shadow: 0 0 20px rgba(0,0,0,.35);
 }
 
-/* même largeur PPP : 1040px */
-.topbar .container {
-  max-width: 1040px;
-  margin: 0 auto;
-
-  display: grid;
-  grid-template-columns: 1fr auto 1fr; /* left | center | right */
-  align-items: center;
-  gap: 12px;
-
-  padding: 12px 16px; /* EXACT PPP PADDING */
-}
-
-/* — Logos — */
+/* Logo ZEUS / icônes de la topbar (mêmes dimensions que PPP) */
 .topbar .topbar-logo {
-  height: 22px;      /* EXACT PPP LOGO HEIGHT */
+  height: 22px;
   width: auto;
   display: block;
   opacity: .95;
 }
 
-/* Left / center / right */
+/* Left / center / right (la grille vient du CSS global PPP) */
 .nav-left,
 .nav-right {
   display: inline-flex;
@@ -110,7 +97,7 @@ body.trade-page::after{
 }
 
 /* ---------------------------------------------------
-   LAYOUT 3 COLONNES (inchangé)
+   LAYOUT 3 COLONNES
 ------------------------------------------------------*/
 .trade-layout{
   display:grid;
@@ -196,7 +183,7 @@ body.trade-page::after{
   opacity:.45;filter:grayscale(1);
 }
 
-/* ---- Chat (inchangé) ---- */
+/* ---- Chat ---- */
 .chat-dock{position:fixed;right:12px;bottom:12px;display:flex;flex-direction:column;gap:10px;max-width:520px}
 .chat{
   width:320px;background:var(--panel);
@@ -298,7 +285,7 @@ button:disabled, .btn:disabled, [aria-disabled="true"] {
 .me-online { font-weight:600; }
 
 .topbar .back-logo img {
-  height: 28px;
+  height: 22px;      /* aligné sur PPP */
   width: auto;
   display: block;
 }
