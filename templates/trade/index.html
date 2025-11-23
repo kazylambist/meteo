@@ -1,39 +1,58 @@
 <!doctype html>
-<html lang="fr" class="h-full">
+<html lang="fr">
 <head>
   <meta charset="utf-8">
   <title>Trade</title>
+
   <link rel="stylesheet" href="/static/trade/styles.css">
+
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2" type="image/x-icon">
   <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}?v=2">
   <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}?v=2">
   <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.ico') }}?v=2">
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}?v=2">
 </head>
+
 <body class="trade-page">
+
+  <!-- TOPBAR IDENTIQUE PPP (structure) -->
   <header class="topbar">
-    <div class="container">
-      <a class="navlink back-logo" href="/ppp" aria-label="Retour à PPP">
-        <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}" alt="ZEUS">
-      </a>
-      <span class="spacer"></span>
-      <a class="navlink active" href="/trade/">🤝</a>
+    <div class="container topbar">
+
+      <!-- Colonne gauche -->
+      <div class="nav-left">
+        <a href="/ppp" class="topbar-logo-link back-logo" aria-label="Retour à PPP">
+          <img src="{{ url_for('static', filename='img/weather_bets_S.png') }}"
+               alt="ZEUS"
+               class="topbar-logo">
+        </a>
+      </div>
+
+      <!-- Colonne centre -->
+      <div class="nav-center">
+        <a href="/trade/" class="navlink active" aria-label="Page Trade">🤝</a>
+      </div>
+
+      <!-- Colonne droite -->
+      <div class="nav-right">
+        <!-- (vide pour l’instant comme PPP, mais extensible) -->
+      </div>
+
     </div>
   </header>
 
+  <!-- LAYOUT 3 COLONNES -->
   <main class="trade-layout">
-    <!-- Colonne gauche : moi -->
+
+    <!-- Colonne gauche : Moi -->
     <section class="me-card">
+
       <div
         class="avatar-mini"
         style="
-          display:inline-block;
           background-image:url('{{ me_avatar_url }}');
           background-size:cover;
           background-position:center;
-          border-radius:50%;
-          border:1px solid rgba(0,0,0,.15);
-          flex:0 0 auto;
         ">
       </div>
 
@@ -41,32 +60,36 @@
         <div id="me-pseudo">{{ current_user.username }}</div>
         <div id="me-points">{{ solde_str }} ⛃</div>
       </div>
+
     </section>
 
-    <!-- Centre : le marché -->
+
+    <!-- Colonne centre : Marché -->
     <section class="market">
-      <!-- Bouton + menu déroulant “Mettre en vente” -->
+
+      <!-- Bouton pour vendre -->
       <div class="sell-wrapper">
         <button id="sellBtn" class="btn" type="button">Mettre en vente</button>
+
         <div id="sellMenu" class="sell-menu overlay" hidden>
           <header class="sell-header">
             <strong>Mes mises disponibles</strong>
             <button id="closeSellMenu" class="btn btn-ghost" type="button" title="Fermer">×</button>
           </header>
           <ul id="myBetsList" class="sell-list">
-            <!-- rempli par JS via /api/trade/my-bets -->
+            <!-- rempli par JS -->
           </ul>
         </div>
       </div>
 
-      <!-- Résumé de l’annonce sélectionnée -->
+      <!-- Résumé annonce sélectionnée -->
       <div id="selectedListing" class="selected-listing" hidden>
         <div class="label">Annonce sélectionnée :</div>
         <div id="selectedListingLabel" class="value"></div>
       </div>
 
-      <div id="selectedListing" class="selected" hidden>
-        <div id="selectedListingLabel"></div>
+      <!-- Contrôles de vente -->
+      <div id="selectedListingControls" class="selected" hidden>
         <div class="sell-controls">
           <label>Prix de vente</label>
           <input type="number" id="sellPrice" min="0" step="0.1" value="1.0">
@@ -74,20 +97,24 @@
         </div>
       </div>
 
-      <!-- Flux d’annonces publiques -->
+      <!-- Liste des annonces -->
       <div id="listings" class="listing-list"></div>
 
     </section>
 
-    <!-- Droite : autres joueurs -->
+
+    <!-- Colonne droite : Joueurs connectés -->
     <aside class="roster">
       <h3>Joueurs connectés</h3>
       <div id="roster" class="roster-list"></div>
     </aside>
+
   </main>
 
+  <!-- Dock de chat (popups flottantes) -->
   <div id="chat-dock" class="chat-dock"></div>
 
+  <!-- JS -->
   <script>
     window.TRADE_CFG = {
       MANIFEST_URL: "{{ url_for('static', filename='cabine/assets/manifest.json') }}",
@@ -95,5 +122,6 @@
     };
   </script>
   <script src="/static/trade/app.js" defer></script>
+
 </body>
 </html>

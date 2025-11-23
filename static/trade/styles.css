@@ -36,7 +36,18 @@ body.trade-page::after{
    TOPBAR — on reprend exactement la structure PPP
    et on ne change que les couleurs via body.trade-page
 ------------------------------------------------------*/
-body.trade-page .topbar{
+/* Même largeur que PPP pour la barre (container) */
+body.trade-page .container {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+body.trade-page .topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr; /* left | center | right */
+  align-items: center;
+  gap: 12px;
   position: sticky;          /* même comportement que PPP */
   top: 0;
   z-index: 10;
@@ -55,6 +66,12 @@ body.trade-page .topbar .back-logo img{
   display:block;
   opacity:.95;
 }
+
+body.trade-page .topbar-logo-link {
+  display: inline-flex;
+  align-items: center;
+}
+body.trade-page .topbar-logo-link:hover .topbar-logo { opacity: .85; }
 
 /* Left / center / right : on garde l’organisation PPP */
 body.trade-page .nav-left,

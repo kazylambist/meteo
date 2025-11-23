@@ -3397,12 +3397,12 @@ PPP_HTML = """
   }
   /* --- Encadrement du jour PPP selon verdict agrégé --- */
   .ppp-day.today-win {
-    border: 2px solid var(--ppp-green);
+    border: 4px solid var(--ppp-green);
     box-shadow: 0 0 10px var(--ppp-green-glow);
   }
 
   .ppp-day.today-loss {
-    border: 2px solid #e53935;          /* rouge pour Lose_day */
+    border: 4px solid #e53935;          /* rouge pour Lose_day */
     box-shadow: 0 0 10px rgba(229, 57, 53, 0.55);
   }
   /* Bandeau de victoire – version premium pastel */
