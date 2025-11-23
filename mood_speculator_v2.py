@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
+from sqlalchemy import desc
 from sqlalchemy.engine import Engine
 from flask_login import (
     LoginManager, login_user, login_required, logout_user,
@@ -6569,7 +6570,60 @@ def api_ppp_odds():
         return jsonify(res), 200
     except Exception as e:
         app.logger.exception("api_ppp_odds failed: %s", e)
-        return jsonify({"error": "internal", "details": str(e)}), 200
+        return jsonify({"error": "internal", "details": str(e)}), 200       
+
+@app.route("/api/ppp/last-bets")
+@login_required
+def api_ppp_last_bets():
+    """
+    Renvoie les derniers jours de PPP résolus pour l'utilisateur courant.
+    Format JSON:
+    [
+      {"date": "2025-11-23", "verdict": "WIN"},
+      {"date": "2025-11-22", "verdict": "LOSE"},
+      ...
+    ]
+    """
+
+    # combien de jours max à renvoyer (par défaut 5)
+    limit = request.args.get("limit", 5, type=int)
+
+    # On récupère plus de lignes que nécessaire puis on déduplique par jour
+    q = (
+        PPPBet.query
+        .filter(PPPBet.user_id == current_user.id)
+        .filter(PPPBet.verdict.in_(["WIN", "LOSE"]))  # adapte si le champ s'appelle autrement
+        .order_by(desc(PPPBet.bet_date), desc(PPPBet.id))
+    )
+
+    rows = q.all()
+
+    seen_dates = set()
+    out = []
+
+    for b in rows:
+      # adapte le nom du champ si besoin (date du pari / de l’échéance)
+      d = getattr(b, "bet_date", None)
+      if d is None:
+          continue
+
+      # si bet_date est un datetime, on ne garde que la partie date
+      if hasattr(d, "date"):
+          d = d.date()
+
+      if d in seen_dates:
+          continue
+      seen_dates.add(d)
+
+      out.append({
+          "date": d.isoformat(),          # ex "2025-11-23"
+          "verdict": getattr(b, "verdict", None)  # "WIN" ou "LOSE"
+      })
+
+      if len(out) >= limit:
+          break
+
+    return jsonify(out)
 
 @app.route('/api/meteo/forecast5')
 def api_meteo_forecast5():
