@@ -79,6 +79,7 @@ body.trade-page .nav-right{
   display:inline-flex;
   align-items:center;
   gap:14px;
+  justify-content:flex-end;
 }
 body.trade-page .nav-center{
   display:flex;
