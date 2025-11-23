@@ -30,39 +30,46 @@
 
       <!-- Colonne centre -->
       <div class="nav-center">
-        <a href="/trade/" class="navlink active" aria-label="Page Trade">🤝</a>
+        <!-- rien au centre, comme PPP -->
       </div>
 
       <!-- Colonne droite -->
       <div class="nav-right">
-        <!-- (vide pour l’instant comme PPP, mais extensible) -->
+        <a href="/trade/" class="navlink active" aria-label="Page Trade">🤝</a>
       </div>
 
     </div>
   </header>
 
-  <!-- LAYOUT 3 COLONNES -->
+  <!-- LAYOUT vertical -->
   <main class="trade-layout">
 
-    <!-- Colonne gauche : Moi -->
+    <!-- Profil -->
     <section class="me-card">
 
-      <div
-        class="avatar-mini"
-        style="
-          background-image:url('{{ me_avatar_url }}');
-          background-size:cover;
-          background-position:center;
-        ">
-      </div>
+      <div class="me-card-row">
 
-      <div class="me-info">
-        <div id="me-pseudo">{{ current_user.username }}</div>
-        <div id="me-points">{{ solde_str }} ⛃</div>
-      </div>
+        <div
+          class="avatar-mini small"
+          style="
+            background-image:url('{{ me_avatar_url }}');
+            background-size:cover;
+            background-position:center;
+          ">
+        </div>
 
+        <div class="me-info">
+          <div id="me-pseudo">{{ current_user.username }}</div>
+          <div id="me-points">{{ solde_str }} ⛃</div>
+        </div>
+      </div>
     </section>
 
+    <!-- Colonne droite : Joueurs connectés -->
+    <aside class="roster">
+      <h3>Messagerie</h3>
+      <div id="roster" class="roster-list"></div>
+    </aside>
 
     <!-- Colonne centre : Marché -->
     <section class="market">
@@ -101,13 +108,6 @@
       <div id="listings" class="listing-list"></div>
 
     </section>
-
-
-    <!-- Colonne droite : Joueurs connectés -->
-    <aside class="roster">
-      <h3>Messagerie</h3>
-      <div id="roster" class="roster-list"></div>
-    </aside>
 
   </main>
 
