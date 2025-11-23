@@ -434,3 +434,143 @@ body.trade-page .topbar .back-logo:hover img{ opacity:.85; }
 .me-lose {
   color: #ff8f8f;                         /* rouge */
 }
+/* ==========================================================
+   RESPONSIVE SMARTPHONE (≤ 600px)
+   Rend Trade aussi lisible que PPP sur mobile
+   ========================================================== */
+@media (max-width: 600px) {
+
+  /* --- Topbar --- */
+  body.trade-page .topbar {
+    padding: 0 10px;
+  }
+  body.trade-page .topbar img {
+    height: 26px;   /* légèrement plus gros pour le doigt */
+  }
+  body.trade-page .navlink {
+    padding: 10px 12px;
+    font-size: 18px;
+  }
+
+  /* --- Layout général --- */
+  .trade-layout {
+    padding: 12px;
+    gap: 20px;
+    max-width: 100%;
+  }
+
+  /* --- Carte Profil --- */
+  body.trade-page .me-card {
+    padding: 18px;
+  }
+
+  .me-card-row {
+    grid-template-columns: 1fr; /* une seule colonne */
+    gap: 20px;
+    text-align: center;
+  }
+
+  /* Avatar plus grand */
+  body.trade-page .me-card .avatar-mini {
+    width: 160px;
+    height: 160px;
+    margin: 0 auto;
+  }
+
+  /* Texte du profil */
+  #me-pseudo {
+    font-size: 22px;
+  }
+  #me-points {
+    font-size: 17px;
+  }
+
+  /* Historique */
+  .me-history h4 {
+    font-size: 18px;
+    text-align: center;
+  }
+  #me-history-list li {
+    font-size: 16px;
+  }
+
+
+  /* --- Roster (liste joueurs) --- */
+  .roster h3 {
+    font-size: 20px;
+  }
+
+  .roster-list {
+    grid-template-columns: 1fr;   /* 1 colonne → plus lisible */
+    gap: 14px;
+  }
+
+  .user-card {
+    padding: 12px;
+    gap: 14px;
+  }
+
+  .user-card .name {
+    font-size: 17px;
+  }
+  .user-card .presence {
+    font-size: 15px;
+  }
+
+  .user-card .avatar-mini {
+    width: 56px;
+    height: 56px;
+  }
+
+
+  /* --- Market --- */
+  .market .btn,
+  #sellBtn {
+    width: 100%;
+    font-size: 18px;
+    padding: 14px 0;
+    border-radius: 10px;
+  }
+
+  .listing {
+    padding: 14px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .listing .meta .title {
+    font-size: 16px;
+  }
+  .listing .line {
+    font-size: 15px;
+  }
+
+
+  /* --- Chat (popups) --- */
+  .chat {
+    width: 100%;
+    max-width: 100%;
+    margin-right: 0;
+  }
+
+  .chat-dock {
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    padding: 0 8px 8px;
+    justify-content: center;
+    flex-direction: column-reverse;
+  }
+
+  .chat .log {
+    max-height: 300px;
+  }
+
+  .chat header strong {
+    font-size: 18px;
+  }
+
+  .chat input {
+    font-size: 16px;
+  }
+}
