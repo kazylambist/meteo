@@ -226,6 +226,11 @@ body.trade-page .me-card .me-info{
   grid-template-columns:repeat(2,minmax(0,1fr));
   gap:10px;
 }
+.roster h3 {
+  text-align: center;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
 .user-card{
   display:flex;
   align-items:center;
