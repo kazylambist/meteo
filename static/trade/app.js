@@ -150,7 +150,9 @@
           </div>
           <div class="col">
             <div class="name">${u.username}</div>
-            <div class="presence ${online ? 'on' : ''}">${online ? 'en ligne' : ''}</div>
+            <div class="presence ${online ? 'on' : 'off'}">
+              ${online ? 'En ligne' : 'Hors ligne'}
+            </div>
           </div>
         `;
         card.addEventListener('click', ()=> openChat(u));
@@ -265,7 +267,9 @@
         const label = card.querySelector('.presence');
         if (label) {
           label.classList.toggle('on', online);
-          label.textContent = online ? 'en ligne' : '';
+          label.classList.toggle('on', online);
+          label.classList.toggle('off', !online);
+          label.textContent = online ? 'En ligne' : 'Hors ligne';
         }
       });
     }catch(e){}
