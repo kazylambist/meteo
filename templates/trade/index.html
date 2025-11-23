@@ -49,21 +49,34 @@
 
       <div class="me-card-row">
 
-        <div
-          class="avatar-mini small"
-          style="
-            background-image:url('{{ me_avatar_url }}');
-            background-size:cover;
-            background-position:center;
-          ">
+        <!-- Avatar + infos -->
+        <div class="me-left">
+          <div
+            class="avatar-mini small"
+            style="
+              background-image:url('{{ me_avatar_url }}');
+              background-size:cover;
+              background-position:center;
+            ">
+          </div>
+
+          <div class="me-info">
+            <div id="me-pseudo">{{ current_user.username }}</div>
+            <div id="me-points">{{ solde_str }} ⛃</div>
+          </div>
         </div>
 
-        <div class="me-info">
-          <div id="me-pseudo">{{ current_user.username }}</div>
-          <div id="me-points">{{ solde_str }} ⛃</div>
+        <!-- Historique des 5 jours -->
+        <div class="me-history">
+          <h4>Historique des 5 derniers jours</h4>
+          <ul id="me-history-list">
+            <!-- rempli dynamiquement par JS -->
+          </ul>
         </div>
       </div>
+
     </section>
+
 
     <!-- Colonne droite : Joueurs connectés -->
     <aside class="roster">

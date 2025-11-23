@@ -149,10 +149,10 @@ body.trade-page .me-card{
   padding:16px;
 }
 
-.me-card-row{
-  display:flex;
-  align-items:center;
-  gap:12px;
+.me-card-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;  /* gauche : avatar ; droite : historique */
+  gap: 16px;
 }
 
 .avatar-mini.small{
@@ -393,4 +393,37 @@ body.trade-page .topbar .back-logo:hover img{ opacity:.85; }
 .user-card .unread-badge {
   position: absolute; top: 2px; right: 2px; font-size: 14px; line-height: 1;
   user-select: none; filter: drop-shadow(0 0 4px rgba(0,0,0,.35));
+}
+.me-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.me-history h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  text-align: left;
+  color: var(--ink);
+}
+
+#me-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 14px;
+}
+
+#me-history-list li {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.me-win {
+  color: #86e3a6;                         /* vert */
+}
+
+.me-lose {
+  color: #ff8f8f;                         /* rouge */
 }

@@ -81,6 +81,36 @@
     }
   }
 
+  // Charge l’historique des 5 derniers paris dans le profil
+  async function loadLastBetsHistory(){
+    try{
+      const res = await fetch('/api/ppp/last-bets?limit=5', { credentials:'same-origin' });
+      if (!res.ok) return;
+
+      const arr = await res.json(); // format attendu : [{date:"2025-11-16", verdict:"WIN"}, ...]
+      const wrap = document.getElementById('me-history-list');
+      if (!wrap) return;
+
+      wrap.innerHTML = '';
+
+      arr.forEach(bet => {
+        const d = new Date(bet.date);
+        const jour = d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+
+        const li = document.createElement('li');
+        const isWin = (String(bet.verdict).toUpperCase() === 'WIN');
+
+        li.className = isWin ? 'me-win' : 'me-lose';
+        li.textContent = `${jour} - ${isWin ? 'Gagnant' : 'Perdant'}`;
+
+        wrap.appendChild(li);
+      });
+
+    }catch(e){
+      console.warn('loadLastBetsHistory failed', e);
+    }
+  }
+
   // ======================================================================
   // Rafraîchit le solde affiché dans la topbar (et #me-points)
   // ======================================================================
@@ -833,5 +863,6 @@
     setInterval(pollUnread, 5000);    
     pollUnread();
     loadListings();
+    loadLastBetsHistory();
   });    
 })();
